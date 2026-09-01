@@ -14,7 +14,12 @@ from __future__ import annotations
 import math
 from collections.abc import Awaitable, Callable
 
-from src.analytics.contradictions import Claim, Contradiction, contradiction_for_group
+from src.analytics.contradictions import (
+    Claim,
+    Contradiction,
+    TrustFn,
+    contradiction_for_group,
+)
 
 EmbedFn = Callable[[list[str]], Awaitable[list[list[float]]]]
 
@@ -57,7 +62,11 @@ async def cluster_claims(
 
 async def detect_contradictions_clustered(
     claims: list[Claim], *, embed: EmbedFn, threshold: float = 0.83,
+    trust: TrustFn | None = None,
 ) -> list[Contradiction]:
-    """Cluster claims semantically, then flag clusters where sources disagree."""
+    """Cluster claims semantically, then flag clusters where sources disagree.
+
+    ``trust`` (optional) weighs each source when ranking versions — see
+    ``src/analytics/contradictions._versions``."""
     clusters = await cluster_claims(claims, embed=embed, threshold=threshold)
-    return [c for cl in clusters if (c := contradiction_for_group(cl))]
+    return [c for cl in clusters if (c := contradiction_for_group(cl, trust))]

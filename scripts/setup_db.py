@@ -125,6 +125,33 @@ _PG_TRGM_DDL = """
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 """
 
+
+# Audit log of fact conflicts resolved at graph-write time (see
+# src/graph/edge_conflicts.py).  One row per contradicting write: what the
+# graph believed, what the new document claimed, which source won and why.
+# The graph keeps only the winning belief; the retired one lives here.
+_FACT_SUPERSEDE_DDL = """
+CREATE TABLE IF NOT EXISTS fact_supersede (
+    id              BIGSERIAL   PRIMARY KEY,
+    decided_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    src             TEXT        NOT NULL,
+    rel             TEXT        NOT NULL DEFAULT '',
+    tgt             TEXT        NOT NULL,
+    stored_polarity TEXT        NOT NULL DEFAULT '',
+    new_polarity    TEXT        NOT NULL DEFAULT '',
+    stored_trust    REAL        NOT NULL DEFAULT 0,
+    new_trust       REAL        NOT NULL DEFAULT 0,
+    stored_doc_id   TEXT        NOT NULL DEFAULT '',
+    new_doc_id      TEXT        NOT NULL DEFAULT '',
+    winner          TEXT        NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS fact_supersede_decided_at_idx
+    ON fact_supersede (decided_at DESC);
+CREATE INDEX IF NOT EXISTS fact_supersede_pair_idx
+    ON fact_supersede (src, tgt);
+"""
+
 def _sql_in_list(values: frozenset[str]) -> str:
     """`'a', 'b', 'c'` for a SQL `IN (...)` clause — sorted so the
     generated DDL text is deterministic across runs.  The single source
@@ -418,6 +445,7 @@ def setup_postgres() -> None:
         cur.execute(_INGEST_METRICS_DDL)
         cur.execute(_BACKFILL_SOURCE_CHANNEL_SQL)
         cur.execute(_PG_TRGM_DDL)
+        cur.execute(_FACT_SUPERSEDE_DDL)
         cur.execute(_STAT_INDICATOR_DDL)
         cur.execute(_STAT_INDICATOR_CONSTRAINTS_DDL)
         cur.execute(_STAT_OBSERVATION_DDL)

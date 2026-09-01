@@ -914,6 +914,25 @@ class SignalsSettings(BaseSettings):
         },
         description="Ожидаемые идентификаторы для оценки полноты данных по типу сущности (используется в completeness-сигнале).",
     )
+    # Source trust (0..1) per document group — the conflict-resolution policy.
+    # When a new document contradicts a stored fact (same pair, opposite
+    # polarity), the higher-trust source keeps the belief; equal trust falls
+    # back to recency (the newer write wins, i.e. today's behaviour).  Keyed by
+    # the `group` /ingest already stamps, so retuning never needs a re-ingest.
+    # Empty map ⇒ every source gets `source_trust_default` ⇒ behaviour
+    # identical to before this knob existed.
+    source_trust: dict[str, float] = Field(
+        default_factory=dict,
+        description="Доверие к источнику (0..1) по группе документа, напр. "
+                    '{"analytics": 0.9, "news": 0.4}. Победитель конфликта фактов — '
+                    "более доверенный источник; при равенстве побеждает свежий.",
+    )
+    source_trust_default: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Доверие для группы, отсутствующей в SIGNALS_SOURCE_TRUST.",
+    )
     # Composite risk score weights (Wave 1).  Five components; must sum to 1.0.
     # Operators can rebalance via SIGNALS_RISK_WEIGHTS='{"affiliation":0.4,...}'.
     risk_weights: dict[str, float] = Field(

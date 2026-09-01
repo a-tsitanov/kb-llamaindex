@@ -121,6 +121,35 @@ class AsyncPostgres:
                 )
             await conn.commit()
 
+    async def record_fact_conflicts(self, rows: list[dict[str, Any]]) -> None:
+        """Append resolved fact conflicts to the `fact_supersede` audit log.
+
+        `rows` are `dataclasses.asdict(EdgeConflict)` shapes (see
+        `src/graph/edge_conflicts.py`).  The graph stores only the winning
+        belief, so this log is the record of what the losing source claimed.
+        """
+        if not rows:
+            return
+        async with self._conn() as conn:
+            async with conn.cursor() as cur:
+                await cur.executemany(
+                    """
+                    INSERT INTO fact_supersede
+                        (src, rel, tgt, stored_polarity, new_polarity,
+                         stored_trust, new_trust, stored_doc_id, new_doc_id, winner)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    [
+                        (r.get("src", ""), r.get("rel", ""), r.get("tgt", ""),
+                         r.get("stored_polarity", ""), r.get("new_polarity", ""),
+                         float(r.get("stored_trust", 0.0)), float(r.get("new_trust", 0.0)),
+                         r.get("stored_doc_id", ""), r.get("new_doc_id", ""),
+                         r.get("winner", ""))
+                        for r in rows
+                    ],
+                )
+            await conn.commit()
+
     async def list_id_path(self) -> list[tuple[str, str]]:
         """Return `(doc_id, path)` for every registered document.
 

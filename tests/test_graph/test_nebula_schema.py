@@ -223,7 +223,7 @@ def test_ensure_schema_probes_related_weighted_edge_write():
     ensure_schema(fake)
     joined = "\n".join(fake.statements)
     assert ("INSERT EDGE `RELATED` (rel_type, polarity, valid_from, valid_to, weight, "
-            "created_at, first_doc_id)") in joined
+            "created_at, first_doc_id, source_trust, superseded_at)") in joined
     assert "__kb_schema_probe_b__" in joined
     # both sentinel vertices are cleaned up WITH EDGE
     assert 'DELETE VERTEX "__kb_schema_probe_b__" WITH EDGE;' in fake.statements
@@ -289,3 +289,19 @@ def test_ensure_schema_entity_probe_includes_wiki_columns():
         "completeness_score, watched, risk_score_prev)"
         in joined
     )
+
+
+def test_related_ddl_has_conflict_resolution_columns():
+    # source_trust/superseded_at back src/graph/edge_conflicts.py: a fresh space
+    # gets them from CREATE EDGE, an existing one from the ALTER below.
+    related_ddl = next(s for s in SCHEMA_DDL if "CREATE EDGE IF NOT EXISTS `RELATED`" in s)
+    assert "source_trust double DEFAULT 0.0" in related_ddl
+    assert "superseded_at int DEFAULT 0" in related_ddl
+
+
+def test_ensure_schema_alters_related_with_conflict_columns():
+    fake = _FakeSession()
+    ensure_schema(fake)
+    joined = "\n".join(fake.statements)
+    assert ("ALTER EDGE `RELATED` ADD (source_trust double DEFAULT 0.0, "
+            "superseded_at int DEFAULT 0);") in joined

@@ -213,17 +213,19 @@ class NebulaGraphStore:
                 (entity_vid(getattr(r, "source_id", "")), entity_vid(getattr(r, "target_id", "")))
                 for r in chunk
             }
-            preserved: dict[tuple[str, str], tuple[Any, Any]] = {}
+            preserved: dict[tuple[str, str], tuple[Any, Any, Any, Any]] = {}
             if keys:
                 try:
                     edge_list = ", ".join(f"{_q(s)}->{_q(t)}" for s, t in keys)
                     rows = self.structured_query(
                         f"FETCH PROP ON `RELATED` {edge_list} YIELD "
                         "src(edge) AS s, dst(edge) AS d, "
-                        "`RELATED`.created_at AS ca, `RELATED`.first_doc_id AS fdi;"
+                        "`RELATED`.created_at AS ca, `RELATED`.first_doc_id AS fdi, "
+                        "`RELATED`.source_trust AS st, `RELATED`.superseded_at AS sa;"
                     )
                     preserved = {
-                        (r["s"], r["d"]): (r.get("ca"), r.get("fdi")) for r in rows
+                        (r["s"], r["d"]): (r.get("ca"), r.get("fdi"), r.get("st"), r.get("sa"))
+                        for r in rows
                     }
                 except Exception as exc:
                     logger.warning(
@@ -232,7 +234,10 @@ class NebulaGraphStore:
                     )
                     preserved = {}
 
-            def row(r: Any, _preserved: dict[tuple[str, str], tuple[Any, Any]] = preserved) -> str:
+            def row(
+                r: Any,
+                _preserved: dict[tuple[str, str], tuple[Any, Any, Any, Any]] = preserved,
+            ) -> str:
                 rel_type = getattr(r, "label", "") or ""
                 props = getattr(r, "properties", {}) or {}
                 src = entity_vid(getattr(r, "source_id", ""))
@@ -245,6 +250,16 @@ class NebulaGraphStore:
                 else:
                     ca = int(props.get("created_at", 0) or 0)
                     fdi = props.get("first_doc_id", "") or ""
+                # Conflict-resolution columns: written by edge_conflicts.py.
+                # When this batch skipped that pass (fail-open), fall back to
+                # what the edge already carries instead of resetting the trust
+                # that backs the stored belief.
+                st = props.get("source_trust")
+                if st is None:
+                    st = (prev[2] if prev else 0.0) or 0.0
+                sa = props.get("superseded_at")
+                if sa is None:
+                    sa = (prev[3] if prev else 0) or 0
                 return (
                     f"{_q(src)} -> {_q(tgt)}:("
                     f"{_q(rel_type)}, "
@@ -254,12 +269,13 @@ class NebulaGraphStore:
                     f"{_q(props.get('valid_from') or '')}, "
                     f"{_q(props.get('valid_to') or '')}, "
                     f"{float(props.get('weight', 1.0) or 1.0)}, "
-                    f"{ca}, {_q(fdi)})"
+                    f"{ca}, {_q(fdi)}, {float(st)}, {int(sa)})"
                 )
 
             stmt = (
                 "INSERT EDGE `RELATED` "
-                "(rel_type, polarity, valid_from, valid_to, weight, created_at, first_doc_id) "
+                "(rel_type, polarity, valid_from, valid_to, weight, created_at, first_doc_id, "
+                "source_trust, superseded_at) "
                 "VALUES "
                 + ", ".join(row(r) for r in chunk)
                 + ";"

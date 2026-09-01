@@ -130,9 +130,48 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
         if entities:
             await asyncio.to_thread(write_with_retry, graph_store.upsert_nodes, entities)
             activity.heartbeat({"stage": "entities_upserted", "count": len(entities)})
+        # Trust-based conflict resolution: read what the graph already believes
+        # about this batch's pairs and let the more credible source keep the
+        # belief (see src/graph/edge_conflicts.py).  Gated on the trust table
+        # being configured at all — with no policy there is nothing to resolve,
+        # and skipping spares the batch its read-back.
+        edge_conflicts: list[dict] = []
+        if relations and settings.signals.source_trust:
+            from dataclasses import asdict
+
+            from src.analytics.source_trust import trust_for
+            from src.graph.edge_conflicts import load_stored_edges, resolve_edge_conflicts
+            from src.retrieval.date_filters import today_epoch_days
+
+            stored_edges = await asyncio.to_thread(
+                load_stored_edges, graph_store, relations,
+            )
+            relations, conflicts = resolve_edge_conflicts(
+                relations,
+                stored_edges,
+                doc_trust=trust_for(merged.kg.parsed.ctx.group),
+                doc_id=merged.kg.parsed.ctx.doc_id,
+                ingest_epoch=today_epoch_days(),
+            )
+            edge_conflicts = [asdict(c) for c in conflicts]
+            activity.heartbeat(
+                {"stage": "conflicts_resolved", "count": len(edge_conflicts)},
+            )
+
         if relations:
             await asyncio.to_thread(write_with_retry, graph_store.upsert_relations, relations)
             activity.heartbeat({"stage": "relations_upserted", "count": len(relations)})
+
+        if edge_conflicts:
+            # Audit trail for the beliefs this write retired / rejected. The
+            # graph keeps only the winner, so a logging failure loses history —
+            # but never the ingest.
+            try:
+                from src.storage.postgres import AsyncPostgres
+
+                await AsyncPostgres().record_fact_conflicts(edge_conflicts)
+            except Exception as exc:
+                logger.warning("fact_supersede log skipped (non-fatal): {e}", e=exc)
 
         # E1 — ON-CREATE-emulated first_seen stamping (gated, dark by default).
         # Relation.source_id/target_id are synthetic EntityNode.id values (not
