@@ -161,12 +161,15 @@ def _llm_only_extractor_factory() -> Extractor:  # pragma: no cover - integratio
 
 def main() -> int:  # pragma: no cover - CLI
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--backend", choices=["llm", "gliner"], default="llm")
+    p.add_argument("--backend", choices=["llm", "gliner", "nuextract"], default="llm")
     p.add_argument("--golden", type=Path, default=GOLDEN_DIR_DEFAULT)
     args = p.parse_args()
     types = ["Person", "Organization", "Location", "Product", "Concept"]
     if args.backend == "llm":
         extractor = _llm_only_extractor_factory()
+    elif args.backend == "nuextract":
+        from tests.eval.nuextract_backend import nuextract_callable
+        extractor = nuextract_callable()
     else:
         from src.graph.gliner_extract import gliner_ner_callable
         extractor = gliner_ner_callable()
