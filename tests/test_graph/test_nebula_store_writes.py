@@ -200,8 +200,9 @@ def test_upsert_relations_writes_weight_from_properties():
     store.upsert_relations([rel])
     blob = "\n".join(sess.executed)
     assert ("INSERT EDGE `RELATED` (rel_type, polarity, valid_from, valid_to, weight, "
-            "created_at, first_doc_id) VALUES") in blob
-    assert '7.0, 0, "")' in blob  # weight then created_at=0, first_doc_id=""
+            "created_at, first_doc_id, source_trust, superseded_at) VALUES") in blob
+    # weight, then created_at=0, first_doc_id="", source_trust=0.0, superseded_at=0
+    assert '7.0, 0, "", 0.0, 0)' in blob
 
 
 def test_upsert_relations_defaults_weight_to_one_when_absent():
@@ -210,7 +211,8 @@ def test_upsert_relations_defaults_weight_to_one_when_absent():
     rel = SimpleNamespace(source_id="a", target_id="b", label="WORKS_AT", properties={})
     store.upsert_relations([rel])
     blob = "\n".join(sess.executed)
-    assert '1.0, 0, "")' in blob  # default weight 1.0 then created_at=0, first_doc_id=""
+    # default weight 1.0, then created_at=0, first_doc_id="", trust/supersede zeros
+    assert '1.0, 0, "", 0.0, 0)' in blob
 
 
 def test_upsert_relations_rel_type_is_a_value_not_identifier():
@@ -323,7 +325,7 @@ def test_upsert_relations_batches_into_multi_values_statements(monkeypatch):
     for stmt in inserts:
         assert stmt.startswith(
             "INSERT EDGE `RELATED` (rel_type, polarity, valid_from, valid_to, weight, "
-            "created_at, first_doc_id) VALUES "
+            "created_at, first_doc_id, source_trust, superseded_at) VALUES "
         )
     assert inserts[0].count(" -> ") == 2
     assert inserts[1].count(" -> ") == 2

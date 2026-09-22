@@ -75,10 +75,16 @@ SCHEMA_DDL: list[str] = [
     # created_at (E1 first-seen ingest epoch-day) + first_doc_id give RELATED the
     # same first-seen provenance as Entity, so events.new_edges /
     # entity_new_connections and dynamics.whats_changed's first-seen axis work.
+    # source_trust = trust of the document that set the CURRENT polarity, and
+    # superseded_at = ingest epoch-day on which a previously-stored opposite
+    # belief was retired (0 = never contradicted).  Both are written by
+    # src/graph/edge_conflicts.py; the retired belief itself lives in the
+    # `fact_supersede` Postgres log, not on the edge.
     "CREATE EDGE IF NOT EXISTS `RELATED` ("
     "rel_type string DEFAULT '', polarity string DEFAULT '', "
     "valid_from string DEFAULT '', valid_to string DEFAULT '', weight double DEFAULT 1.0, "
-    "created_at int DEFAULT 0, first_doc_id string DEFAULT '');",
+    "created_at int DEFAULT 0, first_doc_id string DEFAULT '', "
+    "source_trust double DEFAULT 0.0, superseded_at int DEFAULT 0);",
     "CREATE EDGE IF NOT EXISTS `MENTIONS` (doc_id string DEFAULT '');",
     "CREATE EDGE IF NOT EXISTS `IN_COMMUNITY` (level int DEFAULT 0);",
     "CREATE EDGE IF NOT EXISTS `PARENT_OF` ();",
@@ -294,6 +300,17 @@ def ensure_schema(session: Any, *, use_attempts: int = 30, use_delay_s: float = 
         attempts=1, delay_s=0,
     )
 
+    # 3b-4. RELATED conflict-resolution columns for EXISTING spaces
+    # (source_trust/superseded_at — see edge_conflicts.py).  Pre-existing edges
+    # get source_trust 0.0, i.e. "unknown provenance", so the first trusted
+    # write wins over them; no backfill needed.
+    _execute_with_retry(
+        session,
+        "ALTER EDGE `RELATED` ADD (source_trust double DEFAULT 0.0, "
+        "superseded_at int DEFAULT 0);",
+        attempts=1, delay_s=0,
+    )
+
     # 3c. Same schema-evolution story for EXISTING spaces created before
     # `Entity` had `er_canonical_name` (entity-resolution canonical stamp).
     # Best-effort/fail-open, same as the RELATED.weight ALTER above.
@@ -430,8 +447,9 @@ def ensure_schema(session: Any, *, use_attempts: int = 30, use_delay_s: float = 
     _probe_edge_write_ready(
         session, "RELATED",
         "INSERT EDGE `RELATED` "
-        "(rel_type, polarity, valid_from, valid_to, weight, created_at, first_doc_id) "
-        f'VALUES "{probe}" -> "{probe_b}":("", "", "", "", 1.0, 0, "");',
+        "(rel_type, polarity, valid_from, valid_to, weight, created_at, first_doc_id, "
+        "source_trust, superseded_at) "
+        f'VALUES "{probe}" -> "{probe_b}":("", "", "", "", 1.0, 0, "", 0.0, 0);',
         [f'DELETE VERTEX "{probe}" WITH EDGE;', f'DELETE VERTEX "{probe_b}" WITH EDGE;'],
         attempts=use_attempts, delay_s=use_delay_s,
     )

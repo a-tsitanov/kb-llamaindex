@@ -15,7 +15,7 @@ from collections.abc import Awaitable, Callable
 from src.analytics.claim_cluster import detect_contradictions_clustered
 from src.analytics.claim_extract import extract_claims
 from src.analytics.claim_nli import refine_contradictions
-from src.analytics.contradictions import Contradiction
+from src.analytics.contradictions import Contradiction, TrustFn
 
 Complete = Callable[[str], Awaitable[str]]
 EmbedFn = Callable[[list[str]], Awaitable[list[list[float]]]]
@@ -28,9 +28,14 @@ async def detect_contradictions_e2e(
     embed: EmbedFn,
     nli_complete: Complete,
     threshold: float = 0.83,
+    trust: TrustFn | None = None,
 ) -> list[Contradiction]:
     """``docs`` = list of ``{"doc_id","source","text"}``. Returns NLI-confirmed
-    contradictions across the batch."""
+    contradictions across the batch.
+
+    ``trust`` maps a doc's ``source`` to its credibility (0..1) so consensus
+    follows the most credible source, not the loudest one; ``None`` keeps every
+    source equal."""
     all_claims = []
     for d in docs:
         claims = await extract_claims(
@@ -41,5 +46,5 @@ async def detect_contradictions_e2e(
     if not all_claims:
         return []
     structural = await detect_contradictions_clustered(
-        all_claims, embed=embed, threshold=threshold)
+        all_claims, embed=embed, threshold=threshold, trust=trust)
     return await refine_contradictions(structural, complete=nli_complete)

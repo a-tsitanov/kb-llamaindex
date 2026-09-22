@@ -8,6 +8,38 @@ with a section in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 loosely (Added / Changed / Fixed / Notes per stage).
 
+## [Source Trust] — 2026-08-30 — Доверие к источнику решает конфликты фактов
+
+### Added
+- `SIGNALS_SOURCE_TRUST` (карта «группа документа → доверие 0..1») +
+  `SIGNALS_SOURCE_TRUST_DEFAULT` (0.5) в `SignalsSettings`;
+  `src/analytics/source_trust.py::trust_for`.
+- `src/graph/edge_conflicts.py` — read-back хранимого убеждения по парам
+  батча + политика: при противоположной полярности побеждает более
+  доверенный источник, при равенстве — свежий (прежнее поведение).
+  Проигравшая запись не выбрасывается: удерживается только `polarity`,
+  описание/вес/окно валидности обновляются.
+- Колонки `RELATED.source_trust` / `RELATED.superseded_at` (nebula:
+  CREATE EDGE + ALTER для существующих space, probe-INSERT обновлён).
+- Postgres-таблица `fact_supersede` (аудит снятых/отклонённых убеждений)
+  + `AsyncPostgres.record_fact_conflicts`.
+- Взвешивание consensus доверием источника в
+  `src/analytics/contradictions.py` (`trust` callable, прокинут через
+  `claim_cluster` и `contradiction_pipeline`).
+
+### Notes
+- Проход включается наличием непустой карты `SIGNALS_SOURCE_TRUST`; без
+  неё нет ни read-back, ни записей в лог — поведение как до фичи.
+- Рёбра до фичи имеют `source_trust = 0.0`, бэкфилл не нужен.
+- Neo4j-путь: политика применяется (ключ конфликта включает label), но
+  llama_index пишет свойства через `apoc.merge.relationship(..., onCreate)`
+  — на существующем ребре они не обновляются, так что `source_trust` /
+  `superseded_at` там проставляются только при создании ребра. Legacy-
+  бэкенд не догоняли (прод — nebula).
+- Снятое убеждение хранится в Postgres, а не вторым ребром: nebula
+  держит одно ребро на пару (rank 0), версии в графе потребовали бы
+  фильтра по всем read-путям обоих бэкендов.
+
 ## [Ingest Merge Queue] — 2026-05-26 — Dedicated kb-ingest-merge queue
 
 ### Added
