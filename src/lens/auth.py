@@ -18,6 +18,14 @@ from src.lens.config import lens_settings
 STREAM_TOKEN_TTL_S = 300
 
 
+def key_is_valid(key: str, keys: list[str]) -> bool:
+    """Compare against every key so timing doesn't reveal which/how much matched."""
+    ok = False
+    for k in keys:
+        ok |= hmac.compare_digest(key.encode(), k.encode())
+    return ok
+
+
 def _sig(secret: str, workspace_id: str, exp: int) -> str:
     msg = f"{workspace_id}.{exp}".encode()
     return hmac.new(secret.encode(), msg, hashlib.sha256).hexdigest()[:32]
@@ -47,7 +55,7 @@ async def require_key(request: Request) -> None:
     key = request.headers.get("X-API-Key")
     if not key:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing X-API-Key")
-    if key not in lens_settings.keys_list():
+    if not key_is_valid(key, lens_settings.keys_list()):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Invalid X-API-Key")
 
 

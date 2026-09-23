@@ -118,3 +118,11 @@ def test_stream_token_expiry():
     assert not check_stream_token(tok, "w", "s", now=1011)
     assert not check_stream_token(tok, "w", "other-secret", now=1005)
     assert not check_stream_token("garbage", "w", "s", now=1005)
+
+
+def test_key_is_valid_checks_all_keys():
+    from src.lens.auth import key_is_valid
+    assert key_is_valid("b", ["a", "b"])
+    assert not key_is_valid("c", ["a", "b"])
+    assert not key_is_valid("", [])
+    assert key_is_valid("ключ", ["ключ"])
