@@ -11,6 +11,15 @@ def score(result: NormalizeResult, golden: dict) -> dict:
         ok = not gold
         return {"valid": ok, "recall": 1.0 if ok else 0.0, "precision": 1.0 if ok else 0.0,
                 "type_acc": 1.0 if ok else 0.0}
+    # Non-raw materialized result: check for over-materialization
+    has_content = result.materialized.objects or result.materialized.aggregates
+    if not gold:
+        # Golden expects raw (empty objects), but got materialized content
+        if has_content:
+            return {"valid": False, "recall": 1.0, "precision": 0.0, "type_acc": 0.0}
+        else:
+            # Empty materialization is like raw: valid
+            return {"valid": True, "recall": 1.0, "precision": 1.0, "type_acc": 1.0}
     got = {o.key: o.type for o in result.materialized.objects}
     agg_types = {a.item_type for a in result.materialized.aggregates}
     matched = [k for k in gold if k in got or gold[k] in agg_types]

@@ -45,3 +45,13 @@ def test_aggregate_scores():
                    {"valid": False, "recall": 0.0, "precision": 0.0, "type_acc": 0.0}])
     assert a == {"n": 2, "valid_rate": 0.5, "mean_recall": 0.5, "mean_precision": 0.25,
                  "mean_type_acc": 0.5}
+
+
+def test_over_materialization_on_raw_fixture_is_invalid():
+    s = score(res([o("kb:1", "person")]), {"objects": []})
+    assert s == {"valid": False, "recall": 1.0, "precision": 0.0, "type_acc": 0.0}
+    agg = AggregateEl(key="agg:c:h", label="ip · 30", item_type="ip", count=30,
+                      rows_ref=Ref(call_id="c", path="$.h[*]"),
+                      columns=[Column(name="id", path="$.ip")])
+    assert score(res(aggs=[agg]), {"objects": []})["valid"] is False
+    assert score(res(), {"objects": []})["valid"] is True

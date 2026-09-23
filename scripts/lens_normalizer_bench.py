@@ -32,18 +32,23 @@ async def main() -> None:
     llm = OpenAICompatLLM()
     scores = []
     for path in sorted(FIXTURES.glob(a.glob)):
-        fx = json.loads(path.read_text())
-        norm = Normalizer(llm, MemoryLensStore(), model=a.model,
-                          vocabulary=lens_settings.vocabulary,
-                          aggregate_threshold=lens_settings.aggregate_threshold,
-                          sample_chars=lens_settings.sample_chars)
-        call = ToolCallRecord(id=path.stem, input_id=None, server=fx["server"],
-                              namespace=fx.get("namespace"), tool=fx["tool"], args=fx["args"], payload=fx["payload"],
-                              shape_hash=shape_hash(fx["payload"]), latency_ms=0)
-        result = await norm.normalize(call, fx.get("description", ""))
-        s = score(result, fx["golden"])
-        scores.append(s)
-        print(f"{path.name:40s} source={result.source:6s} {s}")
+        try:
+            fx = json.loads(path.read_text())
+            norm = Normalizer(llm, MemoryLensStore(), model=a.model,
+                              vocabulary=lens_settings.vocabulary,
+                              aggregate_threshold=lens_settings.aggregate_threshold,
+                              sample_chars=lens_settings.sample_chars)
+            call = ToolCallRecord(id=path.stem, input_id=None, server=fx["server"],
+                                  namespace=fx.get("namespace"), tool=fx["tool"], args=fx["args"], payload=fx["payload"],
+                                  shape_hash=shape_hash(fx["payload"]), latency_ms=0)
+            result = await norm.normalize(call, fx.get("description", ""))
+            s = score(result, fx["golden"])
+            scores.append(s)
+            print(f"{path.name:40s} source={result.source:6s} {s}")
+        except Exception as e:
+            s = {"valid": False, "recall": 0.0, "precision": 0.0, "type_acc": 0.0}
+            scores.append(s)
+            print(f"{path.name:40s} ERROR {e}")
     print("AGGREGATE", json.dumps(aggregate(scores), indent=2))
 
 
