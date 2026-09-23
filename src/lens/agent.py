@@ -351,6 +351,7 @@ class Agent:
                             {"view": result.raw.model_dump(mode="json")},
                         )
                     )
+                    known_keys.add(result.raw.key)
                 await self._append(workspace_id, input_id, ops)
             elif isinstance(ev, PlannerFinal) and ev.text.strip():
                 body, cites = resolve_citations(ev.text, known_keys)

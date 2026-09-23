@@ -4,9 +4,9 @@ from src.lens.agent import Agent, resolve_citations, same_as_candidates
 from src.lens.events import EventBus
 from src.lens.llm import ChatReply, ToolCallReq
 from src.lens.mcp_hub import ToolInfo, ToolResult
-from src.lens.model import ObjectEl
+from src.lens.model import ObjectEl, ToolCallRecord
 from src.lens.normalizer import Normalizer
-from src.lens.planner import Planner, PlannerFinal
+from src.lens.planner import Planner, PlannerFinal, ToolCalled
 from src.lens.state import fold
 from src.lens.store import MemoryLensStore
 from tests.test_lens.fakes import FakeLLM
@@ -233,3 +233,37 @@ def test_resolve_citations():
         "A [[kb:1]], B [[x:2]] и A [[kb:1]]", {"kb:1"}
     )
     assert text == "A [[kb:1]], B и A [[kb:1]]" and cites == ["kb:1"]
+
+
+async def test_note_may_cite_raw_view_from_same_input():
+    agent, store, _ = build([], [], [])
+    ws = await store.create_workspace("t")
+
+    # Create a ToolCallRecord with an error
+    record = ToolCallRecord(
+        id="c-raw",
+        input_id=None,
+        server="kb-tools",
+        namespace="kb",
+        tool="find",
+        args={},
+        payload=None,
+        shape_hash="hash",
+        is_error=True,
+        error="kaput",
+        latency_ms=100,
+    )
+    await store.add_tool_call(record)
+
+    # Patch planner to yield ToolCalled and final text with raw view citation
+    async def patched_run(**kw):
+        yield ToolCalled(record, INFO)
+        yield PlannerFinal("См. [[raw:c-raw]].")
+
+    agent.planner.run = patched_run
+    await agent.submit(ws.id, "Росатом", [])
+    await agent.drain()
+    st = fold(await store.list_ops(ws.id))
+    note = st.notes[0]
+    assert note.text == "См. [[raw:c-raw]]."
+    assert note.cites == ["raw:c-raw"]
