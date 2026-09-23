@@ -126,7 +126,8 @@ class MemoryLensStore:
         return iid
 
     async def set_input_status(self, input_id: str, status: str) -> None:
-        self.inputs[input_id]["status"] = status
+        if input_id in self.inputs:
+            self.inputs[input_id]["status"] = status
 
     async def get_input(self, input_id: str) -> dict[str, Any] | None:
         row = self.inputs.get(input_id)
@@ -162,7 +163,9 @@ class MemoryLensStore:
     async def put_spec(
         self, server: str, tool: str, shape_hash: str, spec: ViewSpec, model: str,
     ) -> None:
-        self.specs[(server, tool, shape_hash)] = spec
+        key = (server, tool, shape_hash)
+        self.specs[key] = spec
+        self.spec_hits[key] = 0
 
 
 class PgLensStore:

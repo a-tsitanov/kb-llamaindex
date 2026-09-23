@@ -69,3 +69,8 @@ async def test_spec_cache_upsert(store):
     await store.put_spec("kb", tool, "h", s1, "m")
     await store.put_spec("kb", tool, "h", ViewSpec(), "m2")
     assert await store.get_spec("kb", tool, "h") == ViewSpec()
+
+
+async def test_set_input_status_unknown_id_is_noop(store):
+    await store.set_input_status("missing", "done")
+    assert await store.get_input("missing") is None
