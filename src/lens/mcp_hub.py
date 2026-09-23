@@ -8,6 +8,7 @@ retries once after reconnecting.  One dead server never breaks the others.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from collections.abc import Callable
@@ -18,6 +19,7 @@ from typing import Any
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 from loguru import logger
+from mcp.shared.exceptions import McpError
 
 from src.lens.config import McpServerConfig
 
@@ -91,6 +93,13 @@ class McpHub:
         self._tools: dict[str, ToolInfo] = {}
         self._status: dict[str, str] = {}
         self._last_try: dict[str, float] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    def _lock_for(self, name: str) -> asyncio.Lock:
+        lock = self._locks.get(name)
+        if lock is None:
+            lock = self._locks[name] = asyncio.Lock()
+        return lock
 
     async def _connect(self, name: str) -> bool:
         cfg = self._configs[name]
@@ -112,7 +121,16 @@ class McpHub:
             self._tools[info.qualified] = info
         return True
 
-    async def _disconnect(self, name: str, reason: str) -> None:
+    async def _disconnect(self, name: str, reason: str, client: Any = None) -> None:
+        """Tear down the connection for ``name``.
+
+        ``client`` is the specific client instance that failed, e.g. from a
+        `call()` exception handler.  If that instance is no longer the live
+        one (another caller already reconnected), this is a stale failure and
+        must NOT disconnect the replacement.
+        """
+        if client is not None and self._clients.get(name) is not client:
+            return
         self._clients.pop(name, None)
         self._tools = {q: t for q, t in self._tools.items() if t.server != name}
         self._status[name] = f"down: {reason}"
@@ -122,6 +140,14 @@ class McpHub:
                 await stack.aclose()
             except Exception as e:  # a broken session may fail to close; ignore
                 logger.debug("lens: closing {} failed: {}", name, e)
+
+    async def _connect_if_down(self, name: str) -> bool:
+        """Connect while holding the per-server lock so concurrent callers of a
+        down server share one reconnect instead of racing separate ones."""
+        async with self._lock_for(name):
+            if name in self._clients:
+                return True
+            return await self._connect(name)
 
     async def start(self) -> None:
         for name in self._configs:
@@ -134,7 +160,7 @@ class McpHub:
             if name in self._clients:
                 continue
             if now - self._last_try.get(name, float("-inf")) >= self._backoff_s:
-                await self._connect(name)
+                await self._connect_if_down(name)
 
     async def close(self) -> None:
         for name in list(self._stacks):
@@ -154,15 +180,26 @@ class McpHub:
             return ToolResult(payload=None, is_error=True, error=f"unknown server {server!r}")
         for attempt in range(2):
             client = self._clients.get(server)
-            if client is None and not await self._connect(server):
-                return ToolResult(payload=None, is_error=True,
-                                  error=f"server {server!r} not connected")
-            client = self._clients[server]
+            if client is None:
+                if not await self._connect_if_down(server):
+                    return ToolResult(payload=None, is_error=True,
+                                      error=f"server {server!r} not connected")
+                client = self._clients.get(server)
+                if client is None:
+                    return ToolResult(payload=None, is_error=True,
+                                      error=f"server {server!r} not connected")
             try:
                 res = await client.call_tool(tool, args, timeout=self._timeout_s,
                                              raise_on_error=False)
+            except McpError as e:
+                # A tool-level protocol error (timeout, invalid params, ...): the
+                # server itself is fine, don't disconnect/reconnect/retry.
+                return ToolResult(payload=None, is_error=True, error=str(e))
             except Exception as e:  # transport failure: reconnect once, then give up
-                await self._disconnect(server, str(e))
+                async with self._lock_for(server):
+                    if self._clients.get(server) is client:
+                        await self._disconnect(server, str(e), client=client)
+                        await self._connect(server)
                 if attempt == 1:
                     return ToolResult(payload=None, is_error=True, error=str(e))
                 continue

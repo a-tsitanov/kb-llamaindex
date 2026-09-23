@@ -210,6 +210,39 @@ async def test_open_workspace_or_fall_back_to_search():
     ), "unknown workspace must go to the planner"
 
 
+async def test_mention_context_has_id_namespace_and_keeps_view_mentions():
+    agent, store, _ = build([], [], [])
+    ws = await store.create_workspace("t")
+    await store.append_ops(ws.id, None, [
+        ("add_objects", {"objects": [
+            {"key": "kb:Q1", "type": "organization", "label": "Росатом",
+             "attrs": {}, "refs": []},
+        ]}),
+        ("add_view", {"view": {
+            "kind": "aggregate", "key": "agg:c1:h", "label": "ip · 30",
+            "item_type": "ip", "count": 30,
+            "rows_ref": {"call_id": "c1", "path": "$.hosts[*]"}, "columns": [],
+        }}),
+    ])
+
+    captured: dict = {}
+
+    async def patched_run(**kw):
+        captured.update(kw)
+        return
+        yield  # pragma: no cover
+
+    agent.planner.run = patched_run
+    await agent.submit(ws.id, "текст", ["kb:Q1", "agg:c1:h"])
+    await agent.drain()
+
+    mentions = captured["mentions"]
+    obj_mention = next(m for m in mentions if m["key"] == "kb:Q1")
+    assert obj_mention["id"] == "Q1" and obj_mention["namespace"] == "kb"
+    view_mention = next(m for m in mentions if m["key"] == "agg:c1:h")
+    assert view_mention == {"key": "agg:c1:h", "kind": "aggregate", "label": "ip · 30"}
+
+
 def test_same_as_candidates_cross_namespace_only():
     existing = {
         "fofa:x": ObjectEl(

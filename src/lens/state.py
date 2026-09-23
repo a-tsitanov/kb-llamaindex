@@ -136,6 +136,7 @@ def state_to_dict(st: CanvasState) -> dict[str, Any]:
         ],
         "relations": [
             {**r.model_dump(mode="json"), "key": r.key} for r in st.relations.values()
+            if r.from_key in st.objects and r.to_key in st.objects
         ],
         "views": [
             {**v, "hidden": k in st.hidden, "pin": st.pins.get(k)} for k, v in st.views.items()

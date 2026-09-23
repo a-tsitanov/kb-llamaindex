@@ -95,6 +95,34 @@ def test_large_list_becomes_aggregate():
     assert [c.name for c in agg.columns] == ["id", "label", "port"]
 
 
+def test_aggregate_drops_root_and_args_scoped_attr_columns():
+    hosts = {"center": "HQ", "hosts": [{"ip": f"10.0.0.{i}", "port": 22} for i in range(30)]}
+    m = run(spec(objects=[{
+        "name": "h", "each": "$.hosts[*]", "id": "$.ip", "label": "$.ip", "type": "ip",
+        "attrs": {"port": "$.port", "center": "$root.center", "arg": "$args.x"},
+    }]), payload=hosts, threshold=25, args={"x": "ignored"})
+    agg = m.aggregates[0]
+    assert [c.name for c in agg.columns] == ["id", "label", "port"]
+
+
+def test_aggregate_rejects_root_scoped_label():
+    hosts = {"center": "HQ", "hosts": [{"ip": f"10.0.0.{i}"} for i in range(30)]}
+    with pytest.raises(SpecError) as e:
+        run(spec(objects=[{"name": "h", "each": "$.hosts[*]", "id": "$.ip",
+                           "label": "$root.center", "type": "ip"}]),
+            payload=hosts, threshold=25)
+    assert "item-relative id/label" in str(e.value)
+
+
+def test_aggregate_rejects_args_scoped_label():
+    hosts = {"hosts": [{"ip": f"10.0.0.{i}"} for i in range(30)]}
+    with pytest.raises(SpecError) as e:
+        run(spec(objects=[{"name": "h", "each": "$.hosts[*]", "id": "$.ip",
+                           "label": "$args.x", "type": "ip"}]),
+            payload=hosts, threshold=25, args={"x": "same-for-all"})
+    assert "item-relative id/label" in str(e.value)
+
+
 def test_empty_spec_is_empty():
     assert run(spec()).is_empty()
 

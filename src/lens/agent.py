@@ -262,17 +262,25 @@ class Agent:
         state: CanvasState,
     ) -> None:
         canon_mentions = [state.canon(m) for m in mentions]
-        mention_ctx = [
-            state.objects[k].model_dump(
-                mode="json", include={"key", "type", "label", "attrs"}
-            )
-            for k in canon_mentions
-            if k in state.objects
-        ]
+        mention_ctx = []
+        for k in canon_mentions:
+            o = state.objects.get(k)
+            if o is not None:
+                d = o.model_dump(mode="json", include={"key", "type", "label", "attrs"})
+                ns, _, obj_id = k.partition(":")
+                d["id"], d["namespace"] = obj_id, ns
+                mention_ctx.append(d)
+                continue
+            v = state.views.get(k)
+            if v is not None:
+                mention_ctx.append({"key": k, "kind": v.get("kind"), "label": v.get("label")})
         known_objects: dict[str, ObjectEl] = dict(state.objects)
-        known_keys: set[str] = (
-            set(state.objects) | set(canon_mentions) | set(state.views)
-        )
+        # Ordered set (dict keys keep insertion order): mentions first, then the most
+        # recently added canvas objects, then everything else — build_prompt's cap
+        # relies on this order to keep the most relevant keys when there are many.
+        known_keys: dict[str, None] = {}
+        for k in (*canon_mentions, *reversed(state.objects), *state.views):
+            known_keys.setdefault(k, None)
         calls: list[str] = []
         async for ev in self.planner.run(
             input_id=input_id,
@@ -323,7 +331,7 @@ class Agent:
                         )
                         for o in m.objects:
                             known_objects.setdefault(o.key, o)
-                            known_keys.add(o.key)
+                            known_keys[o.key] = None
                     if relations:
                         ops.append(
                             (
@@ -343,7 +351,7 @@ class Agent:
                                 {"view": agg.model_dump(mode="json")},
                             )
                         )
-                        known_keys.add(agg.key)
+                        known_keys[agg.key] = None
                 if result.raw is not None:
                     ops.append(
                         (
@@ -351,7 +359,7 @@ class Agent:
                             {"view": result.raw.model_dump(mode="json")},
                         )
                     )
-                    known_keys.add(result.raw.key)
+                    known_keys[result.raw.key] = None
                 await self._append(workspace_id, input_id, ops)
             elif isinstance(ev, PlannerFinal) and ev.text.strip():
                 body, cites = resolve_citations(ev.text, known_keys)

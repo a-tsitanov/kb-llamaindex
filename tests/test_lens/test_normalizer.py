@@ -111,6 +111,17 @@ async def test_known_keys_attach_relations_and_reach_prompt():
     assert "kb:Q0" in llm.json_calls[0]["messages"][-1]["content"]
 
 
+async def test_known_keys_mentions_first_survive_the_cap():
+    # Alphabetically last, so the old "first 50 alphabetically" behavior would cut it;
+    # caller-order preservation (mentions first) must keep it in the capped-50 prompt.
+    llm = FakeLLM(json_replies=[GOOD])
+    others = [f"kb:a{i:03d}" for i in range(60)]
+    known_keys = ["kb:zzz_mention", *others]
+    await norm(llm).normalize(call(), "", known_keys=known_keys)
+    prompt = llm.json_calls[0]["messages"][-1]["content"]
+    assert "kb:zzz_mention" in prompt
+
+
 async def test_error_call_is_raw_without_llm():
     llm = FakeLLM()
     r = await norm(llm).normalize(call(is_error=True), "")

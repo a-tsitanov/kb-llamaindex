@@ -1,6 +1,9 @@
+import asyncio
 from types import SimpleNamespace
 
 from fastmcp import Client, FastMCP
+from mcp.shared.exceptions import McpError
+from mcp.types import ErrorData
 
 from src.lens.config import McpServerConfig
 from src.lens.mcp_hub import McpHub
@@ -60,6 +63,48 @@ class _FlakyClient:
         _FlakyClient.last_kw = kw
         if _FlakyClient.fail_next:
             _FlakyClient.fail_next = False
+            raise ConnectionError("session terminated")
+        return SimpleNamespace(structured_content={"ok": True}, content=[], is_error=False)
+
+
+class _McpErrorClient:
+    """Connects fine; every call_tool raises an McpError (timeout/JSON-RPC error)."""
+
+    calls = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def list_tools(self):
+        return [SimpleNamespace(name="ping", description="", inputSchema={})]
+
+    async def call_tool(self, name, args, **kw):
+        _McpErrorClient.calls += 1
+        raise McpError(ErrorData(code=-32001, message="Request timed out"))
+
+
+class _GenClient:
+    """The 1st-generation instance (connected at start()) always fails call_tool;
+    every later generation (i.e. after a reconnect) always succeeds."""
+
+    def __init__(self, gen: int):
+        self.gen = gen
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def list_tools(self):
+        return [SimpleNamespace(name="ping", description="", inputSchema={})]
+
+    async def call_tool(self, name, args, **kw):
+        await asyncio.sleep(0)  # force a genuine interleaving point between concurrent callers
+        if self.gen == 0:
             raise ConnectionError("session terminated")
         return SimpleNamespace(structured_content={"ok": True}, content=[], is_error=False)
 
@@ -153,6 +198,56 @@ async def test_transport_failure_reconnects_once_and_passes_timeout():
         res = await hub.call("flaky", "ping", {})
         assert res.is_error is False and res.payload == {"ok": True}
         assert _FlakyClient.last_kw == {"timeout": 7, "raise_on_error": False}
+    finally:
+        await hub.close()
+
+
+async def test_mcp_error_is_reported_without_disconnect():
+    """McpError (request timeout, JSON-RPC error) is a tool-level failure, not a
+    dead server: no disconnect/reconnect, the tool stays in the catalog."""
+    _McpErrorClient.calls = 0
+    hub = await make_hub(cfg("kb-err"), factory=lambda c: _McpErrorClient())
+    try:
+        res = await hub.call("kb-err", "ping", {})
+        assert res.is_error is True and "timed out" in (res.error or "").lower()
+        assert hub.status()["kb-err"] == "up"
+        assert hub.find("kb-err__ping") is not None
+        assert _McpErrorClient.calls == 1  # no retry
+    finally:
+        await hub.close()
+
+
+async def test_concurrent_calls_to_down_server_share_one_reconnect():
+    """Two concurrent call()s whose shared client dies must trigger exactly one
+    reconnect (no leaked AsyncExitStack), and both must succeed on the retry."""
+    made = {"n": 0}
+
+    def factory(c):
+        made["n"] += 1
+        return _GenClient(made["n"] - 1)
+
+    hub = await make_hub(cfg("gen"), factory=factory)
+    try:
+        r1, r2 = await asyncio.gather(
+            hub.call("gen", "ping", {}), hub.call("gen", "ping", {}))
+        assert r1.is_error is False and r2.is_error is False
+        assert made["n"] == 2  # 1 initial connect (start) + exactly 1 reconnect
+        assert hub.status()["gen"] == "up"
+    finally:
+        await hub.close()
+
+
+async def test_stale_failing_client_does_not_disconnect_replacement():
+    hub = await make_hub(cfg("kb"))
+    try:
+        old_client = hub._clients["kb"]
+        # Simulate: something else (a concurrent call) already replaced the client.
+        new_client = object()
+        hub._clients["kb"] = new_client
+        await hub._disconnect("kb", "stale failure", client=old_client)
+        assert hub._clients["kb"] is new_client
+        assert hub.status()["kb"] == "up"
+        assert hub.catalog()  # tools untouched
     finally:
         await hub.close()
 

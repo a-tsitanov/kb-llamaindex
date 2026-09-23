@@ -68,6 +68,25 @@ async def _call_or_404(deps: LensDeps, call_id: str):
     return rec
 
 
+_SCALAR_TYPES = (str, int, float)
+
+
+def _validate_filter(raw: Any) -> dict[str, list[str]]:
+    """``filter`` must be ``dict[str, list[str | int | float]]``; anything else
+    (a bare scalar, a non-list value, a list with non-scalar items) is a 400,
+    not a silent misinterpretation or an uncaught TypeError."""
+    if not isinstance(raw, dict):
+        raise ValueError("filter must be a JSON object")
+    out: dict[str, list[str]] = {}
+    for k, v in raw.items():
+        if not isinstance(v, list) or not all(
+            isinstance(x, _SCALAR_TYPES) and not isinstance(x, bool) for x in v
+        ):
+            raise ValueError(f"filter[{k!r}] must be a list of strings/numbers")
+        out[str(k)] = [str(x) for x in v]
+    return out
+
+
 def _row_matches(row: dict[str, Any], flt: dict[str, list[str]]) -> bool:
     for col, allowed in flt.items():
         values = row.values() if col == "*" else [row.get(col)]
@@ -84,6 +103,14 @@ def _routes() -> tuple[APIRouter, APIRouter, APIRouter]:
 
     @public.get("/health")
     async def health(deps: LensDeps = Depends(_deps)):
+        # Public: bucketed to "up"/"down" only — the raw status can carry connection
+        # exception text (hostnames, ports, stack-adjacent detail) that's not for
+        # anonymous callers.
+        return {"mcp": {name: "up" if s == "up" else "down"
+                       for name, s in deps.hub.status().items()}}
+
+    @api.get("/health/details")
+    async def health_details(deps: LensDeps = Depends(_deps)):
         return {"mcp": deps.hub.status()}
 
     @api.post("/workspaces")
@@ -154,7 +181,7 @@ def _routes() -> tuple[APIRouter, APIRouter, APIRouter]:
         rec = await _call_or_404(deps, call_id)
         try:
             cols = [Column.model_validate(c) for c in json.loads(columns)]
-            flt = {str(k): [str(x) for x in v] for k, v in json.loads(filter).items()}
+            flt = _validate_filter(json.loads(filter))
             rows = []
             for _, item in iter_path(rec.payload, path):
                 row = {}

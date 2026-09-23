@@ -95,6 +95,27 @@ def test_state_to_dict_is_json_ready():
     assert d["last_seq"] == st.last_seq
 
 
+def test_undo_hides_relation_to_missing_object_until_readded():
+    ops = [
+        op("add_objects", {"objects": [obj("kb:1")]}, "i1"),
+        op("add_objects", {"objects": [obj("kb:2")]}, "i2"),
+        op("add_relations", {"relations": [
+            {"from_key": "kb:1", "to_key": "kb:2", "kind": "k"}]}, "i2"),
+        op("undo", {"input_id": "i1"}, "i3"),
+    ]
+    st = fold(ops)
+    assert "kb:1" not in st.objects
+    # The relation is kept in the fold (so re-adding kb:1 brings it back)...
+    assert "kb:1|k|kb:2" in st.relations
+    # ...but state_to_dict must never emit a relation to a missing endpoint.
+    d = state_to_dict(st)
+    assert d["relations"] == []
+
+    st2 = fold([*ops, op("add_objects", {"objects": [obj("kb:1")]}, "i4")])
+    d2 = state_to_dict(st2)
+    assert [r["key"] for r in d2["relations"]] == ["kb:1|k|kb:2"]
+
+
 def test_repeated_relation_merges_refs():
     rel = lambda c: {"from_key": "kb:1", "to_key": "kb:2", "kind": "k",  # noqa: E731
                      "refs": [{"call_id": c, "path": "$"}]}

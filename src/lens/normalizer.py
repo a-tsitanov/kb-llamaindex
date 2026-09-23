@@ -87,7 +87,19 @@ def build_prompt(
     sample_chars: int,
     known_keys: Collection[str] = (),
 ) -> list[dict]:
-    known = sorted(k for k in known_keys if k.startswith(f"{call.ns}:"))[:50]
+    # Caller order matters: the Agent passes mentions first, then the most recently
+    # added canvas objects, then everything else — so when there are more than 50
+    # candidates, the ones most relevant to this request survive the cap.
+    prefix = f"{call.ns}:"
+    seen: set[str] = set()
+    known: list[str] = []
+    for k in known_keys:
+        if not k.startswith(prefix) or k in seen:
+            continue
+        seen.add(k)
+        known.append(k)
+        if len(known) >= 50:
+            break
     user = (
         f"Tool: {call.server}.{call.tool}\n"
         f"Description: {tool_description or '-'}\n"

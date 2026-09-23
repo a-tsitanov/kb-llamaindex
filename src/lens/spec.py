@@ -179,14 +179,28 @@ def materialize(
         if built is None:
             continue
         if rule.each and len(built) > aggregate_threshold:
+            # ``/rows`` resolves each column against ONE row (item-relative paths
+            # only); $root/$args scopes read the whole payload/args and can't be
+            # resolved that way.
+            if rule.id.startswith(("$root", "$args")) or rule.label.startswith(
+                ("$root", "$args")
+            ):
+                errors.append(
+                    f"aggregated rule {rule.name!r} must use item-relative id/label paths"
+                )
+                continue
+            columns = [Column(name="id", path=rule.id), Column(name="label", path=rule.label)]
+            for k, v in rule.attrs.items():
+                if v.startswith(("$root", "$args")):
+                    continue
+                columns.append(Column(name=k, path=v))
             out.aggregates.append(AggregateEl(
                 key=f"agg:{call_id}:{rule.name}",
                 label=f"{rule.type} · {len(built)}",
                 item_type=rule.type,
                 count=len(built),
                 rows_ref=Ref(call_id=call_id, path=rule.each),
-                columns=[Column(name="id", path=rule.id), Column(name="label", path=rule.label),
-                         *[Column(name=k, path=v) for k, v in rule.attrs.items()]],
+                columns=columns,
             ))
             continue
         for key, o in built.items():

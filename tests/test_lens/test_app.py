@@ -31,6 +31,11 @@ class FakeHub:
         return {"kb": "up"}
 
 
+class MixedHub:
+    def status(self):
+        return {"kb": "up", "dead": "down: ConnectionError('refused: 10.0.0.1:9002')"}
+
+
 @pytest.fixture
 async def client(monkeypatch):
     monkeypatch.setattr(lens_settings, "api_keys", KEY)
@@ -46,6 +51,21 @@ async def client(monkeypatch):
 async def test_health_is_public(client):
     r = await client.get("/lens/v1/health", headers={"X-API-Key": ""})
     assert r.json() == {"mcp": {"kb": "up"}}
+
+
+async def test_health_hides_details_public_but_shows_them_with_key(monkeypatch):
+    monkeypatch.setattr(lens_settings, "api_keys", KEY)
+    store = MemoryLensStore()
+    deps = LensDeps(store=store, bus=EventBus(), agent=FakeAgent(store), hub=MixedHub())
+    app = create_app(deps)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://t") as c:
+        pub = await c.get("/lens/v1/health")
+        assert pub.json() == {"mcp": {"kb": "up", "dead": "down"}}
+        assert (await c.get("/lens/v1/health/details")).status_code == 401
+        det = await c.get("/lens/v1/health/details", headers={"X-API-Key": KEY})
+        assert det.json() == {
+            "mcp": {"kb": "up", "dead": "down: ConnectionError('refused: 10.0.0.1:9002')"}}
 
 
 async def test_auth_header_only_and_own_keys(client):
@@ -98,6 +118,24 @@ async def test_tool_call_value_rows_and_filter(client):
                              params={"path": "$"})).status_code == 404
     assert (await client.get("/lens/v1/tool_calls/c1/value",
                              params={"path": "hosts"})).status_code == 400
+
+
+async def test_rows_filter_must_be_dict_of_scalar_lists(client):
+    payload = {"hosts": [{"ip": f"10.0.0.{i}", "port": 22 + i} for i in range(5)]}
+    await client.deps.store.add_tool_call(ToolCallRecord(
+        id="c2", input_id=None, server="fofa", tool="hosts", args={}, payload=payload,
+        shape_hash="h", latency_ms=1))
+    cols = json.dumps([{"name": "ip", "path": "$.ip"}, {"name": "port", "path": "$.port"}])
+    for bad_filter in ('{"a": "x"}', '{"a": 1}', '"not-an-object"', '{"a": [null]}'):
+        r = await client.get("/lens/v1/tool_calls/c2/rows",
+                             params={"path": "$.hosts[*]", "columns": cols,
+                                     "filter": bad_filter})
+        assert r.status_code == 400, bad_filter
+    ok = await client.get("/lens/v1/tool_calls/c2/rows",
+                          params={"path": "$.hosts[*]", "columns": cols,
+                                  "filter": json.dumps({"port": [22, "23"]})})
+    assert ok.status_code == 200
+    assert [row["port"] for row in ok.json()["rows"]] == [22, 23]
 
 
 async def test_stream_requires_workspace_bound_token(client):
