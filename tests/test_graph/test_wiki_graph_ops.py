@@ -205,11 +205,6 @@ def test_neo4j_write_page_title_issues_set_cypher():
 # --- Dispatch ------------------------------------------------------------
 
 
-def test_dispatch_returns_neo4j_when_backend_not_nebula(monkeypatch):
-    monkeypatch.setattr(wgo.settings.graph, "backend", "neo4j")
-    assert isinstance(wgo.build_wiki_graph_ops(_RecStore()), wgo.Neo4jWikiGraphOps)
-
-
 def test_dispatch_returns_nebula_when_backend_nebula(monkeypatch):
     monkeypatch.setattr(wgo.settings.graph, "backend", "nebula")
     assert isinstance(wgo.build_wiki_graph_ops(_RecStore()), wgo.NebulaWikiGraphOps)

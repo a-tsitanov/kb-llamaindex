@@ -207,11 +207,6 @@ def test_nebula_stream_edges_chunks_go_calls_by_batch_size():
 # --- Dispatch ------------------------------------------------------------
 
 
-def test_dispatch_returns_neo4j_when_backend_not_nebula(monkeypatch):
-    monkeypatch.setattr(gee.settings.graph, "backend", "neo4j")
-    assert isinstance(gee.build_graph_edge_export(_RecStore()), gee.Neo4jGraphEdgeExport)
-
-
 def test_dispatch_returns_nebula_when_backend_nebula(monkeypatch):
     monkeypatch.setattr(gee.settings.graph, "backend", "nebula")
     assert isinstance(gee.build_graph_edge_export(_RecNebula()), gee.NebulaGraphEdgeExport)

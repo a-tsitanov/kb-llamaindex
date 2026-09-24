@@ -118,11 +118,6 @@ def test_nebula_fail_soft():
 # --- Dispatch ------------------------------------------------------------
 
 
-def test_dispatch_neo4j_default(monkeypatch):
-    monkeypatch.setattr(dgo.settings.graph, "backend", "neo4j")
-    assert isinstance(dgo.build_domain_graph_ops(_RecStore()), dgo.Neo4jDomainGraphOps)
-
-
 def test_dispatch_nebula(monkeypatch):
     monkeypatch.setattr(dgo.settings.graph, "backend", "nebula")
     assert isinstance(dgo.build_domain_graph_ops(_NebulaRecStore()), dgo.NebulaDomainGraphOps)

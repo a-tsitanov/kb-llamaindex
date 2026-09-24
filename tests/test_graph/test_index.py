@@ -21,8 +21,10 @@ from src.graph.index import (
     build_kg_extractor,
     ensure_chunk_date_indexes,
     ensure_community_indexes,
+    ensure_community_report_vector_index,
     ensure_entity_fulltext_index,
     ensure_entity_lookup_indexes,
+    ensure_er_vector_index,
     ensure_first_seen_indexes,
 )
 from src.graph.schema import (
@@ -122,112 +124,6 @@ def test_simple_mode_custom_extract_prompt_overrides_default() -> None:
     assert "EXTRACT:" in extractor.extract_prompt.get_template()
 
 
-def test_ensure_entity_fulltext_index_idempotent_cypher_and_failopen():
-    from src.graph.index import (
-        ENTITY_FULLTEXT_INDEX_CYPHER,
-        ensure_entity_fulltext_index,
-    )
-
-    # Idempotent DDL on the entity name.
-    assert "CREATE FULLTEXT INDEX entity_name_fulltext IF NOT EXISTS" in (
-        ENTITY_FULLTEXT_INDEX_CYPHER
-    )
-    assert "ON EACH [e.name]" in ENTITY_FULLTEXT_INDEX_CYPHER
-
-    class _Store:
-        def __init__(self):
-            self.ran = None
-
-        def structured_query(self, cypher):
-            self.ran = cypher
-
-    store = _Store()
-    assert ensure_entity_fulltext_index(store) is True
-    assert store.ran == ENTITY_FULLTEXT_INDEX_CYPHER
-
-    class _BoomStore:
-        def structured_query(self, cypher):
-            raise RuntimeError("no fulltext support")
-
-    # Fail-open: returns False, never raises.
-    assert ensure_entity_fulltext_index(_BoomStore()) is False
-
-
-def test_ensure_entity_lookup_indexes_name_and_mention_count_and_failopen():
-    from src.graph.index import (
-        ENTITY_MENTION_COUNT_INDEX_CYPHER,
-        ENTITY_NAME_INDEX_CYPHER,
-        ensure_entity_lookup_indexes,
-    )
-
-    # Idempotent range indexes backing entity-by-name lookups and the
-    # incremental-ER `ORDER BY mention_count DESC` window.
-    assert "CREATE INDEX entity_name IF NOT EXISTS" in ENTITY_NAME_INDEX_CYPHER
-    assert "FOR (e:__Entity__) ON (e.name)" in ENTITY_NAME_INDEX_CYPHER
-    assert (
-        "CREATE INDEX entity_mention_count IF NOT EXISTS"
-        in ENTITY_MENTION_COUNT_INDEX_CYPHER
-    )
-    assert "ON (e.mention_count)" in ENTITY_MENTION_COUNT_INDEX_CYPHER
-
-    class _Store:
-        def __init__(self):
-            self.ran: list[str] = []
-
-        def structured_query(self, cypher):
-            self.ran.append(cypher)
-
-    store = _Store()
-    assert ensure_entity_lookup_indexes(store) is True
-    assert store.ran == [
-        ENTITY_NAME_INDEX_CYPHER, ENTITY_MENTION_COUNT_INDEX_CYPHER,
-    ]
-
-    class _BoomStore:
-        def structured_query(self, cypher):
-            raise RuntimeError("no index support")
-
-    # Fail-open: returns False, never raises.
-    assert ensure_entity_lookup_indexes(_BoomStore()) is False
-
-
-def test_ensure_chunk_date_indexes_cypher_and_failopen():
-    from src.graph.index import (
-        CHUNK_DOC_DATE_INDEX_CYPHER,
-        CHUNK_INSERTED_AT_INDEX_CYPHER,
-        ensure_chunk_date_indexes,
-    )
-
-    # Range indexes on the per-chunk date epochs (date-filter feature).
-    assert "CREATE INDEX chunk_doc_date_epoch IF NOT EXISTS" in CHUNK_DOC_DATE_INDEX_CYPHER
-    assert "FOR (c:Chunk) ON (c.doc_date_epoch)" in CHUNK_DOC_DATE_INDEX_CYPHER
-    assert (
-        "CREATE INDEX chunk_inserted_at_epoch IF NOT EXISTS"
-        in CHUNK_INSERTED_AT_INDEX_CYPHER
-    )
-    assert "ON (c.inserted_at_epoch)" in CHUNK_INSERTED_AT_INDEX_CYPHER
-
-    class _Store:
-        def __init__(self):
-            self.ran: list[str] = []
-
-        def structured_query(self, cypher):
-            self.ran.append(cypher)
-
-    store = _Store()
-    assert ensure_chunk_date_indexes(store) is True
-    assert store.ran == [
-        CHUNK_DOC_DATE_INDEX_CYPHER, CHUNK_INSERTED_AT_INDEX_CYPHER,
-    ]
-
-    class _BoomStore:
-        def structured_query(self, cypher):
-            raise RuntimeError("no index support")
-
-    # Fail-open: returns False, never raises.
-    assert ensure_chunk_date_indexes(_BoomStore()) is False
-
-
 def test_build_property_graph_index_threads_llm(monkeypatch):
     # The index's llm must be the project (LiteLLM) model so the default
     # retriever's LLMSynonymRetriever doesn't fall back to Settings.llm
@@ -252,84 +148,6 @@ def test_build_property_graph_index_threads_llm(monkeypatch):
     assert captured["llm"] is sentinel
 
 
-def test_ensure_er_vector_index_ddl_and_failopen():
-    from src.graph.index import ER_VECTOR_INDEX_CYPHER, ensure_er_vector_index
-
-    assert "CREATE VECTOR INDEX er_embedding_vec IF NOT EXISTS" in ER_VECTOR_INDEX_CYPHER
-    assert "ON e.er_vec" in ER_VECTOR_INDEX_CYPHER
-    assert "`vector.dimensions`: $dim" in ER_VECTOR_INDEX_CYPHER
-
-    seen = {}
-
-    class _Store:
-        def structured_query(self, cypher, param_map=None):
-            seen["cypher"] = cypher
-            seen["param_map"] = param_map
-
-    assert ensure_er_vector_index(_Store(), 768) is True
-    assert seen["cypher"] == ER_VECTOR_INDEX_CYPHER
-    assert seen["param_map"] == {"dim": 768}
-
-    class _Boom:
-        def structured_query(self, cypher, param_map=None):
-            raise RuntimeError("no vector index support")
-
-    assert ensure_er_vector_index(_Boom(), 768) is False
-
-
-def test_ensure_community_report_vector_index_ddl_and_failopen():
-    from src.graph.index import (
-        COMMUNITY_REPORT_VECTOR_INDEX_CYPHER,
-        ensure_community_report_vector_index,
-    )
-
-    assert (
-        "CREATE VECTOR INDEX community_report_vec IF NOT EXISTS"
-        in COMMUNITY_REPORT_VECTOR_INDEX_CYPHER
-    )
-    assert "FOR (c:Community) ON c.report_vec" in COMMUNITY_REPORT_VECTOR_INDEX_CYPHER
-    assert "`vector.dimensions`: $dim" in COMMUNITY_REPORT_VECTOR_INDEX_CYPHER
-    assert "'cosine'" in COMMUNITY_REPORT_VECTOR_INDEX_CYPHER
-
-    seen = {}
-
-    class _Store:
-        def structured_query(self, cypher, param_map=None):
-            seen["cypher"] = cypher
-            seen["param_map"] = param_map
-
-    assert ensure_community_report_vector_index(_Store(), 768) is True
-    assert seen["cypher"] == COMMUNITY_REPORT_VECTOR_INDEX_CYPHER
-    assert seen["param_map"] == {"dim": 768}
-
-    class _Boom:
-        def structured_query(self, cypher, param_map=None):
-            raise RuntimeError("no vector index support")
-
-    assert ensure_community_report_vector_index(_Boom(), 768) is False
-
-
-def test_ensure_community_indexes_ddl_and_failopen():
-    from src.graph.index import (
-        CHUNK_DOC_ID_INDEX_CYPHER,
-        COMMUNITY_LEVEL_INDEX_CYPHER,
-        ensure_community_indexes,
-    )
-    assert "FOR (c:Community) ON (c.level)" in COMMUNITY_LEVEL_INDEX_CYPHER
-    assert "FOR (c:Chunk) ON (c.doc_id)" in CHUNK_DOC_ID_INDEX_CYPHER
-    assert all("IF NOT EXISTS" in q for q in (COMMUNITY_LEVEL_INDEX_CYPHER, CHUNK_DOC_ID_INDEX_CYPHER))
-
-    ran = []
-    class _Store:
-        def structured_query(self, c, param_map=None): ran.append(c)
-    assert ensure_community_indexes(_Store()) is True
-    assert ran == [COMMUNITY_LEVEL_INDEX_CYPHER, CHUNK_DOC_ID_INDEX_CYPHER]
-
-    class _Boom:
-        def structured_query(self, c, param_map=None): raise RuntimeError("x")
-    assert ensure_community_indexes(_Boom()) is False
-
-
 def test_ensure_indexes_skip_under_nebula(monkeypatch):
     # neo4j `CREATE INDEX` DDL raises `SyntaxError near INDEX` under nebula
     # (nebula uses TAG INDEX, created by nebula_schema.ensure_schema). The
@@ -351,21 +169,6 @@ def test_ensure_indexes_skip_under_nebula(monkeypatch):
     assert ensure_chunk_date_indexes(store) is True
     assert ensure_first_seen_indexes(store) is True
     assert ensure_community_indexes(store) is True
+    assert ensure_er_vector_index(store, 768) is True
+    assert ensure_community_report_vector_index(store, 768) is True
     assert store.calls == 0  # no neo4j DDL sent to nebula
-
-
-def test_ensure_indexes_run_under_neo4j(monkeypatch):
-    # Guard is nebula-only: neo4j path still issues the DDL unchanged.
-    monkeypatch.setattr(settings.graph, "backend", "neo4j")
-
-    class _CountingStore:
-        def __init__(self):
-            self.calls = 0
-
-        def structured_query(self, *a, **k):
-            self.calls += 1
-            return []
-
-    store = _CountingStore()
-    assert ensure_entity_fulltext_index(store) is True
-    assert store.calls == 1

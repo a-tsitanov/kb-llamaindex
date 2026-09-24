@@ -1,7 +1,8 @@
-"""Unit tests for read-only GDS graph analysis (Track 7b).
+"""Unit tests for read-only graph analysis (Track 7b) — backend-agnostic
+fail-soft / empty-input behaviour. Result shaping under nebula lives in
+tests/test_graph/test_analysis_nebula.py.
 
-No live Neo4j/GDS: a fake store returns canned rows keyed by which GDS
-call the Cypher contains.  Asserts result shaping + fail-soft behaviour.
+A fake store returns canned rows keyed by a statement fragment.
 """
 
 from __future__ import annotations
@@ -9,8 +10,6 @@ from __future__ import annotations
 import pytest
 
 from src.graph.analysis import (
-    _pagerank_cypher,
-    _personalized_pagerank_cypher,
     components,
     graph_stats,
     pagerank,
@@ -20,8 +19,7 @@ from src.graph.analysis import (
 
 
 class _FakeStore:
-    """Returns canned rows depending on the GDS/Cypher fragment seen.
-    Project/drop calls return []."""
+    """Returns canned rows depending on the statement fragment seen."""
 
     def __init__(self, *, rows_by_fragment=None, raise_on=None):
         self._rows = rows_by_fragment or {}
@@ -38,61 +36,13 @@ class _FakeStore:
         return []
 
 
-# ── pagerank ─────────────────────────────────────────────────────────
-
-
-def test_pagerank_cypher_is_weighted_and_limited():
-    cy = _pagerank_cypher("g", 5)
-    assert "gds.pageRank.stream" in cy
-    assert "relationshipWeightProperty" in cy
-    assert "LIMIT 5" in cy
-
-
-@pytest.mark.asyncio
-async def test_pagerank_returns_scored_names():
-    store = _FakeStore(rows_by_fragment={
-        "gds.pageRank.stream": [
-            {"name": "Иванов", "score": 9.1},
-            {"name": "СтройИнвест", "score": 4.2},
-        ],
-    })
-    out = await pagerank(store, top_n=2)
-    assert out == [
-        {"name": "Иванов", "score": 9.1},
-        {"name": "СтройИнвест", "score": 4.2},
-    ]
-
-
 # ── personalized pagerank ────────────────────────────────────────────
-
-
-def test_personalized_pagerank_cypher_seeds_source_nodes():
-    cy = _personalized_pagerank_cypher("g", 5)
-    assert "gds.pageRank.stream" in cy
-    assert "sourceNodes" in cy
-    assert "$seeds" in cy
-    assert "LIMIT 5" in cy
-
-
-@pytest.mark.asyncio
-async def test_personalized_pagerank_returns_scored_names():
-    store = _FakeStore(rows_by_fragment={
-        "sourceNodes": [
-            {"name": "СтройИнвест", "score": 6.0},
-            {"name": "Подрядчик", "score": 2.5},
-        ],
-    })
-    out = await personalized_pagerank(store, ["Иванов"], top_n=2)
-    assert out == [
-        {"name": "СтройИнвест", "score": 6.0},
-        {"name": "Подрядчик", "score": 2.5},
-    ]
 
 
 @pytest.mark.asyncio
 async def test_personalized_pagerank_empty_seeds_is_empty():
     # No seeds → no personalization target → empty (and no projection run).
-    store = _FakeStore(rows_by_fragment={"sourceNodes": [{"name": "X", "score": 1.0}]})
+    store = _FakeStore(rows_by_fragment={"`Entity`": [{"name": "X", "score": 1.0}]})
     assert await personalized_pagerank(store, [], top_n=5) == []
     assert await personalized_pagerank(store, ["  "], top_n=5) == []
     assert store.calls == []
@@ -103,32 +53,7 @@ async def test_personalized_pagerank_none_store_failsafe():
     assert await personalized_pagerank(None, ["A"]) == []
 
 
-# ── components ───────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_components_parses_wcc():
-    store = _FakeStore(rows_by_fragment={
-        "gds.wcc.stats": [
-            {"componentCount": 42, "componentDistribution": {"p99": 7, "max": 1200}},
-        ],
-    })
-    out = await components(store)
-    assert out["component_count"] == 42
-    assert out["distribution"]["max"] == 1200
-
-
 # ── shortest path ────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_shortest_path_returns_path_and_hops():
-    store = _FakeStore(rows_by_fragment={
-        "shortestPath": [{"path": ["A", "X", "B"], "hops": 2}],
-    })
-    out = await shortest_path(store, "A", "B")
-    assert out["path"] == ["A", "X", "B"]
-    assert out["hops"] == 2
 
 
 @pytest.mark.asyncio
@@ -137,26 +62,6 @@ async def test_shortest_path_none_when_disconnected():
     out = await shortest_path(store, "A", "B")
     assert out["path"] == []
     assert out["hops"] == -1
-
-
-# ── graph stats ──────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_graph_stats_assembles_counts():
-    store = _FakeStore(rows_by_fragment={
-        "count(e)": [{"n": 50000}],
-        "(:__Entity__)-[r]->(:__Entity__)": [{"n": 120000}],
-        "percentileCont": [{"avg": 4.8, "p50": 3, "p99": 41, "max": 5000}],
-        "c > 1": [{"dup_groups": 130, "dup_entities": 410}],
-        "c:Community": [{"n": 191}],
-    })
-    out = await graph_stats(store)
-    assert out["entities"] == 50000
-    assert out["relationships"] == 120000
-    assert out["degree"]["p99"] == 41
-    assert out["duplicate_name_groups"] == 130
-    assert out["communities"] == 191
 
 
 # ── fail-soft ────────────────────────────────────────────────────────
@@ -175,5 +80,5 @@ async def test_none_store_is_failsafe():
 
 @pytest.mark.asyncio
 async def test_store_error_is_failsafe():
-    store = _FakeStore(raise_on="gds.pageRank.stream")
+    store = _FakeStore(raise_on="`Entity`.pagerank")
     assert await pagerank(store) == []

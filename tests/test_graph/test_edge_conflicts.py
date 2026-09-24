@@ -121,23 +121,26 @@ def test_load_stored_edges_is_fail_open(monkeypatch):
     assert load_stored_edges(_Broken(), [_rel("a", "b")]) == {}
 
 
-def test_load_stored_edges_neo4j_keys_include_the_label(monkeypatch):
-    monkeypatch.setattr("src.graph.edge_conflicts.settings.graph.backend", "neo4j")
+def test_load_stored_edges_nebula_keys_by_pair(monkeypatch):
+    from src.graph.nebula_store import entity_vid
+
+    monkeypatch.setattr("src.graph.edge_conflicts.settings.graph.backend", "nebula")
     seen = {}
 
     class _Store:
-        def structured_query(self, cypher, param_map=None):
-            seen["params"] = param_map
+        def structured_query(self, query, param_map=None):
+            seen["query"] = query
             return [{
-                "src": "Иванов", "tgt": "ООО Ромашка", "label": "WORKS_AT",
+                "s": entity_vid("Иванов"), "d": entity_vid("ООО Ромашка"),
                 "polarity": "affirmed", "source_trust": 0.7, "first_doc_id": "doc-old",
             }]
 
     out = load_stored_edges(_Store(), [_rel("Иванов", "ООО Ромашка")])
 
-    assert seen["params"]["pairs"] == [
-        {"src": "Иванов", "tgt": "ООО Ромашка", "label": "WORKS_AT"},
-    ]
-    assert out[("Иванов", "ООО Ромашка", "WORKS_AT")] == StoredEdge(
+    # nebula collapses every label of a pair onto one rank-0 RELATED edge,
+    # so the edge is read — and keyed — by (src, tgt).
+    assert seen["query"].startswith("FETCH PROP ON `RELATED`")
+    assert f'"{entity_vid("Иванов")}"->"{entity_vid("ООО Ромашка")}"' in seen["query"]
+    assert out[("Иванов", "ООО Ромашка")] == StoredEdge(
         "affirmed", 0.7, "doc-old",
     )

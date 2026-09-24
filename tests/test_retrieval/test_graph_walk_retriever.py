@@ -1,17 +1,19 @@
 """Unit tests for GraphRetriever.awalk — bounded N-hop graph traversal.
 
-Uses a fake PropertyGraphStore exposing only ``structured_query`` (the
-generic Cypher entry on Neo4jPropertyGraphStore). NO live Neo4j: we
-assert the Cypher params (hops clamp, node/edge caps, rel_filter
-pass-through) and the RoundGraphData mapping of the returned rows.
+Under nebula ``awalk`` calls ``store.subgraph(entity_vid(name), hops)`` and
+maps the returned ``{entities, relations}`` rows; a fake store records the
+call and returns canned rows. NO live graph: we assert the hops clamp, the
+node/edge caps, rel_filter handling and the RoundGraphData mapping.
 """
 
 from __future__ import annotations
 
 import pytest
 
+from src.graph.nebula_store import entity_vid
 from src.graph.retriever import (
     GRAPH_WALK_EDGE_CAP,
+    GRAPH_WALK_MAX_HOPS,
     GRAPH_WALK_NODE_CAP,
     GraphRetriever,
     _relation_is_live,
@@ -19,16 +21,17 @@ from src.graph.retriever import (
 
 
 class _FakeStore:
-    """Captures the Cypher + params and returns canned rows."""
+    """Answers ``subgraph`` (the nebula walk entry) with canned rows."""
 
     def __init__(self, rows=None):
         self._rows = rows or []
-        self.last_cypher = None
-        self.last_params = None
+        self.last_subgraph_call = None
 
-    def structured_query(self, cypher, param_map=None):
-        self.last_cypher = cypher
-        self.last_params = param_map or {}
+    def structured_query(self, query, param_map=None):
+        return []
+
+    def subgraph(self, vid, hops, *, edge="RELATED"):
+        self.last_subgraph_call = (vid, hops, edge)
         return self._rows
 
 
@@ -46,35 +49,33 @@ def _rel(src, tgt, label, **props):
 
 
 @pytest.mark.asyncio
-async def test_awalk_clamps_hops_and_caps_in_params():
-    store = _FakeStore(rows=[])
+async def test_awalk_clamps_hops_and_caps_output():
+    n = max(GRAPH_WALK_NODE_CAP, GRAPH_WALK_EDGE_CAP) + 5
+    rows = [{
+        "entities": [{"name": f"E{i}", "label": "P", "description": ""} for i in range(n)],
+        "relations": [_rel("Иванов", f"E{i}", "KNOWS") for i in range(n)],
+    }]
+    store = _FakeStore(rows=rows)
     r = _retriever_with_store(store)
-    await r.awalk("Иванов", hops=99)
-    params = store.last_params
-    # hops clamped to the hard max
-    assert params["hops"] <= GRAPH_WALK_NODE_CAP  # sanity
-    assert params["node_cap"] == GRAPH_WALK_NODE_CAP
-    assert params["edge_cap"] == GRAPH_WALK_EDGE_CAP
-    assert params["name"] == "Иванов"
-    # query is bounded by a LIMIT on the node cap
-    assert "LIMIT" in store.last_cypher.upper()
+    data = await r.awalk("Иванов", hops=99)
+    vid, hops, _edge = store.last_subgraph_call
+    # hops clamped to the hard max; walk starts at the named entity
+    assert hops == GRAPH_WALK_MAX_HOPS
+    assert vid == entity_vid("Иванов")
+    # output bounded by the node / edge caps
+    assert len(data.entities) == GRAPH_WALK_NODE_CAP
+    assert len(data.relations) == GRAPH_WALK_EDGE_CAP
 
 
 @pytest.mark.asyncio
-async def test_awalk_passes_rel_filter_as_param():
-    store = _FakeStore(rows=[])
-    r = _retriever_with_store(store)
-    await r.awalk("A", hops=2, rel_filter=["KNOWS", "WORKS_AT"])
-    assert store.last_params["rel_filter"] == ["KNOWS", "WORKS_AT"]
-
-
-@pytest.mark.asyncio
-async def test_awalk_no_rel_filter_passes_empty_list():
-    store = _FakeStore(rows=[])
-    r = _retriever_with_store(store)
-    await r.awalk("A", hops=2, rel_filter=None)
-    # empty list ⇒ Cypher treats "no filter" (size(filter)=0) branch
-    assert store.last_params["rel_filter"] == []
+async def test_awalk_no_rel_filter_keeps_all_labels():
+    rows = [{
+        "entities": [{"name": "A", "label": "P", "description": ""}],
+        "relations": [_rel("A", "B", "KNOWS"), _rel("A", "C", "WORKS_AT")],
+    }]
+    r = _retriever_with_store(_FakeStore(rows=rows))
+    data = await r.awalk("A", hops=2, rel_filter=None)
+    assert {rel["label"] for rel in data.relations} == {"KNOWS", "WORKS_AT"}
 
 
 @pytest.mark.asyncio
@@ -196,19 +197,3 @@ async def test_awalk_opt_out_disables_filtering():
     data = await r.awalk("A", hops=2)
     tgts = {rel["tgt_id"] for rel in data.relations}
     assert tgts == {"B", "C"}
-
-
-@pytest.mark.asyncio
-async def test_awalk_no_apoc_path_also_filters():
-    rows = [{
-        "start_name": "A", "start_labels": ["P"], "start_description": "",
-        "m_name": "B", "m_labels": ["P"], "m_description": "",
-        "rels": [
-            _rel("A", "B", "OWNS", polarity="affirmed"),
-            _rel("A", "C", "OWNS", polarity="negated"),
-        ],
-    }]
-    r = _retriever_with_store(_FakeStore(rows=rows))
-    data = r._map_no_apoc_rows(rows)
-    tgts = {rel["tgt_id"] for rel in data.relations}
-    assert tgts == {"B"}

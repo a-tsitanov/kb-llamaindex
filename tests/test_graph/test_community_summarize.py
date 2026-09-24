@@ -42,9 +42,9 @@ def test_neo4j_write_report_issues_exact_cypher_and_params():
     })]
 
 
-def test_dispatch_returns_neo4j_when_backend_not_nebula(monkeypatch):
-    monkeypatch.setattr(cs.settings.graph, "backend", "neo4j")
-    assert isinstance(cs.build_community_summarize(_RecStore()), cs.Neo4jCommunitySummarize)
+def test_dispatch_returns_nebula_when_backend_nebula(monkeypatch):
+    monkeypatch.setattr(cs.settings.graph, "backend", "nebula")
+    assert isinstance(cs.build_community_summarize(_RecStore()), cs.NebulaCommunitySummarize)
 
 
 class _RecNebula:

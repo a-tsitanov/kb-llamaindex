@@ -1,12 +1,17 @@
-"""Unit tests for offline GDS-Leiden community detection (Search R6).
+"""Unit tests for community detection orchestration (Search R6).
 
-No live Neo4j / GDS here: a FAKE store records every ``structured_query``
-call and returns canned rows for the Leiden-stream read.  We assert:
+Leiden compute is stubbed at the ``_leiden_rows`` seam (the leidenalg
+backend); the :Community write-back is a recording fake patched in at
+``build_community_writeback``.  We assert:
 
-  * canned ``communityId`` rows are grouped into ``CommunityRef``s,
+  * canned ``communityId`` / ``ids`` rows are grouped into ``CommunityRef``s,
   * the ``min_size`` floor drops tiny communities,
-  * the ``:Community`` MERGE + ``IN_COMMUNITY`` link writes were issued,
-  * any store error → ``[]`` (fail-safe, no raise through the boundary).
+  * prune-before-merge ordering, hierarchy parent-first ordering and the
+    incremental report carry-over reach the write-back,
+  * any compute error → ``[]`` (fail-safe, no raise through the boundary).
+
+The nGQL each write-back call issues is covered in
+tests/test_graph/test_community_writeback.py.
 """
 
 from __future__ import annotations
@@ -19,40 +24,73 @@ import src.graph.communities as comm
 from src.graph.communities import detect_communities
 
 
-@pytest.fixture(autouse=True)
-def _force_gds_backend(monkeypatch):
-    """Ensure tests run with GDS backend for deterministic test behavior.
+class _RecWriteback:
+    """Records every write-back call (with kwargs) in order."""
 
-    _FakeStore returns GDS-stream-shaped rows, so this fixture pins the
-    community_backend to "gds" to ensure deterministic results regardless
-    of the resolved default configuration.
-    """
-    import src.graph.communities as communities
-    monkeypatch.setattr(communities.settings.temporal, "community_backend", "gds")
+    def __init__(self, old_report_rows=None):
+        self.calls: list[tuple] = []
+        self._old = list(old_report_rows or [])
+
+    def ensure_schema(self):
+        self.calls.append(("ensure_schema", {}))
+
+    def read_old_reports(self):
+        self.calls.append(("read_old_reports", {}))
+        return self._old
+
+    def prune_level(self, level):
+        self.calls.append(("prune_level", {"level": level}))
+
+    def prune_all(self):
+        self.calls.append(("prune_all", {}))
+
+    def merge_community(self, **kw):
+        self.calls.append(("merge_community", kw))
+
+    def merge_subcommunity(self, **kw):
+        self.calls.append(("merge_subcommunity", kw))
 
 
-class _FakeStore:
-    """Records Cypher calls; returns canned rows for the leiden-stream
-    read (the query that RETURNs ``name``/``communityId``)."""
-
-    def __init__(self, stream_rows, *, raise_on=None):
-        self._stream_rows = stream_rows
-        self._raise_on = raise_on
-        self.calls: list[tuple[str, dict]] = []
-
-    def structured_query(self, cypher, param_map=None):
-        self.calls.append((cypher, param_map or {}))
-        if self._raise_on and self._raise_on in cypher:
-            raise RuntimeError("boom")
-        # The leiden read is the one that returns communityId rows.
-        if "communityId" in cypher and cypher.strip().upper().startswith(("CALL", "MATCH")):
-            if "gds.leiden.stream" in cypher or ("RETURN" in cypher and "communityId" in cypher):
-                return self._stream_rows
+class _Store:
+    def structured_query(self, query, param_map=None):
         return []
 
 
+@pytest.fixture
+def leiden(monkeypatch):
+    """Pin the leidenalg backend and stub its compute + the write-back seam.
+
+    ``leiden(rows, old_report_rows=None) -> _RecWriteback``; ``leiden.seen``
+    records the kwargs ``_leiden_rows`` was called with.
+    """
+    import src.graph.community_writeback as community_writeback
+
+    monkeypatch.setattr(comm.settings.temporal, "community_backend", "leidenalg")
+    seen: list[dict] = []
+
+    def _setup(rows, old_report_rows=None):
+        async def fake_rows(store, **kw):
+            seen.append(kw)
+            return rows
+
+        wb = _RecWriteback(old_report_rows)
+        monkeypatch.setattr(comm, "_leiden_rows", fake_rows)
+        # detect_* import build_community_writeback lazily from the source
+        # module, so that is the patch target (see the Task 4 note below).
+        monkeypatch.setattr(
+            community_writeback, "build_community_writeback", lambda store: wb)
+        return wb
+
+    _setup.seen = seen
+    return _setup
+
+
+def _kinds(wb):
+    return [k for k, _ in wb.calls]
+
+
 @pytest.mark.asyncio
-async def test_detect_groups_members_by_community_id():
+async def test_detect_groups_members_by_community_id(leiden):
     rows = [
         {"name": "Иванов", "communityId": 7},
         {"name": "Петров", "communityId": 7},
@@ -61,8 +99,8 @@ async def test_detect_groups_members_by_community_id():
         {"name": "СтройИнвест", "communityId": 2},
         {"name": "ТехноСтрой", "communityId": 2},
     ]
-    store = _FakeStore(rows)
-    comms = await detect_communities(store, min_size=3)
+    leiden(rows)
+    comms = await detect_communities(_Store(), min_size=3)
 
     by_id = {c.community_id: c for c in comms}
     assert set(by_id) == {"7", "2"}
@@ -71,104 +109,55 @@ async def test_detect_groups_members_by_community_id():
 
 
 @pytest.mark.asyncio
-async def test_detect_drops_communities_below_min_size():
+async def test_detect_drops_communities_below_min_size(leiden):
     rows = [
         {"name": "A", "communityId": 1},
         {"name": "B", "communityId": 1},
         {"name": "C", "communityId": 1},
         {"name": "D", "communityId": 9},  # singleton — dropped
     ]
-    store = _FakeStore(rows)
-    comms = await detect_communities(store, min_size=3)
+    leiden(rows)
+    comms = await detect_communities(_Store(), min_size=3)
     assert [c.community_id for c in comms] == ["1"]
 
 
 @pytest.mark.asyncio
-async def test_detect_issues_community_merge_writes():
-    rows = [
-        {"name": "A", "communityId": 5},
-        {"name": "B", "communityId": 5},
-        {"name": "C", "communityId": 5},
-    ]
-    store = _FakeStore(rows)
-    await detect_communities(store, min_size=3, level=0)
-
-    joined = "\n".join(c for c, _ in store.calls)
-    # Idempotent node + link writes.
-    assert "MERGE (c:Community" in joined
-    assert "IN_COMMUNITY" in joined
-    # member_count persisted on the node.
-    assert "member_count" in joined
-
-
-@pytest.mark.asyncio
-async def test_detect_prunes_prior_level_before_merges():
-    """A rebuild must DETACH DELETE the prior level's communities (scoped
-    to $level) BEFORE re-creating them, so ghost nodes/summaries from a
+async def test_detect_prunes_prior_level_before_merges(leiden):
+    """A rebuild must delete the prior level's communities (scoped to the
+    requested level) BEFORE re-creating them, so ghost nodes/summaries from a
     renumbered Leiden run don't linger."""
     rows = [
         {"name": "A", "communityId": 5},
         {"name": "B", "communityId": 5},
         {"name": "C", "communityId": 5},
     ]
-    store = _FakeStore(rows)
-    await detect_communities(store, min_size=3, level=2)
+    wb = leiden(rows)
+    await detect_communities(_Store(), min_size=3, level=2)
 
-    cyphers = [c for c, _ in store.calls]
-    prune_idx = next(
-        i for i, c in enumerate(cyphers)
-        if "DETACH DELETE c" in c and "Community{level:$level}" in c.replace(" ", "")
-    )
-    first_merge_idx = next(
-        i for i, c in enumerate(cyphers) if "MERGE (c:Community" in c
-    )
+    kinds = _kinds(wb)
+    prune_idx = kinds.index("prune_level")
+    first_merge_idx = kinds.index("merge_community")
     assert prune_idx < first_merge_idx
-    # Scoped to the requested level only (parameterized, never global).
-    _, prune_params = store.calls[prune_idx]
-    assert prune_params == {"level": 2}
+    # Scoped to the requested level only (never global).
+    assert wb.calls[prune_idx][1] == {"level": 2}
+    assert "prune_all" not in kinds
 
 
 @pytest.mark.asyncio
-async def test_detect_uses_per_call_projection_name():
-    """The GDS projection name must be unique per call (not a module
-    constant) so concurrent rebuilds don't drop each other's projection."""
-    rows = [{"name": n, "communityId": 1} for n in ("A", "B", "C")]
-    store = _FakeStore(rows)
-    await detect_communities(store, min_size=3)
+async def test_detect_failsafe_on_store_error_returns_empty(monkeypatch):
+    monkeypatch.setattr(comm.settings.temporal, "community_backend", "leidenalg")
 
-    project_calls = [c for c, _ in store.calls if "gds.graph.project" in c]
-    drop_calls = [c for c, _ in store.calls if "gds.graph.drop" in c]
-    assert project_calls and drop_calls
-    # Per-call name carries the prefix + a random suffix.
-    assert "'kb-communities-" in project_calls[0]
-    # The drop targets the SAME per-call name used for the projection.
-    name = project_calls[0].split("'")[1]
-    assert all(f"'{name}'" in c for c in drop_calls)
+    def boom(store, **kw):
+        raise RuntimeError("boom")
 
-
-@pytest.mark.asyncio
-async def test_detect_failsafe_on_store_error_returns_empty():
-    store = _FakeStore([], raise_on="gds.leiden")
-    comms = await detect_communities(store, min_size=3)
+    monkeypatch.setattr(comm, "extract_entity_edges", boom)
+    comms = await detect_communities(_Store(), min_size=3)
     assert comms == []
 
 
 @pytest.mark.asyncio
 async def test_detect_none_store_returns_empty():
     assert await detect_communities(None, min_size=3) == []
-
-
-def test_subcommunity_cypher_writes_member_links():
-    """level>0 MERGE теперь и wires PARENT_OF, и линкует членов —
-    иначе у листовых сообществ нет источника member-context."""
-    from src.graph import communities
-
-    cy = communities._MERGE_SUBCOMMUNITY_CYPHER
-    assert "-[:PARENT_OF]->(c)" in cy                      # дендрограмма
-    assert "OPTIONAL MATCH (c)<-[old:IN_COMMUNITY]-" in cy  # чистка старых
-    assert "UNWIND $members AS member_name" in cy
-    assert "MATCH (e:__Entity__ {name: member_name})" in cy
-    assert "MERGE (e)-[:IN_COMMUNITY]->(c)" in cy
 
 
 def test_members_hash_order_insensitive():
@@ -196,10 +185,10 @@ def test_group_by_levels_maps_dendrogram_and_parents():
 
 
 @pytest.mark.asyncio
-async def test_detect_hierarchy_materialises_levels_and_parents():
+async def test_detect_hierarchy_materialises_levels_and_parents(leiden):
     """detect_hierarchy must prune-all before merging, write level-0
-    entity IN_COMMUNITY links, and wire level>0 PARENT_OF edges with the
-    parent written FIRST (the coarsest-first invariant the MATCH relies on)."""
+    communities with their member links, and wire level>0 PARENT_OF edges
+    with the parent written FIRST (the coarsest-first invariant)."""
     from src.graph.communities import detect_hierarchy
 
     # 3 nodes, 2 levels (finest..coarsest): a,b in finer 10; c in finer 11;
@@ -209,65 +198,40 @@ async def test_detect_hierarchy_materialises_levels_and_parents():
         {"name": "b", "ids": [10, 1]},
         {"name": "c", "ids": [11, 1]},
     ]
-    store = _FakeStore(rows)
-    comms = await detect_hierarchy(store, max_levels=10, min_size=1)
+    wb = leiden(rows)
+    comms = await detect_hierarchy(_Store(), max_levels=10, min_size=1)
 
     assert {(c.level, c.community_id) for c in comms} == {(0, "1"), (1, "10"), (1, "11")}
 
-    cyphers = [c for c, _ in store.calls]
-    # prune-ALL precedes the first community MERGE
-    prune_idx = next(i for i, c in enumerate(cyphers)
-                     if "DETACH DELETE" in c and "MATCH (c:Community)" in c)
-    first_merge_idx = next(i for i, c in enumerate(cyphers) if "MERGE (c:Community" in c)
+    kinds = _kinds(wb)
+    # prune-ALL precedes the first community write
+    prune_idx = kinds.index("prune_all")
+    first_merge_idx = min(
+        i for i, k in enumerate(kinds) if k in ("merge_community", "merge_subcommunity"))
     assert prune_idx < first_merge_idx
 
-    # level 0 = IN_COMMUNITY entity links; level>0 = PARENT_OF; parent first
-    in_comm_idx = next(i for i, c in enumerate(cyphers) if "IN_COMMUNITY" in c)
-    parent_idx = next(i for i, c in enumerate(cyphers) if "PARENT_OF" in c)
+    # level 0 = entity member links; level>0 = PARENT_OF; parent first
+    in_comm_idx = kinds.index("merge_community")
+    parent_idx = kinds.index("merge_subcommunity")
     assert in_comm_idx < parent_idx   # coarsest-first: parent before child
 
     # the PARENT_OF write carries the coarser parent id + the child level
-    _c, parent_params = next((c, p) for c, p in store.calls if "PARENT_OF" in c)
+    parent_params = next(p for k, p in wb.calls if k == "merge_subcommunity")
     assert parent_params.get("parent_id") == "1"
     assert parent_params.get("level") == 1
 
-    # level>0 MERGE теперь И wires PARENT_OF, И линкует членов, и передаёт members
-    sub_cypher, sub_params = next((c, p) for c, p in store.calls if "PARENT_OF" in c)
-    assert "IN_COMMUNITY" in sub_cypher            # тот же MERGE линкует членов
-    assert sub_params.get("members")               # непустой список членов на level>0
+    # level>0 write also links members (non-empty member list)
+    assert parent_params.get("members")
 
 
 # --- Phase 2b: incremental report carry-over -----------------------------
 
-# Distinctive substring of _READ_OLD_REPORTS_CYPHER, used by the fake store
-# to recognise the "read prior reports before prune" query.
-_OLD_REPORTS_MARKER = "c.members_hash IS NOT NULL AND c.report IS NOT NULL"
-
-
-class _FakeStoreWithOldReports(_FakeStore):
-    """Like ``_FakeStore`` but ALSO returns canned rows for the
-    ``_READ_OLD_REPORTS_CYPHER`` read (matched on a distinctive substring)."""
-
-    def __init__(self, stream_rows, old_report_rows, *, raise_on=None):
-        super().__init__(stream_rows, raise_on=raise_on)
-        self._old_report_rows = old_report_rows
-
-    def structured_query(self, cypher, param_map=None):
-        self.calls.append((cypher, param_map or {}))
-        if self._raise_on and self._raise_on in cypher:
-            raise RuntimeError("boom")
-        if _OLD_REPORTS_MARKER in cypher:
-            return self._old_report_rows
-        if "communityId" in cypher and cypher.strip().upper().startswith(("CALL", "MATCH")):
-            if "gds.leiden.stream" in cypher or ("RETURN" in cypher and "communityId" in cypher):
-                return self._stream_rows
-        return []
-
 
 @pytest.mark.asyncio
-async def test_read_old_reports_maps_level_and_hash():
+async def test_read_old_reports_maps_level_and_hash(monkeypatch):
     """``_read_old_reports`` returns ``{(level, members_hash): {...}}`` from
     the prior build's ``:Community`` nodes."""
+    import src.graph.community_writeback as community_writeback
     from src.graph.communities import _read_old_reports
 
     old_rows = [
@@ -277,8 +241,9 @@ async def test_read_old_reports_maps_level_and_hash():
          "title": "B", "summary": "sum B", "report_vec": None},
         {"level": 0, "h": None, "report": "x"},  # no hash → skipped
     ]
-    store = _FakeStoreWithOldReports([], old_rows)
-    old = await _read_old_reports(store)
+    wb = _RecWriteback(old_rows)
+    monkeypatch.setattr(community_writeback, "build_community_writeback", lambda store: wb)
+    old = await _read_old_reports(_Store())
 
     assert set(old) == {(0, "hash-A"), (1, "hash-B")}
     assert old[(0, "hash-A")]["report"] == '{"title":"A"}'
@@ -294,10 +259,10 @@ async def test_read_old_reports_none_store_returns_empty():
 
 
 @pytest.mark.asyncio
-async def test_detect_hierarchy_carries_unchanged_report():
+async def test_detect_hierarchy_carries_unchanged_report(leiden):
     """A community whose ``(level, members_hash)`` matches a prior build's
     report keeps that report (``needs_report=False`` + report carried into
-    the MERGE); a community whose hash is NOT in the old map stays
+    the write); a community whose hash is NOT in the old map stays
     ``needs_report=True`` with no carried report."""
     from src.graph.communities import detect_hierarchy, members_hash
 
@@ -319,8 +284,8 @@ async def test_detect_hierarchy_carries_unchanged_report():
          "title": "x", "summary": "y", "report_vec": None,
          "summarized_at": 1},
     ]
-    store = _FakeStoreWithOldReports(rows, old_rows)
-    comms = await detect_hierarchy(store, max_levels=10, min_size=1)
+    wb = leiden(rows, old_rows)
+    comms = await detect_hierarchy(_Store(), max_levels=10, min_size=1)
 
     by = {(c.level, c.community_id): c for c in comms}
     # level-0 community carried its report → not flagged for re-summarisation.
@@ -330,104 +295,44 @@ async def test_detect_hierarchy_carries_unchanged_report():
     assert by[(1, "11")].needs_report is True
 
     # The old-reports read happened BEFORE the prune-all wipe.
-    cyphers = [c for c, _ in store.calls]
-    read_idx = next(i for i, c in enumerate(cyphers) if _OLD_REPORTS_MARKER in c)
-    prune_idx = next(i for i, c in enumerate(cyphers)
-                     if "DETACH DELETE" in c and "MATCH (c:Community)" in c)
-    assert read_idx < prune_idx
+    kinds = _kinds(wb)
+    assert kinds.index("read_old_reports") < kinds.index("prune_all")
 
-    # The level-0 MERGE carries the report; the level-1 MERGEs do not.
-    l0_merge = next(p for c, p in store.calls
-                    if "MERGE (c:Community" in c and "IN_COMMUNITY" in c)
-    assert l0_merge.get("carry_report") == '{"title":"L0"}'
-    assert l0_merge.get("carry_title") == "L0"
-    assert l0_merge.get("carry_summary") == "sum L0"
-    assert l0_merge.get("carry_report_vec") == [0.3]
+    # The level-0 write carries the report; the level-1 writes do not.
+    l0_carry = next(p for k, p in wb.calls if k == "merge_community")["carry"]
+    assert l0_carry.get("report") == '{"title":"L0"}'
+    assert l0_carry.get("title") == "L0"
+    assert l0_carry.get("summary") == "sum L0"
+    assert l0_carry.get("report_vec") == [0.3]
     # The ORIGINAL summarisation time is carried (not re-stamped to now).
-    assert l0_merge.get("carry_summarized_at") == 1234567890
+    assert l0_carry.get("summarized_at") == 1234567890
 
-    l1_merges = [p for c, p in store.calls
-                 if "MERGE (c:Community" in c and "PARENT_OF" in c]
+    l1_merges = [p for k, p in wb.calls if k == "merge_subcommunity"]
     assert l1_merges  # sanity
     for p in l1_merges:
-        assert p.get("carry_report") is None
-        assert p.get("carry_title") is None
-        assert p.get("carry_summary") is None
-        assert p.get("carry_report_vec") is None
+        assert p["carry"].get("report") is None
+        assert p["carry"].get("title") is None
+        assert p["carry"].get("summary") is None
+        assert p["carry"].get("report_vec") is None
 
 
-# ── Track 4: weighted projection + instrumentation ──────────────────
-
-
-def test_leiden_stream_uses_relationship_weight():
-    """Leiden must run weighted (edge weight = co-occurrence count from
-    the merge layer) so dense ties dominate community structure."""
-    from src.graph.communities import _leiden_stream_cypher
-
-    cy = _leiden_stream_cypher("g")
-    assert "relationshipWeightProperty" in cy
-    assert "weight" in cy
-
-
-def test_projection_carries_weight_property():
-    from src.graph.communities import _project_cypher
-
-    cy = _project_cypher("g")
-    assert "weight" in cy
-    assert "defaultValue: 1.0" in cy  # missing r.weight → 1.0 (ex-coalesce)
-
-
-def test_projection_is_native_not_cypher_aggregation():
-    """Regression (2026-07-03): the cypher-AGGREGATION projection form
-    (MATCH … RETURN gds.graph.project(…) AS g) deterministically exhausts
-    a 4G heap on GDS 2.13.9 / Neo4j 5.26.25 even on a ~2k-entity graph,
-    killing the JVM (same failure took prod down on 2026-06-30 via the
-    GDS community backend). The projection MUST use the native CALL form."""
-    from src.graph.communities import _project_cypher
-
-    cy = _project_cypher("g")
-    assert cy.strip().startswith("CALL gds.graph.project(")
-    assert "OPTIONAL MATCH" not in cy
-    assert "AS g" in cy  # row shape still {"g": {...}} for _projection_stats
-
-
-# ── #4 follow-up: gamma (resolution) + concurrency knobs ─────────────
-
-
-def test_leiden_stream_includes_gamma_and_concurrency():
-    """gamma (resolution) + concurrency must reach the GDS Leiden config."""
-    from src.graph.communities import _leiden_stream_cypher
-
-    cy = _leiden_stream_cypher("g", gamma=2.5, concurrency=8)
-    assert "gamma: 2.5" in cy
-    assert "concurrency: 8" in cy
-
-
-def test_leiden_stream_default_gamma_concurrency():
-    from src.graph.communities import _leiden_stream_cypher
-
-    cy = _leiden_stream_cypher("g")
-    # defaults are still emitted so behaviour is explicit, not GDS-implicit.
-    assert "gamma: 1.0" in cy
-    assert "concurrency: 4" in cy
+# ── #4 follow-up: gamma (resolution) knob ────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_detect_forwards_gamma_concurrency_to_stream():
+async def test_detect_forwards_gamma_to_leiden(leiden):
     rows = [
         {"name": "A", "communityId": 1},
         {"name": "B", "communityId": 1},
         {"name": "C", "communityId": 1},
     ]
-    store = _FakeStore(rows)
-    await detect_communities(store, min_size=3, gamma=3.0, concurrency=6)
-    stream_calls = [c for c, _ in store.calls if "gds.leiden.stream" in c]
-    assert stream_calls and "gamma: 3.0" in stream_calls[0]
-    assert "concurrency: 6" in stream_calls[0]
+    leiden(rows)
+    await detect_communities(_Store(), min_size=3, gamma=3.0, concurrency=6)
+    assert leiden.seen and leiden.seen[0]["gamma"] == 3.0
 
 
 @pytest.mark.asyncio
-async def test_detect_hierarchy_forwards_gamma_concurrency():
+async def test_detect_hierarchy_forwards_gamma_to_leiden(leiden):
     from src.graph.communities import detect_hierarchy
 
     rows = [
@@ -435,12 +340,11 @@ async def test_detect_hierarchy_forwards_gamma_concurrency():
         {"name": "B", "communityId": 1, "ids": [1, 1]},
         {"name": "C", "communityId": 1, "ids": [1, 1]},
     ]
-    store = _FakeStore(rows)
-    await detect_hierarchy(store, max_levels=2, min_size=3,
+    leiden(rows)
+    await detect_hierarchy(_Store(), max_levels=2, min_size=3,
                            gamma=2.0, concurrency=2)
-    stream_calls = [c for c, _ in store.calls if "gds.leiden.stream" in c]
-    assert stream_calls and "gamma: 2.0" in stream_calls[0]
-    assert "concurrency: 2" in stream_calls[0]
+    assert leiden.seen and leiden.seen[0]["gamma"] == 2.0
+    assert leiden.seen[0]["max_levels"] == 2
 
 
 def test_detect_communities_params_carry_gamma_concurrency():
@@ -458,60 +362,6 @@ def test_community_leiden_settings_defaults():
 
     assert settings.temporal.community_leiden_gamma == 1.0
     assert settings.temporal.community_leiden_concurrency == 4
-
-
-def test_projection_stats_extracts_counts():
-    from src.graph.communities import _projection_stats
-
-    rows = [{"g": {"nodeCount": 50000, "relationshipCount": 120000}}]
-    assert _projection_stats(rows) == {"nodes": 50000, "rels": 120000}
-
-
-def test_projection_stats_empty_is_zero():
-    from src.graph.communities import _projection_stats
-
-    assert _projection_stats([]) == {"nodes": 0, "rels": 0}
-
-
-# ── regression: every $param referenced in a write must be passed ───
-
-
-class _ParamCheckingStore:
-    """Records (not raises) any `$name` in a Cypher that isn't in
-    param_map — like Neo4j's ParameterMissing, but collected so the
-    fail-soft persist block doesn't hide it from the test."""
-
-    import re as _re
-    _PARAM = _re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
-
-    def __init__(self, stream_rows):
-        self._stream_rows = stream_rows
-        self.missing: list[str] = []
-
-    def structured_query(self, cypher, param_map=None):
-        params = param_map or {}
-        for name in set(self._PARAM.findall(cypher)):
-            if name not in params:
-                self.missing.append(name)
-        if "gds.leiden.stream" in cypher:
-            return self._stream_rows
-        return []
-
-
-@pytest.mark.asyncio
-async def test_single_level_merge_passes_all_params():
-    """detect_communities (max_levels=1 path) must pass EVERY param the
-    persist Cyphers reference — the single-level path forgot
-    carry_summarized_at, so the :Community write silently failed against
-    a live Neo4j (ParameterMissing)."""
-    rows = [
-        {"name": "Иванов", "communityId": 7},
-        {"name": "Петров", "communityId": 7},
-        {"name": "Сидоров", "communityId": 7},
-    ]
-    store = _ParamCheckingStore(rows)
-    await detect_communities(store, min_size=3)
-    assert store.missing == [], f"missing query params: {store.missing}"
 
 
 # ── Task 4: BUILD write-back routed through the CommunityWriteback seam ──

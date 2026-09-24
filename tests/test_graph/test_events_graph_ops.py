@@ -117,11 +117,6 @@ def test_nebula_entity_new_connections_name_anchored():
 # --- Dispatch ------------------------------------------------------------
 
 
-def test_dispatch_neo4j_default(monkeypatch):
-    monkeypatch.setattr(ego.settings.graph, "backend", "neo4j")
-    assert isinstance(ego.build_events_graph_ops(_RecStore()), ego.Neo4jEventsGraphOps)
-
-
 def test_dispatch_nebula(monkeypatch):
     monkeypatch.setattr(ego.settings.graph, "backend", "nebula")
     assert isinstance(ego.build_events_graph_ops(_NebulaRecStore()), ego.NebulaEventsGraphOps)

@@ -64,11 +64,6 @@ def test_neo4j_prune_and_read_and_ensure_use_the_constants():
     assert rows == [{"level": 0, "h": "x", "report": "r"}]
 
 
-def test_dispatch_returns_neo4j_when_backend_not_nebula(monkeypatch):
-    monkeypatch.setattr(cw.settings.graph, "backend", "neo4j")
-    assert isinstance(cw.build_community_writeback(_RecStore()), cw.Neo4jCommunityWriteback)
-
-
 from src.graph.nebula_store import entity_vid
 
 

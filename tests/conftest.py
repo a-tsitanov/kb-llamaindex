@@ -22,4 +22,3 @@ try:
 except ImportError:
     pass
 
-import pytest

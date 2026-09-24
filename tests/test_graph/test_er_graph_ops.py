@@ -108,12 +108,6 @@ def _graph_half(ops):
     return ops._graph if isinstance(ops, ego._CompositeERGraphOps) else ops
 
 
-def test_dispatch_returns_neo4j_when_backend_not_nebula(monkeypatch):
-    monkeypatch.setattr(ego.settings.graph, "backend", "neo4j")
-    ops = ego.build_er_graph_ops(_RecStore())
-    assert isinstance(_graph_half(ops), ego.Neo4jERGraphOps)
-
-
 def test_dispatch_returns_nebula_when_backend_nebula(monkeypatch):
     monkeypatch.setattr(ego.settings.graph, "backend", "nebula")
     ops = ego.build_er_graph_ops(_RecStore())

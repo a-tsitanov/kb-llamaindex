@@ -38,11 +38,6 @@ def test_neo4j_read_summaries_issues_exact_cypher_and_returns_rows_verbatim():
     assert rows == canned  # verbatim rows, not mutated
 
 
-def test_dispatch_returns_neo4j_when_backend_not_nebula(monkeypatch):
-    monkeypatch.setattr(cr.settings.graph, "backend", "neo4j")
-    assert isinstance(cr.build_community_read(_RecStore()), cr.Neo4jCommunityRead)
-
-
 def test_dispatch_returns_nebula_when_backend_nebula(monkeypatch):
     monkeypatch.setattr(cr.settings.graph, "backend", "nebula")
     assert isinstance(cr.build_community_read(_RecNebula()), cr.NebulaCommunityRead)

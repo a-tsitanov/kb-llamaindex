@@ -152,11 +152,6 @@ def test_nebula_fail_soft_returns_empty_on_raise():
 # --- Dispatch ------------------------------------------------------------
 
 
-def test_dispatch_neo4j_default(monkeypatch):
-    monkeypatch.setattr(qgo.settings.graph, "backend", "neo4j")
-    assert isinstance(qgo.build_quality_graph_ops(_RecStore()), qgo.Neo4jQualityGraphOps)
-
-
 def test_dispatch_nebula(monkeypatch):
     monkeypatch.setattr(qgo.settings.graph, "backend", "nebula")
     assert isinstance(qgo.build_quality_graph_ops(_NebulaRecStore()), qgo.NebulaQualityGraphOps)

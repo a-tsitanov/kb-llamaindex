@@ -109,11 +109,6 @@ def test_nebula_fail_soft():
 # --- Dispatch ------------------------------------------------------------
 
 
-def test_dispatch_neo4j_default(monkeypatch):
-    monkeypatch.setattr(cgo.settings.graph, "backend", "neo4j")
-    assert isinstance(cgo.build_communities_graph_ops(_RecStore()), cgo.Neo4jCommunitiesGraphOps)
-
-
 def test_dispatch_nebula(monkeypatch):
     monkeypatch.setattr(cgo.settings.graph, "backend", "nebula")
     assert isinstance(

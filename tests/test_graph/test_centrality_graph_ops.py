@@ -83,7 +83,5 @@ def test_nebula_fail_soft():
 
 
 def test_dispatch(monkeypatch):
-    monkeypatch.setattr(cgo.settings.graph, "backend", "neo4j")
-    assert isinstance(cgo.build_centrality_graph_ops(_RecStore()), cgo.Neo4jCentralityGraphOps)
     monkeypatch.setattr(cgo.settings.graph, "backend", "nebula")
     assert isinstance(cgo.build_centrality_graph_ops(_NebulaRecStore()), cgo.NebulaCentralityGraphOps)

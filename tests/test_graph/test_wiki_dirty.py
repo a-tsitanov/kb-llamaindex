@@ -42,17 +42,20 @@ def test_clear_dirty_routes_through_seam(monkeypatch):
     ops.clear_dirty.assert_called_once_with("A", "deadbeef")
 
 
-# --- neo4j default path: the seam issues the historical Cypher (Task 2's
-# byte-for-byte guard lives in tests/test_graph/test_wiki_graph_ops.py; this
-# just confirms a real, undispatched call reaches it). ---------------------
+# --- default (nebula) path: the seam issues the nGQL update (the per-backend
+# guard lives in tests/test_graph/test_wiki_graph_ops.py; this just confirms
+# a real, undispatched call reaches it). -----------------------------------
 
 
-def test_mark_dirty_neo4j_default_reaches_store():
+def test_mark_dirty_default_reaches_store():
+    from src.graph.nebula_store import entity_vid
+
     store = MagicMock()
     mark_dirty(store, ["A", "B"])
-    args, kwargs = store.structured_query.call_args
-    assert kwargs["param_map"]["names"] == ["A", "B"]
-    assert "wiki_dirty = true" in args[0]
+    stmts = [c.args[0] for c in store.structured_query.call_args_list]
+    assert len(stmts) == 2
+    assert entity_vid("A") in stmts[0] and entity_vid("B") in stmts[1]
+    assert all("wiki_dirty = true" in s for s in stmts)
 
 
 def test_mark_dirty_noop_on_empty():

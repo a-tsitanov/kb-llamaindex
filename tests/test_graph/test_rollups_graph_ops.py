@@ -67,11 +67,6 @@ def test_nebula_fail_soft():
     assert rgo.NebulaRollupsGraphOps(_NebulaRaisingStore()).amount_edges(None) == []
 
 
-def test_dispatch_neo4j_default(monkeypatch):
-    monkeypatch.setattr(rgo.settings.graph, "backend", "neo4j")
-    assert isinstance(rgo.build_rollups_graph_ops(_RecStore()), rgo.Neo4jRollupsGraphOps)
-
-
 def test_dispatch_nebula(monkeypatch):
     monkeypatch.setattr(rgo.settings.graph, "backend", "nebula")
     assert isinstance(rgo.build_rollups_graph_ops(_NebulaRecStore()), rgo.NebulaRollupsGraphOps)

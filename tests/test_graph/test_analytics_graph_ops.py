@@ -309,11 +309,6 @@ def test_neo4j_fail_soft_logs_warning(monkeypatch):
 # --- Dispatch ------------------------------------------------------------
 
 
-def test_dispatch_returns_neo4j_when_backend_not_nebula(monkeypatch):
-    monkeypatch.setattr(ago.settings.graph, "backend", "neo4j")
-    assert isinstance(ago.build_analytics_graph_ops(_RecStore()), ago.Neo4jAnalyticsGraphOps)
-
-
 def test_dispatch_returns_nebula_when_backend_nebula(monkeypatch):
     monkeypatch.setattr(ago.settings.graph, "backend", "nebula")
     assert isinstance(ago.build_analytics_graph_ops(_RecStore()), ago.NebulaAnalyticsGraphOps)

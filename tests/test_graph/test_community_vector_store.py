@@ -29,11 +29,6 @@ def test_neo4j_upsert_is_noop():
 
 
 def test_factory_dispatches(monkeypatch):
-    monkeypatch.setattr(cvs.settings.graph, "backend", "neo4j", raising=False)
-    monkeypatch.setattr(cvs.settings.agent, "community_vector_backend", "native", raising=False)
-    assert isinstance(cvs.build_community_report_vector_store(_FakeGraphStore([])),
-                      cvs.Neo4jCommunityReportVectorStore)
-
     # nebula -> Milvus impl. Patch the class (which the factory lazily
     # imports) to a sentinel so dispatch is verified DB-free — the real
     # MilvusCommunityReportVectorStore constructor connects a MilvusClient
@@ -42,9 +37,4 @@ def test_factory_dispatches(monkeypatch):
     sentinel = object()
     monkeypatch.setattr(cvsm, "MilvusCommunityReportVectorStore", lambda *a, **k: sentinel)
     monkeypatch.setattr(cvs.settings.graph, "backend", "nebula", raising=False)
-    assert cvs.build_community_report_vector_store(_FakeGraphStore([])) is sentinel
-
-    # opt-in flag on the neo4j backend also routes to Milvus.
-    monkeypatch.setattr(cvs.settings.graph, "backend", "neo4j", raising=False)
-    monkeypatch.setattr(cvs.settings.agent, "community_vector_backend", "milvus", raising=False)
     assert cvs.build_community_report_vector_store(_FakeGraphStore([])) is sentinel

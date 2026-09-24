@@ -1,18 +1,11 @@
-"""Tests for the full-text entity-name lookup helpers."""
+"""Tests for the entity-name lookup helper (``afind_entities_by_name``).
+
+Row mapping / query shape under nebula live in
+tests/test_retrieval/test_nebula_read_slice.py; this file keeps the
+backend-agnostic blank-input + fail-open contract.
+"""
 
 from __future__ import annotations
-
-
-def test_build_fulltext_query_or_tokens_escaped():
-    from src.graph.retriever import build_fulltext_query
-
-    assert build_fulltext_query("Иванов Иван") == "Иванов OR Иван"
-    # Lucene special chars are escaped per token.
-    assert build_fulltext_query("a:b (x)") == r"a\:b OR \(x\)"
-    # Blank input → empty query (caller short-circuits).
-    assert build_fulltext_query("   ") == ""
-    assert build_fulltext_query("") == ""
-
 
 import pytest
 
@@ -23,10 +16,10 @@ class _StubStore:
         self._raise = raise_
         self.last = None
 
-    def structured_query(self, cypher, params):
-        self.last = (cypher, params)
+    def structured_query(self, query, param_map=None):
+        self.last = (query, param_map)
         if self._raise:
-            raise RuntimeError("no fulltext index")
+            raise RuntimeError("entity name lookup failed")
         return self._rows
 
 
@@ -36,18 +29,6 @@ def _retriever(store):
     r._graph_store = store
     r._similarity_top_k = 10
     return r
-
-
-@pytest.mark.asyncio
-async def test_afind_entities_by_name_maps_rows():
-    store = _StubStore(rows=[
-        {"name": "Иванов Иван Иванович", "labels": ["Person"], "description": "д."},
-        {"name": "", "labels": [], "description": ""},  # skipped (no name)
-    ])
-    data = await _retriever(store).afind_entities_by_name("Иванов", limit=5)
-    assert [e["entity_name"] for e in data.entities] == ["Иванов Иван Иванович"]
-    assert data.entities[0]["entity_type"] == "Person"
-    assert store.last[1] == {"lucene": "Иванов", "limit": 5}
 
 
 @pytest.mark.asyncio

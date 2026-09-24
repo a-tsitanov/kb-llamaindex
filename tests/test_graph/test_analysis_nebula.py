@@ -242,15 +242,6 @@ async def test_refresh_stats_submits_the_job(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_refresh_stats_is_a_noop_off_nebula(monkeypatch):
-    monkeypatch.setattr("src.graph.analysis.settings.graph.backend", "neo4j", raising=False)
-    store = _FakeNebulaStore([])
-    out = await analysis.refresh_nebula_stats(store)
-    assert out["submitted"] is False
-    assert store.calls == []
-
-
-@pytest.mark.asyncio
 async def test_refresh_stats_fails_soft(monkeypatch):
     """A maintenance trigger must not 500 the admin route."""
     monkeypatch.setattr("src.graph.analysis.settings.graph.backend", "nebula", raising=False)

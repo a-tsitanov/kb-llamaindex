@@ -270,11 +270,6 @@ def test_nebula_fail_soft_returns_empty_on_raise():
 # --- Dispatch ------------------------------------------------------------
 
 
-def test_dispatch_returns_neo4j_when_backend_not_nebula(monkeypatch):
-    monkeypatch.setattr(ago.settings.graph, "backend", "neo4j")
-    assert isinstance(ago.build_aggregations_graph_ops(_RecStore()), ago.Neo4jAggregationsGraphOps)
-
-
 def test_dispatch_returns_nebula_when_backend_nebula(monkeypatch):
     monkeypatch.setattr(ago.settings.graph, "backend", "nebula")
     assert isinstance(

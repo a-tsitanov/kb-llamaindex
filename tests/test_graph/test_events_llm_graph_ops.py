@@ -203,11 +203,6 @@ def test_nebula_trending_empty_when_no_events():
 # --- Dispatch ------------------------------------------------------------
 
 
-def test_dispatch_neo4j_default(monkeypatch):
-    monkeypatch.setattr(ego.settings.graph, "backend", "neo4j")
-    assert isinstance(ego.build_events_llm_graph_ops(_RecStore()), ego.Neo4jEventsLlmGraphOps)
-
-
 def test_dispatch_nebula(monkeypatch):
     monkeypatch.setattr(ego.settings.graph, "backend", "nebula")
     assert isinstance(ego.build_events_llm_graph_ops(_NebulaRecStore()), ego.NebulaEventsLlmGraphOps)

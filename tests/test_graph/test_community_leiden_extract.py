@@ -1,109 +1,77 @@
 from __future__ import annotations
 
+import re
 from typing import ClassVar
 
 import src.graph.community_leiden as community_leiden
 from src.graph.community_leiden import extract_entity_edges
+from src.graph.nebula_store import entity_vid
+
+_AFTER = re.compile(r'`Entity`\.name > "([^"]*)"')
+_LIMIT = re.compile(r"LIMIT (\d+)")
+_VIDS = re.compile(r'"([0-9a-f]+)"')
 
 
-class _FakeStore:
-    """Returns one page of node rows, then one page of edge rows, then empties."""
+class _FakeNebula:
+    """Answers the nGQL the nebula ``GraphEdgeExport`` issues:
 
-    def __init__(self):
-        self.calls = 0
+    * ``LOOKUP ON `Entity` WHERE `Entity`.name > "<after>" ... | LIMIT n`` →
+      the next keyset page of ``names`` (sorted, strictly after ``after``);
+    * ``GO FROM "<vid>", ... OVER `RELATED` ...`` → every edge whose source
+      vid is listed, as ``{s, d, w}`` rows.
+    """
 
-    def structured_query(self, cypher, param_map=None):
-        param_map = param_map or {}
-        if "RETURN e.name AS name" in cypher:           # node page
-            if param_map.get("after") in (None, ""):
-                return [{"name": "A"}, {"name": "B"}, {"name": "C"}]
-            return []
-        # edge page
-        if param_map.get("after") in (None, ""):
+    def __init__(self, names: list[str], edges: list[tuple[str, str, float]]):
+        self._names = sorted(names)
+        self._edges = edges
+        self.stmts: list[str] = []
+
+    def structured_query(self, query, param_map=None):
+        assert not param_map, "nebula read must inline values"
+        self.stmts.append(query)
+        if query.startswith("LOOKUP ON `Entity`"):
+            after = _AFTER.search(query).group(1)
+            limit = int(_LIMIT.search(query).group(1))
+            return [{"name": n} for n in self._names if n > after][:limit]
+        if query.startswith("GO FROM"):
+            listed = set(_VIDS.findall(query.split(" OVER ")[0]))
             return [
-                {"src": "A", "tgt": "B", "weight": 2.0},
-                {"src": "B", "tgt": "C", "weight": 1.0},
+                {"s": entity_vid(s), "d": entity_vid(d), "w": w}
+                for s, d, w in self._edges if entity_vid(s) in listed
             ]
         return []
 
 
 def test_extract_returns_edges_and_all_node_names():
-    edges, nodes = extract_entity_edges(_FakeStore(), batch_size=10)
+    store = _FakeNebula(
+        names=["A", "B", "C"],
+        edges=[("A", "B", 2.0), ("B", "C", 1.0)],
+    )
+    edges, nodes = extract_entity_edges(store, batch_size=10)
     assert ("A", "B", 2.0) in edges
     assert ("B", "C", 1.0) in edges
     assert set(nodes) == {"A", "B", "C"}      # includes isolated entities
 
 
-class _FakeStoreNullCursor:
-    """Edge page whose last row carries a null cursor — would loop forever under old code.
+class _FakeNebulaHighDegreeSource(_FakeNebula):
+    """Source node 'A' has 4 outgoing edges; batch_size=2 forces 3 name pages
+    and 3 GO chunks.  Every edge from 'A' must survive the paging."""
 
-    The store is rigged to return the SAME non-empty page every time ``after``
-    is unchanged (i.e. still ``""``), so the old code would spin indefinitely.
-    The fixed code must detect that ``last_cursor`` is None (not > after) and break.
-    """
-
-    def structured_query(self, cypher, param_map=None):
-        param_map = param_map or {}
-        if "RETURN e.name AS name" in cypher:           # node page — single batch
-            if param_map.get("after") in (None, ""):
-                return [{"name": "X"}]
-            return []
-        # edge page: always return the same page with a null cursor on the last row
-        # Under the old code this would never advance `after`, looping forever.
-        return [
-            {"src": "X", "tgt": "X", "weight": 1.0, "cursor": "X"},
-            {"src": "X", "tgt": "X", "weight": 1.0, "cursor": None},
-        ]
-
-
-def test_edge_loop_terminates_when_last_cursor_is_null():
-    """Regression: extract_entity_edges must not hang when last cursor is falsy."""
-    edges, nodes = extract_entity_edges(_FakeStoreNullCursor(), batch_size=10)
-    # Just assert it returned — if it hung, pytest would time out.
-    assert isinstance(edges, list)
-    assert isinstance(nodes, list)
-
-
-class _FakeStoreHighDegreeSource:
-    """Source node 'A' has 4 outgoing edges; batch_size=2 forces 2 pages.
-
-    Under the old s.name cursor, the second page would use ``WHERE s.name > 'A'``
-    and skip all remaining 'A' edges — silently dropping half the graph.
-    Under the fixed elementId(r) cursor each page advances to the last
-    relationship id, so all edges are collected.
-    """
-
-    # All edges from A with unique relationship element ids.
-    _ALL_EDGES: ClassVar[list[dict]] = [
-        {"src": "A", "tgt": "B", "weight": 1.0, "cursor": "r1"},
-        {"src": "A", "tgt": "C", "weight": 1.0, "cursor": "r2"},
-        {"src": "A", "tgt": "D", "weight": 1.0, "cursor": "r3"},
-        {"src": "A", "tgt": "E", "weight": 1.0, "cursor": "r4"},
+    _ALL_EDGES: ClassVar[list[tuple[str, str, float]]] = [
+        ("A", "B", 1.0), ("A", "C", 1.0), ("A", "D", 1.0), ("A", "E", 1.0),
     ]
 
-    def structured_query(self, cypher, param_map=None):
-        param_map = param_map or {}
-        if "RETURN e.name AS name" in cypher:
-            after = param_map.get("after", "")
-            if after in (None, ""):
-                return [{"name": "A"}, {"name": "B"}, {"name": "C"},
-                        {"name": "D"}, {"name": "E"}]
-            return []
-        # Edge page: return edges whose cursor > after, sliced to batch_size.
-        after = param_map.get("after", "") or ""
-        limit = param_map.get("limit", 10)
-        remaining = [e for e in self._ALL_EDGES if e["cursor"] > after]
-        return remaining[:limit]
+    def __init__(self):
+        super().__init__(names=["A", "B", "C", "D", "E"], edges=self._ALL_EDGES)
 
 
 def test_high_degree_source_no_edges_dropped():
     """Regression: all edges from a high-degree source must survive multi-page reads.
 
-    With batch_size=2 and 4 edges from 'A', the old s.name cursor would drop
-    A->C, A->D, A->E on the second page (WHERE s.name > 'A' skips them).
-    The fixed elementId(r) cursor collects all 4 edges across 2 pages.
+    With batch_size=2 and 4 edges from 'A', paging must not drop any of
+    A->B..A->E.
     """
-    edges, _nodes = extract_entity_edges(_FakeStoreHighDegreeSource(), batch_size=2)
+    edges, _nodes = extract_entity_edges(_FakeNebulaHighDegreeSource(), batch_size=2)
     targets = {tgt for src, tgt, _ in edges if src == "A"}
     assert targets == {"B", "C", "D", "E"}, (
         f"Expected all 4 targets of 'A', got: {targets}"

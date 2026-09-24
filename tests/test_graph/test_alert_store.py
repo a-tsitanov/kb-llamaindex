@@ -142,11 +142,6 @@ def test_nebula_mark_watched_updates_each_entity():
 # --- Dispatch ------------------------------------------------------------
 
 
-def test_dispatch_neo4j_default(monkeypatch):
-    monkeypatch.setattr(als.settings.graph, "backend", "neo4j")
-    assert isinstance(als.build_alert_store(_RecStore()), als.Neo4jAlertStore)
-
-
 def test_dispatch_nebula(monkeypatch):
     monkeypatch.setattr(als.settings.graph, "backend", "nebula")
     assert isinstance(als.build_alert_store(_NebulaRecStore()), als.NebulaAlertStore)
