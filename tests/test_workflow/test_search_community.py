@@ -12,10 +12,14 @@ Temporal) — same pattern as the other search-activity tests.  We cover:
 
 from __future__ import annotations
 
+import json
+import re
 from unittest.mock import MagicMock
 
 import pytest
 
+from src.graph.community_writeback import community_vid
+from src.graph.nebula_store import _q
 from src.workflow.contracts import (
     DetectCommunitiesResult,
     DetectedCommunity,
@@ -45,6 +49,110 @@ class _FakeStore:
         if "RETURN" in cypher and "description" in cypher:
             return self._member_rows
         return []
+
+
+class _NebulaStmtStore:
+    """nGQL fake keyed on the EXACT statements the nebula seam issues.
+
+    ``responses`` maps a full statement to its canned rows; an unknown
+    statement answers ``[]`` (a legitimately empty read) and is still
+    recorded in ``calls``.  Nebula binds no parameters, so a non-empty
+    ``param_map`` is a test failure."""
+
+    def __init__(self, responses=None):
+        self._responses = dict(responses or {})
+        self.calls: list[str] = []
+
+    def structured_query(self, query, param_map=None):
+        assert not param_map, f"nebula binds no params, got {param_map!r}"
+        self.calls.append(query)
+        return list(self._responses.get(query, []))
+
+
+def _member_go(community_id, level):
+    return (
+        f"GO FROM {_q(community_vid(community_id, level))} OVER `IN_COMMUNITY` "
+        "REVERSELY YIELD src(edge) AS m;"
+    )
+
+
+def _child_go(community_id, level):
+    return (
+        f"GO FROM {_q(community_vid(community_id, level))} OVER `PARENT_OF` "
+        "YIELD dst(edge) AS child;"
+    )
+
+
+def _summ_store(community_id, level, *, members=(), children=()):
+    """Nebula store answering ``NebulaCommunitySummarize``'s reads.
+
+    ``members``: ``{"name","description"}`` rows reached via
+    ``IN_COMMUNITY REVERSELY`` + ``FETCH PROP ON Entity``; ``children``:
+    ``{"title","summary"}`` reports reached via ``PARENT_OF`` +
+    ``FETCH PROP ON Community`` (each carries a non-empty ``report``)."""
+    responses: dict[str, list[dict]] = {}
+    mvids = [f"m{i}" for i in range(len(members))]
+    if mvids:
+        listed = ", ".join(_q(v) for v in mvids)
+        responses[_member_go(community_id, level)] = [{"m": v} for v in mvids]
+        responses[
+            f"FETCH PROP ON `Entity` {listed} YIELD id(vertex) AS vid, "
+            "`Entity`.name AS name, `Entity`.description AS description;"
+        ] = [{"vid": v, **m} for v, m in zip(mvids, members, strict=True)]
+    cvids = [f"c{i}" for i in range(len(children))]
+    if cvids:
+        listed = ", ".join(_q(v) for v in cvids)
+        responses[_child_go(community_id, level)] = [{"child": v} for v in cvids]
+        responses[
+            f"FETCH PROP ON `Community` {listed} YIELD "
+            "`Community`.title AS title, `Community`.summary AS summary, "
+            "`Community`.report AS report, `Community`.member_count AS mc;"
+        ] = [
+            {**c, "report": "{}", "mc": len(children) - i}
+            for i, c in enumerate(children)
+        ]
+    return _NebulaStmtStore(responses)
+
+
+_UPDATE_RE = re.compile(
+    r'^UPDATE VERTEX ON `Community` "(?P<vid>[0-9a-f]+)" SET '
+    r'report = (?P<report>"(?:[^"\\]|\\.)*"), '
+    r'title = (?P<title>"(?:[^"\\]|\\.)*"), '
+    r'summary = (?P<summary>"(?:[^"\\]|\\.)*"), '
+    r"summarized_at = (?P<ts>\d+);$"
+)
+
+
+def _report_write(store, community_id, level):
+    """The report write the nebula summarize issued for ONE community, as a
+    field dict (string literals decoded — ``_q`` escaping is JSON-compatible),
+    or ``None`` when no such ``UPDATE VERTEX`` was issued."""
+    vid = community_vid(community_id, level)
+    for stmt in store.calls:
+        m = _UPDATE_RE.match(stmt)
+        if m and m["vid"] == vid:
+            return {
+                "community_id": community_id,
+                "report": json.loads(m["report"]),
+                "title": json.loads(m["title"]),
+                "summary": json.loads(m["summary"]),
+                "statement": stmt,
+            }
+    return None
+
+
+class _RecReportStore:
+    """Milvus report-vec store fake: records ``upsert``s (the nebula home of
+    ``report_vec`` — it is never written to the graph vertex)."""
+
+    def __init__(self):
+        self.upserts: list[list[dict]] = []
+
+    def knn(self, query_vec, *, level, limit):
+        raise AssertionError("the WRITE path must never knn")
+
+    def upsert(self, reports):
+        self.upserts.append(reports)
 
 
 class _FakeEmbed:
@@ -97,14 +205,24 @@ def _stub_activity_ctx(monkeypatch):
     # Default embed stub so the activity never builds a real embedding
     # model in unit tests (individual tests may override).
     monkeypatch.setattr(community_mod, "_get_embed_model", lambda: _FakeEmbed())
+    # Default inert report-vec store so no test reaches a real Milvus
+    # (individual tests may override with their own recorder).
+    monkeypatch.setattr(
+        community_mod, "build_community_report_vector_store",
+        lambda s: _RecReportStore(),
+    )
 
 
 @pytest.mark.asyncio
 async def test_summarize_produces_report_and_persists(monkeypatch):
-    store = _FakeStore(member_rows=[
+    store = _summ_store("2", 0, members=[
         {"name": "Ромашка", "description": "Поставщик материалов."},
         {"name": "СтройИнвест", "description": "Подрядчик."},
     ])
+    report_store = _RecReportStore()
+    monkeypatch.setattr(
+        community_mod, "build_community_report_vector_store", lambda s: report_store,
+    )
     llm = _FakeLLM(_report_json(
         title="Строительные компании",
         summary="Группа строительных компаний.",
@@ -127,15 +245,15 @@ async def test_summarize_produces_report_and_persists(monkeypatch):
     # title + summary were embedded.
     assert "Строительные компании" in (embed.seen_text or "")
     assert "Группа строительных компаний." in (embed.seen_text or "")
-    # The report MERGE was issued with report/title/summary/report_vec.
-    write = next(
-        (pm for c, pm in store.calls if "report" in c and "MERGE" in c), None
-    )
+    # The report write was issued with report/title/summary; on nebula the
+    # report_vec goes to the Milvus report-vec store, not the vertex.
+    write = _report_write(store, "2", 0)
     assert write is not None
     assert write["community_id"] == "2"
     assert write["title"] == "Строительные компании"
     assert write["summary"] == "Группа строительных компаний."
-    assert isinstance(write["report_vec"], list)
+    [vec_report] = report_store.upserts[0]
+    assert isinstance(vec_report["embedding"], list)
     import json as _json
     parsed = _json.loads(write["report"])
     assert parsed["findings"][0]["importance"] == 90
@@ -143,9 +261,10 @@ async def test_summarize_produces_report_and_persists(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_summarize_level_gt0_uses_child_reports(monkeypatch):
-    store = _FakeStore(
-        member_rows=[{"name": "X", "description": "y"}],
-        child_rows=[
+    store = _summ_store(
+        "7", 1,
+        members=[{"name": "X", "description": "y"}],
+        children=[
             {"title": "Дочернее A", "summary": "Сводка A."},
             {"title": "Дочернее B", "summary": "Сводка B."},
         ],
@@ -163,15 +282,16 @@ async def test_summarize_level_gt0_uses_child_reports(monkeypatch):
     assert "Дочернее A" in (llm.seen_prompt or "")
     assert "Дочерние сообщества" in (llm.seen_prompt or "")
     # The PARENT_OF child-report query was issued.
-    assert any("PARENT_OF" in c for c, _ in store.calls)
+    assert _child_go("7", 1) in store.calls
 
 
 @pytest.mark.asyncio
 async def test_summarize_level_gt0_falls_back_to_members(monkeypatch):
     # No child reports yet → must fall back to member context.
-    store = _FakeStore(
-        member_rows=[{"name": "Альфа", "description": "Описание."}],
-        child_rows=[],
+    store = _summ_store(
+        "7", 1,
+        members=[{"name": "Альфа", "description": "Описание."}],
+        children=[],
     )
     llm = _FakeLLM()
     monkeypatch.setattr(community_mod, "_get_store", lambda: store)
@@ -187,7 +307,11 @@ async def test_summarize_level_gt0_falls_back_to_members(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_summarize_persists_without_vec_on_embed_failure(monkeypatch):
-    store = _FakeStore(member_rows=[{"name": "A", "description": "x"}])
+    store = _summ_store("3", 0, members=[{"name": "A", "description": "x"}])
+    report_store = _RecReportStore()
+    monkeypatch.setattr(
+        community_mod, "build_community_report_vector_store", lambda s: report_store,
+    )
     monkeypatch.setattr(community_mod, "_get_store", lambda: store)
     monkeypatch.setattr(community_mod, "_get_summary_llm", lambda: _FakeLLM())
 
@@ -201,11 +325,11 @@ async def test_summarize_persists_without_vec_on_embed_failure(monkeypatch):
         community_id="3", level=0, member_count=2,
     ))
     assert out.persisted is True
-    write = next(
-        (pm for c, pm in store.calls if "report" in c and "MERGE" in c), None
-    )
+    write = _report_write(store, "3", 0)
     assert write is not None
-    assert write["report_vec"] is None
+    # no vector anywhere: never on the vertex, and no Milvus upsert.
+    assert "report_vec" not in write["statement"]
+    assert report_store.upserts == []
 
 
 class _FakeReportStore:
@@ -333,7 +457,7 @@ async def test_summarize_map_reduce_on_large_member_context(monkeypatch):
     # proving a huge root community never sends ONE oversized prompt.
     monkeypatch.setattr(community_mod, "_CONTEXT_CHAR_BUDGET", 60)
     members = [{"name": f"E{i}", "description": "d" * 50} for i in range(6)]
-    store = _FakeStore(member_rows=members)
+    store = _summ_store("0", 0, members=members)
     llm = _FakeLLM(_report_json(title="Итог", summary="Сводная сводка."))
     monkeypatch.setattr(community_mod, "_get_store", lambda: store)
     monkeypatch.setattr(community_mod, "_get_summary_llm", lambda: llm)
@@ -423,24 +547,24 @@ async def test_detect_activity_strips_members_from_result(monkeypatch):
 async def test_summarize_reads_members_from_graph_by_community_id(monkeypatch):
     """summarize reads its members from Neo4j keyed by community_id (via
     IN_COMMUNITY) — NOT from a member-name list in the params payload."""
-    store = _FakeStore(member_rows=[
+    store = _summ_store("2", 0, members=[
         {"name": "Ромашка", "description": "Поставщик."},
     ])
+    llm = _FakeLLM()
     monkeypatch.setattr(community_mod, "_get_store", lambda: store)
-    monkeypatch.setattr(community_mod, "_get_summary_llm", lambda: _FakeLLM())
+    monkeypatch.setattr(community_mod, "_get_summary_llm", lambda: llm)
 
     out = await summarize_community_activity(
         SummarizeCommunityParams(community_id="2", level=0, member_count=1))
 
     assert out.persisted is True
-    member_call = next(
-        (pm for c, pm in store.calls
-         if "IN_COMMUNITY" in c and "description" in c),
-        None,
-    )
+    # members resolved from the graph keyed by community_id "2" (its vid,
+    # via IN_COMMUNITY) — the statement carries no member-name list.
+    member_call = next((c for c in store.calls if c == _member_go("2", 0)), None)
     assert member_call is not None, "member context query not issued"
-    assert member_call.get("community_id") == "2"
-    assert "members" not in member_call  # keyed by id, not by a name list
+    assert community_vid("2", 0) in member_call
+    assert "Ромашка" not in member_call  # keyed by id, not by a name list
+    assert "Ромашка" in (llm.seen_prompt or "")
 
 
 @pytest.mark.asyncio

@@ -30,8 +30,9 @@ def _fake_merged():
 
 @pytest.mark.asyncio
 async def test_disabled_returns_skipped(monkeypatch):
-    from src.config import settings
-    from src.workflow.activities.push_wikibase import push_wikibase
+    # the module's OWN settings binding: test_llm_factory reloads src.config,
+    # so src.config.settings may no longer be the object push_wikibase reads.
+    from src.workflow.activities.push_wikibase import push_wikibase, settings
 
     monkeypatch.setattr(settings.wikibase, "enabled", False, raising=False)
 
@@ -52,8 +53,9 @@ async def test_disabled_returns_skipped(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_happy_path_runs_push_entities(monkeypatch):
-    from src.config import settings
-    from src.workflow.activities.push_wikibase import push_wikibase
+    # the module's OWN settings binding: test_llm_factory reloads src.config,
+    # so src.config.settings may no longer be the object push_wikibase reads.
+    from src.workflow.activities.push_wikibase import push_wikibase, settings
 
     monkeypatch.setattr(settings.wikibase, "enabled", True, raising=False)
 
@@ -112,8 +114,9 @@ async def test_zero_counters_marked_failed_not_ok(monkeypatch):
     object so every per-owner create_item raised, push_entities's
     inner try/except swallowed each, top-level returned all zeros).
     """
-    from src.config import settings
-    from src.workflow.activities.push_wikibase import push_wikibase
+    # the module's OWN settings binding: test_llm_factory reloads src.config,
+    # so src.config.settings may no longer be the object push_wikibase reads.
+    from src.workflow.activities.push_wikibase import push_wikibase, settings
 
     monkeypatch.setattr(settings.wikibase, "enabled", True, raising=False)
 
@@ -164,8 +167,9 @@ async def test_zero_counters_marked_failed_not_ok(monkeypatch):
 async def test_empty_input_returns_ok(monkeypatch):
     """An ingest with no entities to push (empty merged blob) IS a
     valid no-op — status="ok" with all zeros is honest here."""
-    from src.config import settings
-    from src.workflow.activities.push_wikibase import push_wikibase
+    # the module's OWN settings binding: test_llm_factory reloads src.config,
+    # so src.config.settings may no longer be the object push_wikibase reads.
+    from src.workflow.activities.push_wikibase import push_wikibase, settings
 
     monkeypatch.setattr(settings.wikibase, "enabled", True, raising=False)
 
@@ -219,7 +223,10 @@ async def test_heartbeats_pulse_during_push_entities(monkeypatch):
     from temporalio.testing import ActivityEnvironment
 
     import src.workflow.activities.push_wikibase  # noqa: F401  (ensure import)
-    from src.config import settings
+
+    # the module's OWN settings binding: test_llm_factory reloads src.config,
+    # so src.config.settings may no longer be the object push_wikibase reads.
+    from src.workflow.activities.push_wikibase import settings
 
     # The activities package __init__ rebinds the name ``push_wikibase`` to
     # the *function*, shadowing the submodule attribute — so reach the real
@@ -271,8 +278,9 @@ async def test_heartbeats_pulse_during_push_entities(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_exception_returns_failed_not_raise(monkeypatch):
-    from src.config import settings
-    from src.workflow.activities.push_wikibase import push_wikibase
+    # the module's OWN settings binding: test_llm_factory reloads src.config,
+    # so src.config.settings may no longer be the object push_wikibase reads.
+    from src.workflow.activities.push_wikibase import push_wikibase, settings
 
     monkeypatch.setattr(settings.wikibase, "enabled", True, raising=False)
 

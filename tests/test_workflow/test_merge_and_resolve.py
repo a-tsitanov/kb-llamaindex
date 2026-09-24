@@ -98,6 +98,12 @@ async def test_runs_er_when_enabled():
         "src.workflow.activities.merge_and_resolve.build_graph_store",
         return_value=MagicMock(),
     ), patch(
+        # nebula routes ER candidate-kNN through the Milvus entity-vector
+        # store (imported at call time from its module) — fake it so no
+        # Milvus connection is attempted.
+        "src.graph.entity_vector_store.build_entity_vector_store",
+        return_value=MagicMock(),
+    ), patch(
         "src.workflow.activities.merge_and_resolve.merge_kg_extraction",
         new=AsyncMock(return_value=(merged_entities, merged_relations)),
     ), patch(

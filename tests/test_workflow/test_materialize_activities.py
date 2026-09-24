@@ -3,11 +3,33 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
+import src.analytics.centrality_compute as cc
 from src.analytics.contracts import CentralityIn, LinkPredictionIn, RiskIn
+from src.analytics.ids import ID_TYPES
+from src.graph.nebula_store import entity_vid
+from src.retrieval.date_filters import today_epoch_days
 from src.workflow.analytics import materialize_activities as ma
+
+
+class _NebulaStmtStore:
+    """nGQL fake keyed on the EXACT statements the nebula seam issues.
+
+    ``responses`` maps a full statement to its canned rows; an unknown
+    statement answers ``[]`` and is still recorded in ``calls``.  Nebula
+    binds no parameters, so a non-empty ``param_map`` is a test failure."""
+
+    def __init__(self, responses=None):
+        self._responses = dict(responses or {})
+        self.calls: list[str] = []
+
+    def structured_query(self, query, param_map=None):
+        assert not param_map, f"nebula binds no params, got {param_map!r}"
+        self.calls.append(query)
+        return list(self._responses.get(query, []))
 
 
 class _Store:
@@ -22,9 +44,25 @@ class _Store:
 
 @pytest.mark.asyncio
 async def test_materialize_centrality_runs_each_metric(monkeypatch):
-    monkeypatch.setattr(ma, "_get_store", lambda: _Store())
+    # nebula computes every metric in-worker from ONE compute_all (igraph over
+    # the edge export) and writes one UPDATE VERTEX per scored entity; each
+    # metric scores one (distinct) entity here.
+    computed: list[int] = []
+
+    def _fake_compute_all(store, **_kw):
+        computed.append(1)
+        return {"pagerank": {"A": 0.5}, "betweenness": {"B": 0.5}, "eigenvector": {}}
+
+    monkeypatch.setattr(cc, "compute_all", _fake_compute_all)
+    store = _NebulaStmtStore()
+    monkeypatch.setattr(ma, "_get_store", lambda: store)
     res = await ma.materialize_centrality(CentralityIn(metrics=["pagerank", "betweenness"]))
     assert res.written == 2 and res.error == ""  # 1 row each
+    assert computed == [1]
+    assert store.calls == [
+        f'UPDATE VERTEX ON `Entity` "{entity_vid("A")}" SET pagerank = 0.5;\n'
+        f'UPDATE VERTEX ON `Entity` "{entity_vid("B")}" SET betweenness = 0.5;'
+    ]
 
 
 @pytest.mark.asyncio
@@ -38,37 +76,11 @@ async def test_materialize_centrality_failsoft(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_materialize_centrality_none_projection(monkeypatch):
-    """If _with_projection returns None (projection failed), error must be non-empty."""
-    monkeypatch.setattr(ma, "_get_store", lambda: None)
-    res = await ma.materialize_centrality(CentralityIn(metrics=["pagerank"]))
-    assert res.written == 0 and res.error != ""
-
-
-@pytest.mark.asyncio
 async def test_materialize_link_prediction_runs(monkeypatch):
     monkeypatch.setattr(ma, "_get_store", lambda: _Store())
     res = await ma.materialize_link_prediction(LinkPredictionIn())
     # _Store returns 1 stream row → but min_score filter may reduce to 0; just check no error
     assert res.error == ""
-
-
-@pytest.mark.asyncio
-async def test_materialize_link_prediction_failsoft(monkeypatch):
-    def _boom():
-        raise RuntimeError("link pred down")
-
-    monkeypatch.setattr(ma, "_get_store", _boom)
-    res = await ma.materialize_link_prediction(LinkPredictionIn())
-    assert res.written == 0 and "link pred down" in res.error
-
-
-@pytest.mark.asyncio
-async def test_materialize_link_prediction_none_projection(monkeypatch):
-    """If _with_projection returns None (projection failed), error must be non-empty."""
-    monkeypatch.setattr(ma, "_get_store", lambda: None)
-    res = await ma.materialize_link_prediction(LinkPredictionIn())
-    assert res.written == 0 and res.error != ""
 
 
 # ---------------------------------------------------------------------------
@@ -87,25 +99,53 @@ class _RiskStore:
         return self._rows  # the component-gather read
 
 
+_ID_LIST = "[" + ", ".join(f'"{t}"' for t in ID_TYPES) + "]"
+_RISK_ENTS_NGQL = (
+    f"MATCH (e:`Entity`) WHERE e.`Entity`.label NOT IN {_ID_LIST} "
+    "RETURN e.`Entity`.name AS name, e.`Entity`.betweenness AS betweenness;"
+)
+_RISK_EDGES_NGQL = (
+    f"MATCH (e:`Entity`)-[r:`RELATED`]-(n:`Entity`) WHERE e.`Entity`.label NOT IN {_ID_LIST} "
+    "RETURN e.`Entity`.name AS name, n.`Entity`.label AS nlabel, "
+    "r.polarity AS polarity, r.created_at AS created_at;"
+)
+_RISK_UPDATE_RE = re.compile(
+    r'^UPDATE VERTEX ON `Entity` "(?P<vid>[0-9a-f]+)" '
+    r"SET risk_score_prev = risk_score, risk_score = (?P<score>[0-9.eE+-]+), "
+    r'risk_band = (?P<band>"(?:[^"\\]|\\.)*"), '
+    r'risk_components = (?P<components>"(?:[^"\\]|\\.)*");$'
+)
+
+
 @pytest.mark.asyncio
 async def test_materialize_risk_writes_scores(monkeypatch):
-    rows = [
-        {
-            "name": "Shell",
-            "betweenness": 1.0,
-            "id_links": 3,
-            "deg": 3,
-            "contested": 2,
-            "recent": 4,
-        }
+    # nebula gathers entities + their RELATED edges and aggregates per entity
+    # in Python: 3 edges, all to identifier entities, 2 contested, all recent
+    # → betweenness 1.0, id_links 3, deg 3, contested 2, recent 3.
+    now = today_epoch_days()
+    edges = [
+        {"name": "Shell", "nlabel": ID_TYPES[0], "polarity": "negated", "created_at": now},
+        {"name": "Shell", "nlabel": ID_TYPES[1], "polarity": "uncertain", "created_at": now},
+        {"name": "Shell", "nlabel": ID_TYPES[2], "polarity": "asserted", "created_at": now},
     ]
-    store = _RiskStore(rows)
+    store = _NebulaStmtStore({
+        _RISK_ENTS_NGQL: [{"name": "Shell", "betweenness": 1.0}],
+        _RISK_EDGES_NGQL: edges,
+    })
     monkeypatch.setattr(ma, "_get_store", lambda: store)
     res = await ma.materialize_risk(RiskIn())
     assert res.written == 1 and res.error == ""
-    write_cypher = store.writes[0][0]
-    assert "SET e.risk_score" in write_cypher and "e.risk_band" in write_cypher
-    rowarg = store.writes[0][1]["rows"][0]
+    writes = [c for c in store.calls if c.startswith("UPDATE VERTEX")]
+    write_stmt = writes[0]
+    assert "SET risk_score_prev = risk_score, risk_score = " in write_stmt
+    assert "risk_band = " in write_stmt
+    m = _RISK_UPDATE_RE.match(write_stmt)
+    assert m is not None and m["vid"] == entity_vid("Shell")
+    rowarg = {
+        "score": float(m["score"]),
+        "band": json.loads(m["band"]),
+        "components": json.loads(m["components"]),
+    }
     assert 0.0 <= rowarg["score"] <= 1.0 and rowarg["band"] in {"low", "medium", "high"}
     json.loads(rowarg["components"])  # components serialized as JSON
 

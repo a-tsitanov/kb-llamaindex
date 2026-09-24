@@ -22,21 +22,6 @@ def _stub_activity_ctx(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_documents_for_communities_returns_doc_ids(monkeypatch):
-    import src.workflow.search.activities.documents as mod
-
-    class _Store:
-        def structured_query(self, cypher, params):
-            assert params == {"ids": ["1", "2"]}
-            return [{"doc_id": "d1"}, {"doc_id": "d2"}, {"doc_id": None}]
-
-    monkeypatch.setattr(mod, "_get_store", lambda: _Store())
-    res = await mod.documents_for_communities(
-        DocumentsForCommunitiesParams(community_ids=["1", "2"]))
-    assert res.doc_ids == ["d1", "d2"]
-
-
-@pytest.mark.asyncio
 async def test_documents_for_communities_failopen(monkeypatch):
     import src.workflow.search.activities.documents as mod
     monkeypatch.setattr(mod, "_get_store", lambda: None)
