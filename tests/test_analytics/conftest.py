@@ -24,6 +24,32 @@ class _FakeStore:
         return self._rows
 
 
+class _NebulaStmtStore:
+    """nGQL fake keyed on the EXACT statements the nebula seam issues.
+
+    ``responses`` maps a full statement string to its canned rows; a statement
+    not in the map answers ``[]`` (a legitimately empty read) and is still
+    recorded in ``calls`` so tests can assert what was (not) issued.  Nebula
+    binds no parameters, so a non-empty ``param_map`` is a test failure."""
+
+    def __init__(self, responses: dict[str, list[dict]] | None = None):
+        self._responses = dict(responses or {})
+        self.calls: list[str] = []
+
+    def structured_query(self, query, param_map=None):
+        assert not param_map, f"nebula binds no params, got {param_map!r}"
+        self.calls.append(query)
+        return list(self._responses.get(query, []))
+
+
+def _ngql_list(values) -> str:
+    """Inline-quoted nGQL value list (vids or labels), in the given order
+    (mirrors the seam's ``", ".join(_q(v) for v in values)``)."""
+    from src.graph.nebula_store import _q
+
+    return ", ".join(_q(v) for v in values)
+
+
 @dataclass
 class _StubLLM:
     """Minimal async chat LLM returning a canned reply (or raising)."""

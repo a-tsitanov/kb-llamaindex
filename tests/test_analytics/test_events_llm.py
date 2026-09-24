@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from src.analytics.primitives import events_llm
-from tests.test_analytics.conftest import _FakeStore
+from tests.test_analytics.conftest import _NebulaStmtStore, _ngql_list
 
 
 class _FakeOps:
@@ -120,14 +120,34 @@ async def test_event_timeline_fail_soft_none_store():
     assert (await events_llm.event_timeline(None, entity="X")).rows == []
 
 
-# --- trending_events stays on run_rows (unchanged) ----------------------
+# --- trending_events ------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_trending_events_windows_and_shape(monkeypatch):
     monkeypatch.setattr(events_llm, "today_epoch_days", lambda: 19900)
-    store = _FakeStore(rows=[{"entity": "Acme", "event_type": "lawsuit", "recent": 6,
-                              "baseline_rate": 1.0, "burst_score": 6.0}])
+    # Acme took part in 6 lawsuit events inside the 7-day window and 4 in the
+    # 4-window baseline before it: recent=6, baseline_rate=1.0, burst=6.0.
+    since_baseline = 19900 - 7 * (4 + 1)
+    events = [{"vid": f"ev{i}", "event_type": "lawsuit", "created_at": 19895}
+              for i in range(6)]
+    events += [{"vid": f"ev{i}", "event_type": "lawsuit", "created_at": 19870}
+               for i in range(6, 10)]
+    store = _NebulaStmtStore({
+        "MATCH (e:`Entity`) WHERE e.`Entity`.label == 'EventOrAction' "
+        f"AND e.`Entity`.created_at >= {since_baseline} "
+        "RETURN id(e) AS vid, e.`Entity`.event_type AS event_type, "
+        "e.`Entity`.created_at AS created_at;": events,
+        f"GO FROM {_ngql_list(e['vid'] for e in events)} OVER `RELATED` "
+        "WHERE `RELATED`.rel_type == 'PARTICIPATED_IN' "
+        "AND `RELATED`.polarity != 'negated' "
+        "YIELD src(edge) AS ev, dst(edge) AS p;": [
+            {"ev": e["vid"], "p": "acme"} for e in events
+        ],
+        'FETCH PROP ON `Entity` "acme" YIELD id(vertex) AS vid, `Entity`.name AS name;': [
+            {"vid": "acme", "name": "Acme"},
+        ],
+    })
     res = await events_llm.trending_events(store, window_days=7, baseline_windows=4)
     assert res.params["since_recent"] == 19900 - 7
     assert res.params["since_baseline"] == 19900 - 7 * (4 + 1)

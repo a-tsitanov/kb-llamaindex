@@ -1,7 +1,8 @@
 import pytest
 
+from src.analytics.ids import ID_TYPES
 from src.analytics.primitives import aggregations as agg
-from tests.test_analytics.conftest import _FakeStore
+from tests.test_analytics.conftest import _FakeStore, _ngql_list
 
 
 @pytest.mark.asyncio
@@ -12,11 +13,15 @@ async def test_count_entities_excludes_identifiers_by_default():
     assert res.params["type"] == "Organization"
     # identifier exclusion present
     assert res.params["id_types"]  # passed in
-    # The underlying Neo4j Cypher issued through the seam is unchanged
-    # (byte-for-byte) -- verify it on the store's actually-executed query,
-    # not on the primitive's now backend-agnostic `res.cypher` descriptor.
+    # Verify it on the store's actually-executed nGQL, not on the primitive's
+    # backend-agnostic `res.cypher` descriptor: nebula binds no params, so the
+    # id types are inlined as a quoted list into the NOT IN filter.
     assert "count(e)" in store.last_cypher
-    assert "$id_types" in store.last_cypher
+    assert store.last_cypher == (
+        'MATCH (e:`Entity`) WHERE e.`Entity`.label == "Organization" '
+        f"AND e.`Entity`.label NOT IN [{_ngql_list(ID_TYPES)}] "
+        "RETURN count(e) AS n;"
+    )
 
 
 @pytest.mark.asyncio

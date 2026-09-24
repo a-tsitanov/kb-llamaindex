@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+import pytest
+
 from src.mcp import tools_server
 from src.mcp.tools_server import (
     _period_bounds,
@@ -10,6 +12,19 @@ from src.mcp.tools_server import (
     _topic_trend,
 )
 from src.stats.align import GRANULARITIES
+
+
+@pytest.fixture
+def _guard_lifted(monkeypatch):
+    """Exercise `_topic_trend`'s row shaping (window filter, period_start,
+    value) with the nebula backend guard lifted.
+
+    On nebula the tool refuses up front (see
+    `test_topic_trend_errors_instead_of_returning_a_silent_zero_on_nebula`),
+    but the shaping below the guard is backend-agnostic and is exactly what
+    runs once the guard is deleted (its comment in tools_server says so).
+    The primitive itself is faked via `_fn`, so no store is queried."""
+    monkeypatch.setattr(tools_server, "_TOPIC_TREND_UNSUPPORTED_BACKENDS", frozenset())
 
 
 def test_topic_trend_granularities_are_not_a_parallel_copy():
@@ -36,7 +51,7 @@ async def test_topic_trend_rejects_bad_dates():
     assert "YYYY-MM-DD" in out["error"]
 
 
-async def test_topic_trend_post_filters_by_date_window():
+async def test_topic_trend_post_filters_by_date_window(_guard_lifted):
     """`topic_trend` returns the full history; the window is applied to
     the buckets it returns rather than by changing the primitive."""
     async def fake(store, *, topic, granularity):
@@ -150,7 +165,7 @@ def test_period_in_window_open_bounds():
     assert not _period_in_window("2026-05", "month", None, "2026-04-30")
 
 
-async def test_topic_trend_filters_quarter_buckets():
+async def test_topic_trend_filters_quarter_buckets(_guard_lifted):
     async def fake(store, *, topic, granularity):
         from src.analytics.catalog import PrimitiveResult
         return PrimitiveResult(cypher="", params={}, rows=[
@@ -168,7 +183,7 @@ async def test_topic_trend_filters_quarter_buckets():
     ]
 
 
-async def test_topic_trend_rows_carry_period_start_and_value():
+async def test_topic_trend_rows_carry_period_start_and_value(_guard_lifted):
     """The two keys `stat_align` requires.  `period` / `mentions` stay —
     this is additive, so nothing that already read the rows breaks."""
     async def fake(store, *, topic, granularity):
@@ -187,7 +202,7 @@ async def test_topic_trend_rows_carry_period_start_and_value():
     ]
 
 
-async def test_topic_trend_period_start_is_the_bucket_first_day_per_granularity():
+async def test_topic_trend_period_start_is_the_bucket_first_day_per_granularity(_guard_lifted):
     def _fake(period: str):
         async def fake(store, *, topic, granularity):
             from src.analytics.catalog import PrimitiveResult
@@ -226,22 +241,6 @@ async def test_topic_trend_errors_instead_of_returning_a_silent_zero_on_nebula(
     assert "error" in out
     assert "nebula" in out["error"]
     assert "rows" not in out
-
-
-async def test_topic_trend_is_not_guarded_on_neo4j(monkeypatch):
-    from src.config import settings
-
-    monkeypatch.setattr(settings.graph, "backend", "neo4j")
-
-    async def fake(store, *, topic, granularity):
-        from src.analytics.catalog import PrimitiveResult
-        return PrimitiveResult(cypher="", params={}, rows=[
-            {"period": "2026-01", "mentions": 3},
-        ])
-
-    out = await _topic_trend(object(), "инфляция", "month", None, None, _fn=fake)
-    assert "error" not in out
-    assert out["rows"][0]["mentions"] == 3
 
 
 async def test_polarity_evolution_is_not_guarded_on_nebula(monkeypatch):

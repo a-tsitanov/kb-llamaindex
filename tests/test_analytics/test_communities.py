@@ -2,12 +2,13 @@
 import pytest
 
 from src.analytics.primitives import communities as com
-from tests.test_analytics.conftest import _FakeStore
+from src.graph.nebula_store import entity_vid
+from tests.test_analytics.conftest import _FakeStore, _NebulaStmtStore
 
 
 @pytest.mark.asyncio
 async def test_community_overview_reads_level():
-    # _FakeStore drives the default Neo4jCommunitiesGraphOps path.
+    # _FakeStore drives the default NebulaCommunitiesGraphOps path.
     store = _FakeStore(rows=[{"title": "Поставки", "summary": "...", "member_count": 12}])
     res = await com.community_overview(store, level=0)
     assert res.params["level"] == 0
@@ -21,7 +22,13 @@ async def test_community_overview_fail_soft_none_store():
 
 @pytest.mark.asyncio
 async def test_entity_communities_by_name():
-    store = _FakeStore(rows=[{"level": 0, "title": "Поставки", "summary": "s"}])
+    vid = entity_vid("Ромашка")
+    store = _NebulaStmtStore({
+        f'GO FROM "{vid}" OVER `IN_COMMUNITY` YIELD dst(edge) AS cvid;': [{"cvid": "c1"}],
+        'FETCH PROP ON `Community` "c1" YIELD '
+        "`Community`.level AS level, `Community`.title AS title, "
+        "`Community`.summary AS summary;": [{"level": 0, "title": "Поставки", "summary": "s"}],
+    })
     res = await com.entity_communities(store, name="Ромашка")
     assert res.params["name"] == "Ромашка"
     assert res.rows[0]["title"] == "Поставки"

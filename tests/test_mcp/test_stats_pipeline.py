@@ -15,9 +15,24 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+import pytest
+
 from src.analytics.catalog import PrimitiveResult
+from src.mcp import tools_server
 from src.mcp.stats_server import _align_tool
 from src.mcp.tools_server import _topic_trend
+
+
+@pytest.fixture(autouse=True)
+def _guard_lifted(monkeypatch):
+    """Lift `_topic_trend`'s nebula backend guard for this composition test.
+
+    On nebula the tool refuses up front (pinned by
+    test_tools_server_trend::test_topic_trend_errors_instead_of_returning_a_silent_zero_on_nebula);
+    the row shaping this file composes with `stat_align` sits below that
+    guard, is backend-agnostic, and is what runs once the guard is deleted.
+    The primitive is faked via `_fn`, so no store is queried."""
+    monkeypatch.setattr(tools_server, "_TOPIC_TREND_UNSUPPORTED_BACKENDS", frozenset())
 
 
 def _fake_primitive(rows: list[dict]):

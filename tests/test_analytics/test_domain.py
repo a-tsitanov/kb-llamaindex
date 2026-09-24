@@ -1,14 +1,24 @@
 import pytest
 
 from src.analytics.primitives import domain as dm
-from tests.test_analytics.conftest import _FakeStore
+from tests.test_analytics.conftest import _FakeStore, _NebulaStmtStore
 
 
 @pytest.mark.asyncio
 async def test_issue_resolution_stats_computes_rate():
-    # _FakeStore drives the default Neo4jDomainGraphOps path (returns the raw
-    # {total, unresolved}); the primitive computes resolved/rate.
-    store = _FakeStore(rows=[{"total": 10, "unresolved": 4}])
+    # The nebula seam counts Issues and DISTINCT resolved Issues (two nGQL
+    # reads) and returns the raw {total, unresolved}; the primitive computes
+    # resolved/rate.
+    store = _NebulaStmtStore({
+        "MATCH (i:`Entity`) WHERE i.`Entity`.label == 'Issue' RETURN count(*) AS total;":
+            [{"total": 10}],
+        "MATCH (i:`Entity`)-[rr:`RELATED`]-(r:`Entity`) "
+        "WHERE i.`Entity`.label == 'Issue' AND rr.rel_type == 'RESOLVED_BY' "
+        "AND r.`Entity`.label == 'Resolution' "
+        "AND (rr.polarity IS NULL OR rr.polarity != 'negated') "
+        "RETURN DISTINCT i.`Entity`.name AS name;":
+            [{"name": f"issue-{i}"} for i in range(6)],
+    })
     res = await dm.issue_resolution_stats(store)
     row = res.rows[0]
     assert row["total_issues"] == 10

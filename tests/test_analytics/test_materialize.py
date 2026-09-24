@@ -1,18 +1,31 @@
 import pytest
 
+import src.analytics.centrality_compute as cc
 from src.analytics import materialize as m
-from tests.test_analytics.conftest import _FakeStore
+from src.graph.nebula_store import entity_vid
+from tests.test_analytics.conftest import _FakeStore, _NebulaStmtStore
 
 
 @pytest.mark.asyncio
-async def test_write_centrality_pagerank_shape():
-    # call 1 = GDS stream rows; the write UNWIND returns nothing
-    store = _FakeStore(by_call=[[{"name": "A", "score": 0.9}, {"name": "B", "score": 0.1}], []])
+async def test_write_centrality_pagerank_shape(monkeypatch):
+    # Nebula computes centrality in-worker (compute_all over the edge export)
+    # and writes one UPDATE VERTEX per scored entity.
+    computed: list[int] = []
+
+    def _fake_compute_all(store, **_kw):
+        computed.append(1)
+        return {"pagerank": {"A": 0.9, "B": 0.1}, "betweenness": {}, "eigenvector": {}}
+
+    monkeypatch.setattr(cc, "compute_all", _fake_compute_all)
+    store = _NebulaStmtStore()
     n = await m.write_centrality(store, "g1", "pagerank")
     assert n == 2
-    cyphers = " ".join(c for c, _ in store.calls)
-    assert "gds.pageRank.stream" in cyphers
-    assert "SET e.pagerank" in cyphers  # metric inlined into write-back
+    assert computed == [1]  # the in-worker compute ran (once)
+    # metric inlined into write-back
+    assert store.calls == [
+        f'UPDATE VERTEX ON `Entity` "{entity_vid("A")}" SET pagerank = 0.9;\n'
+        f'UPDATE VERTEX ON `Entity` "{entity_vid("B")}" SET pagerank = 0.1;'
+    ]
 
 
 @pytest.mark.asyncio
@@ -23,21 +36,14 @@ async def test_write_centrality_rejects_unknown_metric():
 
 
 @pytest.mark.asyncio
-async def test_write_link_prediction_filters_and_writes():
-    store = _FakeStore(
-        by_call=[
-            [],  # delete stale
-            [
-                {"a": "A", "b": "B", "score": 0.9},
-                {"a": "A", "b": "C", "score": 0.2},
-            ],  # nodeSimilarity
-            [],  # write
-        ]
-    )
+async def test_write_link_prediction_is_a_noop_on_nebula():
+    # gds.nodeSimilarity has no in-worker port: under nebula link prediction
+    # is a documented no-op (src/analytics/materialize.py) -- nothing is
+    # written and the store is never touched.
+    store = _NebulaStmtStore()
     n = await m.write_link_prediction(store, "g1", top_k=10, min_score=0.5)
-    assert n == 1  # only the 0.9 pair kept
-    joined = " ".join(c for c, _ in store.calls)
-    assert "gds.nodeSimilarity.stream" in joined and ":LIKELY_LINK" in joined
+    assert n == 0
+    assert store.calls == []
 
 
 @pytest.mark.asyncio

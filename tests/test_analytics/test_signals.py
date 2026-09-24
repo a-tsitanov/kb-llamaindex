@@ -1,12 +1,13 @@
 import pytest
 
+from src.analytics.ids import ID_TYPES
 from src.analytics.primitives import signals as sig
-from tests.test_analytics.conftest import _FakeStore
+from tests.test_analytics.conftest import _FakeStore, _NebulaStmtStore, _ngql_list
 
 
 @pytest.mark.asyncio
 async def test_risk_score_reads_materialized():
-    # _FakeStore drives the default Neo4jSignalsGraphOps path.
+    # _FakeStore drives the default NebulaSignalsGraphOps path.
     store = _FakeStore(rows=[{"name": "Shell", "score": 0.8, "band": "high", "components": "{}"}])
     res = await sig.risk_score(store, band="high")
     assert res.params["band"] == "high"
@@ -30,14 +31,26 @@ async def test_investigate_next_ranks_high_risk_low_completeness():
 
 @pytest.mark.asyncio
 async def test_recommended_merges_groups_dup_names():
-    store = _FakeStore(rows=[{"key": "ромашка", "names": ["Ромашка", "РОМАШКА"], "count": 2}])
+    store = _NebulaStmtStore({
+        "MATCH (e:`Entity`) WHERE e.`Entity`.label NOT IN "
+        f"[{_ngql_list(ID_TYPES)}] RETURN e.`Entity`.name AS name;": [
+            {"name": "Ромашка"}, {"name": "РОМАШКА"}, {"name": "Лютик"},
+        ],
+    })
     res = await sig.recommended_merges(store)
     assert res.rows[0]["count"] == 2
 
 
 @pytest.mark.asyncio
 async def test_review_queue_shell_signal():
-    store = _FakeStore(rows=[{"name": "Org", "degree": 2, "flag": "shell_signal"}])
+    # An Organization whose every neighbour is an identifier is a shell.
+    store = _NebulaStmtStore({
+        "MATCH (e:`Entity`) WHERE e.`Entity`.label == 'Organization' "
+        "OPTIONAL MATCH (e)-[:`RELATED`]-(n:`Entity`) "
+        "RETURN e.`Entity`.name AS name, collect(n.`Entity`.label) AS neighbor_labels;": [
+            {"name": "Org", "neighbor_labels": ["INN", "BankAccount"]},
+        ],
+    })
     res = await sig.review_queue(store)
     assert res.params["top_n"] == 50
     assert res.rows[0]["flag"] == "shell_signal"

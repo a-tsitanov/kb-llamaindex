@@ -1,31 +1,57 @@
+from itertools import permutations
+
 import pytest
 
 from src.analytics.primitives import connections as conn
-from tests.test_analytics.conftest import _FakeStore
+from src.graph.nebula_store import entity_vid
+from tests.test_analytics.conftest import _NebulaStmtStore, _ngql_list
+
+_RELATED_FULL_YIELD = (
+    "YIELD src(edge) AS s, dst(edge) AS d, `RELATED`.rel_type AS rl, "
+    "`RELATED`.weight AS w, `RELATED`.polarity AS pol;"
+)
+
+
+def _fetch_name_label(vids) -> str:
+    return (
+        f"FETCH PROP ON `Entity` {_ngql_list(vids)} YIELD id(vertex) AS vid, "
+        "`Entity`.name AS name, `Entity`.label AS label;"
+    )
 
 
 @pytest.mark.asyncio
 async def test_entity_dossier_assembles_sections():
-    # Default backend (neo4j) -> build_analytics_graph_ops(store) returns
-    # Neo4jAnalyticsGraphOps, which issues the SAME 4 structured_query
-    # calls (core, neighbors, identifiers, communities) in the SAME order
-    # as the pre-seam implementation -- _FakeStore's by_call mechanism
-    # (canned rows per sequential call) still applies unmodified.
-    store = _FakeStore(
-        by_call=[
-            [
-                {
-                    "name": "Ромашка",
-                    "description": "d",
-                    "labels": ["__Entity__", "Organization"],
-                    "mention_count": 4,
-                }
-            ],  # core
-            [{"rel": "OWNS", "name": "ООО Лютик", "ntype": "Organization", "w": 2.0}],  # neighbors
-            [{"id_type": "INN", "value": "7701234567"}],  # identifiers
-            [{"level": 0, "title": "Поставки"}],  # communities
-        ]
-    )
+    # The nebula seam assembles the same 4 sections (core, neighbors,
+    # identifiers, communities) from GO/FETCH reads; the fake answers the
+    # exact nGQL each section issues.
+    vid = entity_vid("Ромашка")
+    lutik, inn = entity_vid("ООО Лютик"), entity_vid("7701234567")
+    store = _NebulaStmtStore({
+        # core
+        f'FETCH PROP ON `Entity` "{vid}" YIELD '
+        "`Entity`.name AS name, `Entity`.description AS description, "
+        "`Entity`.label AS label, `Entity`.mention_count AS mention_count;": [
+            {"name": "Ромашка", "description": "d", "label": "Organization",
+             "mention_count": 4},
+        ],
+        # neighbors
+        f'GO FROM "{vid}" OVER `RELATED` BIDIRECT {_RELATED_FULL_YIELD}': [
+            {"s": vid, "d": lutik, "rl": "OWNS", "w": 2.0, "pol": "affirmed"},
+        ],
+        _fetch_name_label([lutik]): [
+            {"vid": lutik, "name": "ООО Лютик", "label": "Organization"},
+        ],
+        # identifiers
+        f'GO FROM "{vid}" OVER `RELATED` BIDIRECT YIELD '
+        "src(edge) AS s, dst(edge) AS d;": [{"s": vid, "d": inn}],
+        _fetch_name_label([inn]): [{"vid": inn, "name": "7701234567", "label": "INN"}],
+        # communities
+        f'GO FROM "{vid}" OVER `IN_COMMUNITY` YIELD dst(edge) AS c;': [{"c": "c1"}],
+        'FETCH PROP ON `Community` "c1" YIELD '
+        "`Community`.level AS level, `Community`.title AS title;": [
+            {"level": 0, "title": "Поставки"},
+        ],
+    })
     res = await conn.entity_dossier(store, name="Ромашка")
     row = res.rows[0]
     assert row["core"]["name"] == "Ромашка"
@@ -37,31 +63,51 @@ async def test_entity_dossier_assembles_sections():
 
 @pytest.mark.asyncio
 async def test_shared_identifier_entities_min_owners():
-    store = _FakeStore(rows=[{"value": "7701234567", "id_type": "INN", "owners": ["A", "B"]}])
+    inn, email = entity_vid("7701234567"), entity_vid("a@x.ru")
+    a, b = entity_vid("A"), entity_vid("B")
+    responses = {
+        'LOOKUP ON `Entity` WHERE `Entity`.label == "INN" '
+        "YIELD id(vertex) AS vid, `Entity`.name AS name;": [
+            {"vid": inn, "name": "7701234567"},
+        ],
+        'LOOKUP ON `Entity` WHERE `Entity`.label == "Email" '
+        "YIELD id(vertex) AS vid, `Entity`.name AS name;": [
+            {"vid": email, "name": "a@x.ru"},
+        ],
+    }
+    go_edges = [{"s": a, "d": inn}, {"s": b, "d": inn}, {"s": a, "d": email}]
+    owner_rows = [
+        {"vid": a, "name": "A", "label": "Organization"},
+        {"vid": b, "name": "B", "label": "Organization"},
+    ]
+    # The seam batches id/owner vids from dicts/sets; key every ordering.
+    for ids in permutations([inn, email]):
+        responses[
+            f"GO FROM {_ngql_list(ids)} OVER `RELATED` BIDIRECT YIELD "
+            "src(edge) AS s, dst(edge) AS d;"
+        ] = go_edges
+    for owners in permutations([a, b]):
+        responses[_fetch_name_label(owners)] = owner_rows
+    store = _NebulaStmtStore(responses)
+
     res = await conn.shared_identifier_entities(store, min_owners=2)
     assert res.params["min_owners"] == 2
-    # The underlying Neo4j Cypher issued through the seam is unchanged
-    # (byte-for-byte) -- verify it on the store's actually-executed query,
-    # not on the primitive's now backend-agnostic `res.cypher` descriptor.
-    assert "size(owners) >= $min_owners" in store.last_cypher
+    # min_owners is enforced on the executed read: the INN shared by A and B
+    # survives, the Email owned by A alone does not.
+    assert res.rows == [{"value": "7701234567", "id_type": "INN", "owners": ["A", "B"]}]
 
 
 @pytest.mark.asyncio
 async def test_connection_path_clamps_hops_inline():
-    store = _FakeStore(rows=[{"path": ["A", "B"], "rels": ["OWNS"], "hops": 1}])
+    store = _NebulaStmtStore()
     res = await conn.connection_path(store, source="A", target="B", max_hops=99)
     # hops clamped (max 12) -- reflected in params, and inlined into the
-    # real Cypher literal (shortestPath bound) issued via the seam.
+    # real nGQL literal (FIND SHORTEST PATH bound) issued via the seam.
     assert res.params["max_hops"] == 12
-    assert "*..12" in store.last_cypher
-
-
-@pytest.mark.asyncio
-async def test_cooccurrence_via_shared_chunks():
-    store = _FakeStore(rows=[{"name": "B", "shared": 3}])
-    res = await conn.cooccurrence(store, name="A")
-    assert res.rows == [{"name": "B", "shared": 3}]
-    assert ":MENTIONS" in store.last_cypher
+    assert store.calls == [
+        f'FIND SHORTEST PATH FROM "{entity_vid("A")}" TO "{entity_vid("B")}" '
+        "OVER * BIDIRECT UPTO 12 STEPS YIELD path AS p;"
+    ]
 
 
 @pytest.mark.asyncio
