@@ -5,16 +5,6 @@ from src.graph import community_read as cr
 from src.workflow.contracts import MapCommunitiesParams
 
 
-class _RecStore:
-    """Records structured_query(cypher, param_map) calls; returns canned rows."""
-    def __init__(self, ret=None):
-        self.calls = []
-        self._ret = ret if ret is not None else []
-    def structured_query(self, cypher, param_map=None):
-        self.calls.append((cypher, param_map))
-        return self._ret
-
-
 class _RecNebula:
     """Fake nebula store: records nGQL; returns canned rows per substring."""
     def __init__(self, read_map=None):
@@ -27,20 +17,6 @@ class _RecNebula:
             if needle in query:
                 return rows
         return []
-
-
-def test_neo4j_read_summaries_issues_exact_cypher_and_returns_rows_verbatim():
-    canned = [{"community_id": "1", "level": 0, "summary": "s", "member_count": 3}]
-    store = _RecStore(ret=canned)
-    reader = cr.Neo4jCommunityRead(store)
-    rows = reader.read_summaries(level=0)
-    assert store.calls == [(cr._READ_SUMMARIES_CYPHER, {"level": 0})]
-    assert rows == canned  # verbatim rows, not mutated
-
-
-def test_dispatch_returns_nebula_when_backend_nebula(monkeypatch):
-    monkeypatch.setattr(cr.settings.graph, "backend", "nebula")
-    assert isinstance(cr.build_community_read(_RecNebula()), cr.NebulaCommunityRead)
 
 
 def test_nebula_read_summaries_filters_level_drops_blank_and_sorts():
@@ -111,8 +87,3 @@ def test_map_communities_lexical_routes_through_reader(monkeypatch):
     assert result.communities[0].community_id == "1"
 
 
-def test_read_summaries_cypher_shape():
-    cy = cr._READ_SUMMARIES_CYPHER
-    assert "MATCH (c:Community {level: $level})" in cy
-    assert "trim(c.summary)" in cy
-    assert "ORDER BY member_count DESC, community_id ASC" in cy

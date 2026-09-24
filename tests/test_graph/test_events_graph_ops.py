@@ -3,21 +3,6 @@ from __future__ import annotations
 from src.graph import events_graph_ops as ego
 
 
-class _RecStore:
-    def __init__(self, rows=None):
-        self.calls: list[tuple[str, dict | None]] = []
-        self._rows = list(rows or [])
-
-    def structured_query(self, cypher, param_map=None):
-        self.calls.append((cypher, param_map))
-        return self._rows.pop(0) if self._rows else []
-
-
-class _RaisingStore:
-    def structured_query(self, cypher, param_map=None):
-        raise RuntimeError("boom")
-
-
 class _NebulaRecStore:
     def __init__(self, canned: list[tuple[str, list[dict]]] | None = None):
         self.calls: list[tuple[str, dict | None]] = []
@@ -30,34 +15,6 @@ class _NebulaRecStore:
             if substr in stmt:
                 return rows
         return []
-
-
-# --- Neo4j: byte-for-byte -----------------------------------------------
-
-
-def test_neo4j_new_entities_issues_moved_cypher():
-    store = _RecStore(rows=[[{"name": "NewCo", "type": "Organization", "created_at": 19799}]])
-    result = ego.Neo4jEventsGraphOps(store).new_entities(19786, 25)
-    assert result == [{"name": "NewCo", "type": "Organization", "created_at": 19799}]
-    assert store.calls == [(ego._NEW_ENTITIES, {"since": 19786, "top_n": 25})]
-
-
-def test_neo4j_new_edges_issues_moved_cypher():
-    store = _RecStore(rows=[[{"src": "A", "rel": "OWNS", "tgt": "B", "created_at": 19799}]])
-    result = ego.Neo4jEventsGraphOps(store).new_edges(19786, 25)
-    assert result[0]["rel"] == "OWNS"
-    assert store.calls == [(ego._NEW_EDGES, {"since": 19786, "top_n": 25})]
-
-
-def test_neo4j_entity_new_connections_issues_moved_cypher():
-    store = _RecStore(rows=[[{"rel": "OWNS", "other": "B", "created_at": 19799}]])
-    result = ego.Neo4jEventsGraphOps(store).entity_new_connections("A", 19786, 25)
-    assert result[0]["other"] == "B"
-    assert store.calls == [(ego._ENTITY_NEW_CONNECTIONS, {"name": "A", "since": 19786, "top_n": 25})]
-
-
-def test_neo4j_fail_soft():
-    assert ego.Neo4jEventsGraphOps(_RaisingStore()).new_entities(0, 25) == []
 
 
 # --- Nebula: new_entities MATCH; edges/connections -> [] ----------------
@@ -114,9 +71,11 @@ def test_nebula_entity_new_connections_name_anchored():
     assert "ORDER BY created_at DESC LIMIT 25" in stmt
 
 
-# --- Dispatch ------------------------------------------------------------
+class _NebulaRaisingStore:
+    def structured_query(self, stmt, param_map=None):
+        raise RuntimeError("boom")
 
 
-def test_dispatch_nebula(monkeypatch):
-    monkeypatch.setattr(ego.settings.graph, "backend", "nebula")
-    assert isinstance(ego.build_events_graph_ops(_NebulaRecStore()), ego.NebulaEventsGraphOps)
+def test_nebula_fail_soft():
+    # ported from test_neo4j_fail_soft.
+    assert ego.NebulaEventsGraphOps(_NebulaRaisingStore()).new_entities(0, 25) == []

@@ -1,9 +1,8 @@
-"""Backend-dispatched analytics "rollups" graph op (numeric Amount rollup,
+"""Analytics "rollups" graph op (numeric Amount rollup,
 read-only, fail-soft). The amount PARSING + aggregation stays in the primitive;
 the seam only returns the raw (counterparty, amount) edge rows.
 
-``Neo4jRollupsGraphOps`` runs the existing Cypher verbatim (moved from
-``analytics/primitives/rollups.py``). ``NebulaRollupsGraphOps`` = MATCH neighbour
+``NebulaRollupsGraphOps`` = MATCH neighbour
 with ``label == 'Amount'`` (near-verbatim). Fail-soft per method.
 """
 from __future__ import annotations
@@ -14,30 +13,9 @@ from typing import Any, Protocol
 
 from loguru import logger
 
-from src.config import settings
-
-_AMOUNT_EDGES = (
-    "MATCH (e:__Entity__)-[]-(a:__Entity__:Amount) "
-    "WHERE ($cp IS NULL OR e.name=$cp) "
-    "RETURN e.name AS counterparty, a.name AS amount"
-)
-
 
 class RollupsGraphOps(Protocol):
     def amount_edges(self, counterparty: str | None) -> list[dict]: ...
-
-
-class Neo4jRollupsGraphOps:
-    def __init__(self, store: Any):
-        self._store = store
-
-    def amount_edges(self, counterparty: str | None) -> list[dict]:
-        try:
-            rows = self._store.structured_query(_AMOUNT_EDGES, param_map={"cp": counterparty})
-            return list(rows or [])
-        except Exception as exc:  # fail-soft, like store_query.run_rows
-            logger.warning("analytics query failed: {e}", e=exc)
-            return []
 
 
 def _nebula_fail_soft(method: Callable[..., list[dict]]) -> Callable[..., list[dict]]:
@@ -71,6 +49,4 @@ class NebulaRollupsGraphOps:
 
 
 def build_rollups_graph_ops(store: Any) -> RollupsGraphOps:
-    if settings.graph.backend == "nebula":
-        return NebulaRollupsGraphOps(store)
-    return Neo4jRollupsGraphOps(store)
+    return NebulaRollupsGraphOps(store)

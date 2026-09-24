@@ -1,13 +1,11 @@
-"""Backend-dispatched analytics "dynamics" graph ops (temporal validity reads,
+"""Analytics "dynamics" graph ops (temporal validity reads,
 read-only, fail-soft): relationship_timeline / polarity_evolution / whats_changed.
 
 topic_trend / entity_activity are NOT here — they traverse (:Chunk), which isn't a
 nebula graph node, so they degrade to [] via run_rows fail-soft (no nebula-specific
 logic to add).
 
-``Neo4jDynamicsGraphOps`` runs the existing Cypher verbatim (moved from
-``analytics/primitives/dynamics.py``). ``NebulaDynamicsGraphOps`` translates to
-nGQL now that RELATED.valid_from/valid_to are STRING (see nebula_schema): near-
+``NebulaDynamicsGraphOps`` implements the reads in nGQL now that RELATED.valid_from/valid_to are STRING (see nebula_schema): near-
 verbatim MATCH with ``substr`` (neo4j ``substring``), ``r.rel_type`` (neo4j
 ``type(r)``), and string range compares on the ISO validity window.
 
@@ -25,37 +23,6 @@ from typing import Any, Protocol
 
 from loguru import logger
 
-from src.config import settings
-
-_RELATIONSHIP_TIMELINE = (
-    "MATCH (e:__Entity__ {name:$name})-[r]-(n:__Entity__) "
-    "WHERE r.valid_from IS NOT NULL AND ($rel_type IS NULL OR type(r)=$rel_type) "
-    "RETURN substring(r.valid_from,0,7) AS period, type(r) AS rel, n.name AS name, "
-    "r.polarity AS polarity "
-    "ORDER BY period"
-)
-_POLARITY_EVOLUTION = (
-    "MATCH (e:__Entity__)-[r]-(:__Entity__) "
-    "WHERE r.valid_from IS NOT NULL AND ($name IS NULL OR e.name=$name) "
-    "AND ($rel_type IS NULL OR type(r)=$rel_type) "
-    "RETURN substring(r.valid_from,0,7) AS period, r.polarity AS polarity, count(*) AS n "
-    "ORDER BY period"
-)
-_WHATS_CHANGED = (
-    "MATCH (e:__Entity__)-[r]-(n:__Entity__) "
-    "WHERE type(r) <> 'LIKELY_LINK' AND ($entity IS NULL OR e.name=$entity) AND "
-    "((r.valid_from >= $from AND r.valid_from <= $to) OR "
-    "(r.valid_to >= $from AND r.valid_to <= $to) OR "
-    "(r.valid_from IS NULL AND r.valid_to IS NULL AND $from_epoch IS NOT NULL "
-    "AND r.created_at >= $from_epoch AND r.created_at <= $to_epoch)) "
-    "RETURN e.name AS name, type(r) AS rel, n.name AS other, r.polarity AS polarity, "
-    "r.valid_from AS valid_from, r.valid_to AS valid_to, r.created_at AS created_at, "
-    "CASE WHEN r.valid_from >= $from AND r.valid_from <= $to THEN 'appeared' "
-    "WHEN r.valid_to >= $from AND r.valid_to <= $to THEN 'ended' "
-    "ELSE 'first_seen' END AS change "
-    "ORDER BY coalesce(r.valid_from,r.valid_to) LIMIT $top_n"
-)
-
 
 class DynamicsGraphOps(Protocol):
     def relationship_timeline(self, name: str, rel_type: str | None) -> list[dict]: ...
@@ -71,46 +38,6 @@ class DynamicsGraphOps(Protocol):
         to_epoch: int | None,
         top_n: int,
     ) -> list[dict]: ...
-
-
-class Neo4jDynamicsGraphOps:
-    def __init__(self, store: Any):
-        self._store = store
-
-    def _rows(self, cypher: str, params: dict) -> list[dict]:
-        try:
-            rows = self._store.structured_query(cypher, param_map=params)
-            return list(rows or [])
-        except Exception as exc:  # fail-soft, like store_query.run_rows
-            logger.warning("analytics query failed: {e}", e=exc)
-            return []
-
-    def relationship_timeline(self, name: str, rel_type: str | None) -> list[dict]:
-        return self._rows(_RELATIONSHIP_TIMELINE, {"name": name, "rel_type": rel_type})
-
-    def polarity_evolution(self, name: str | None, rel_type: str | None) -> list[dict]:
-        return self._rows(_POLARITY_EVOLUTION, {"name": name, "rel_type": rel_type})
-
-    def whats_changed(
-        self,
-        date_from: str,
-        date_to: str,
-        entity: str | None,
-        from_epoch: int | None,
-        to_epoch: int | None,
-        top_n: int,
-    ) -> list[dict]:
-        return self._rows(
-            _WHATS_CHANGED,
-            {
-                "from": date_from,
-                "to": date_to,
-                "from_epoch": from_epoch,
-                "to_epoch": to_epoch,
-                "entity": entity,
-                "top_n": top_n,
-            },
-        )
 
 
 def _nebula_fail_soft(method: Callable[..., list[dict]]) -> Callable[..., list[dict]]:
@@ -220,6 +147,4 @@ class NebulaDynamicsGraphOps:
 
 
 def build_dynamics_graph_ops(store: Any) -> DynamicsGraphOps:
-    if settings.graph.backend == "nebula":
-        return NebulaDynamicsGraphOps(store)
-    return Neo4jDynamicsGraphOps(store)
+    return NebulaDynamicsGraphOps(store)

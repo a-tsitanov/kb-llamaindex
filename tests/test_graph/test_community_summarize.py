@@ -6,47 +6,6 @@ from src.graph.community_writeback import community_vid
 from src.graph.nebula_store import entity_vid
 
 
-class _RecStore:
-    def __init__(self, ret=None):
-        self.calls = []
-        self._ret = ret if ret is not None else []
-    def structured_query(self, cypher, param_map=None):
-        self.calls.append((cypher, param_map))
-        return self._ret
-
-
-def test_neo4j_read_member_context_issues_exact_cypher():
-    store = _RecStore(ret=[{"name": "a", "description": "d", "rel_types": ["R"]}])
-    wb = cs.Neo4jCommunitySummarize(store)
-    rows = wb.read_member_context(community_id="7", level=0)
-    assert store.calls == [(cs._MEMBER_CONTEXT_CYPHER, {"community_id": "7", "level": 0})]
-    assert rows == [{"name": "a", "description": "d", "rel_types": ["R"]}]
-
-
-def test_neo4j_read_child_reports_issues_exact_cypher():
-    store = _RecStore(ret=[{"title": "t", "summary": "s"}])
-    wb = cs.Neo4jCommunitySummarize(store)
-    rows = wb.read_child_reports(community_id="7", level=1)
-    assert store.calls == [(cs._CHILD_REPORTS_CYPHER, {"community_id": "7", "level": 1})]
-    assert rows == [{"title": "t", "summary": "s"}]
-
-
-def test_neo4j_write_report_issues_exact_cypher_and_params():
-    store = _RecStore()
-    wb = cs.Neo4jCommunitySummarize(store)
-    wb.write_report(community_id="7", level=0, report="R", title="T",
-                    summary="S", report_vec=[0.1])
-    assert store.calls == [(cs._WRITE_REPORT_CYPHER, {
-        "community_id": "7", "level": 0, "report": "R",
-        "title": "T", "summary": "S", "report_vec": [0.1],
-    })]
-
-
-def test_dispatch_returns_nebula_when_backend_nebula(monkeypatch):
-    monkeypatch.setattr(cs.settings.graph, "backend", "nebula")
-    assert isinstance(cs.build_community_summarize(_RecStore()), cs.NebulaCommunitySummarize)
-
-
 class _RecNebula:
     """Fake nebula store: records nGQL; returns canned rows per substring."""
     def __init__(self, read_map=None):
@@ -137,24 +96,5 @@ def test_gather_context_routes_member_read_through_seam(monkeypatch):
 
 # Cypher-content-shape guards for the 3 constants, moved here with them from
 # tests/test_workflow/test_search_community.py (their new canonical home).
-def test_write_report_cypher_shape():
-    cy = cs._WRITE_REPORT_CYPHER
-    assert "MERGE (c:Community {id: $community_id, level: $level})" in cy
-    for field in ("c.report = $report", "c.title = $title",
-                  "c.summary = $summary", "c.report_vec = $report_vec",
-                  "c.summarized_at = timestamp()"):
-        assert field in cy
 
 
-def test_child_reports_cypher_shape():
-    cy = cs._CHILD_REPORTS_CYPHER
-    assert "-[:PARENT_OF]->(child:Community)" in cy
-    assert "child.report IS NOT NULL" in cy
-    assert "ORDER BY child.member_count DESC" in cy
-
-
-def test_member_context_cypher_shape():
-    cy = cs._MEMBER_CONTEXT_CYPHER
-    assert "<-[:IN_COMMUNITY]-(e:__Entity__)" in cy
-    assert "(e)-[r]-(o:__Entity__)-[:IN_COMMUNITY]->(c)" in cy
-    assert "collect(DISTINCT type(r))[..10] AS rel_types" in cy

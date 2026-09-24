@@ -4,22 +4,6 @@ from src.graph import graph_edge_export as gee
 from src.graph.nebula_store import entity_vid
 
 
-class _RecStore:
-    """Records (cypher, param_map) calls; returns canned pages per call,
-    popped in call order, keyed by query kind (nodes vs edges)."""
-
-    def __init__(self, node_pages=None, edge_pages=None):
-        self.calls: list[tuple[str, dict | None]] = []
-        self._node_pages = list(node_pages or [])
-        self._edge_pages = list(edge_pages or [])
-
-    def structured_query(self, cypher, param_map=None):
-        self.calls.append((cypher, param_map))
-        if "RETURN e.name AS name" in cypher:
-            return self._node_pages.pop(0) if self._node_pages else []
-        return self._edge_pages.pop(0) if self._edge_pages else []
-
-
 class _RecNebula:
     """Fake nebula store: records nGQL (asserts inline, no param_map);
     returns canned pages per call, popped in call order, keyed by
@@ -38,73 +22,6 @@ class _RecNebula:
         if query.startswith("GO FROM"):
             return self._go_pages.pop(0) if self._go_pages else []
         return []
-
-
-# --- Neo4j: byte-for-byte guard ---------------------------------------
-
-
-def test_neo4j_stream_names_issues_nodes_cypher_across_pages_and_concatenates():
-    pages = [
-        [{"name": "A"}, {"name": "B"}],   # full page (== batch_size) -> continue
-        [{"name": "C"}],                  # short page -> stop
-    ]
-    store = _RecStore(node_pages=pages)
-    exp = gee.Neo4jGraphEdgeExport(store)
-
-    names = exp.stream_names(batch_size=2)
-
-    assert names == ["A", "B", "C"]
-    assert store.calls == [
-        (gee._NODES_CYPHER, {"after": "", "limit": 2}),
-        (gee._NODES_CYPHER, {"after": "B", "limit": 2}),
-    ]
-
-
-def test_neo4j_stream_edges_issues_edges_cypher_across_pages_floats_weight():
-    pages = [
-        [{"src": "A", "tgt": "B", "weight": 2, "cursor": "r1"}],   # full page -> continue
-        [{"src": "B", "tgt": "C", "weight": None, "cursor": "r2"}],  # full page -> continue
-        [],                                                          # empty -> stop
-    ]
-    store = _RecStore(edge_pages=pages)
-    exp = gee.Neo4jGraphEdgeExport(store)
-
-    edges = exp.stream_edges(batch_size=1)
-
-    assert edges == [("A", "B", 2.0), ("B", "C", 1.0)]
-    assert store.calls == [
-        (gee._EDGES_CYPHER, {"after": "", "limit": 1}),
-        (gee._EDGES_CYPHER, {"after": "r1", "limit": 1}),
-        (gee._EDGES_CYPHER, {"after": "r2", "limit": 1}),
-    ]
-
-
-def test_neo4j_stream_names_stops_on_empty_page():
-    store = _RecStore(node_pages=[[]])
-    exp = gee.Neo4jGraphEdgeExport(store)
-    assert exp.stream_names(batch_size=10) == []
-
-
-def test_neo4j_stream_edges_stops_when_cursor_does_not_advance():
-    # last row's cursor equal to `after` ("") -> must break, not loop forever.
-    pages = [[{"src": "X", "tgt": "X", "weight": 1.0, "cursor": None}]]
-    store = _RecStore(edge_pages=pages)
-    exp = gee.Neo4jGraphEdgeExport(store)
-    edges = exp.stream_edges(batch_size=10)
-    assert edges == [("X", "X", 1.0)]
-
-
-def test_neo4j_stream_edges_ignores_names_still_issues_edges_cypher():
-    # neo4j runs its own self-contained _EDGES_CYPHER query; a `names` list
-    # passed in must be ignored — behaviour identical to names=None.
-    pages = [[{"src": "A", "tgt": "B", "weight": 2.0, "cursor": "r1"}]]
-    store = _RecStore(edge_pages=pages)
-    exp = gee.Neo4jGraphEdgeExport(store)
-
-    edges = exp.stream_edges(batch_size=10, names=["A", "B", "unused"])
-
-    assert edges == [("A", "B", 2.0)]
-    assert store.calls == [(gee._EDGES_CYPHER, {"after": "", "limit": 10})]
 
 
 # --- Nebula: nGQL keyset LOOKUP + batched GO ----------------------------
@@ -204,9 +121,3 @@ def test_nebula_stream_edges_chunks_go_calls_by_batch_size():
     assert len(go_stmts) == 2
 
 
-# --- Dispatch ------------------------------------------------------------
-
-
-def test_dispatch_returns_nebula_when_backend_nebula(monkeypatch):
-    monkeypatch.setattr(gee.settings.graph, "backend", "nebula")
-    assert isinstance(gee.build_graph_edge_export(_RecNebula()), gee.NebulaGraphEdgeExport)

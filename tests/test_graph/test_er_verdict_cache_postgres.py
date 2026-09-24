@@ -224,7 +224,7 @@ def test_factory_graph_backend_setting_restores_the_old_path(monkeypatch):
     )
     ops = build_er_graph_ops(object())
     assert not isinstance(ops, _CompositeERGraphOps)
-    assert isinstance(ops, ops_mod.NebulaERGraphOps | ops_mod.Neo4jERGraphOps)
+    assert isinstance(ops, ops_mod.NebulaERGraphOps)
 
 
 # ── the fail-safe guarantee ──────────────────────────────────────────

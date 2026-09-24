@@ -1,10 +1,9 @@
-"""Backend-dispatched analytics "communities" graph ops (read-only, fail-soft):
+"""Analytics "communities" graph ops (read-only, fail-soft):
 community_overview + entity_communities. ``personalized_pagerank`` stays in the
 primitive (a GDS compute that already degrades to ``[]`` under nebula via
 ``graph.analysis``'s fail-soft projection).
 
-``Neo4jCommunitiesGraphOps`` runs the existing Cypher verbatim (moved from
-``analytics/primitives/communities.py``). ``NebulaCommunitiesGraphOps``:
+``NebulaCommunitiesGraphOps``:
 - ``community_overview``: MATCH the Community tag by level (community_level_idx),
   aliased ORDER BY member_count.
 - ``entity_communities``: GO OVER IN_COMMUNITY from the entity VID, then FETCH the
@@ -19,42 +18,11 @@ from typing import Any, Protocol
 
 from loguru import logger
 
-from src.config import settings
-
-_COMMUNITY_OVERVIEW = (
-    "MATCH (c:Community {level:$level}) "
-    "RETURN c.title AS title, c.summary AS summary, c.member_count AS member_count "
-    "ORDER BY c.member_count DESC LIMIT $top_n"
-)
-_ENTITY_COMMUNITIES = (
-    "MATCH (e:__Entity__ {name:$name})-[:IN_COMMUNITY]->(c:Community) "
-    "RETURN c.level AS level, c.title AS title, c.summary AS summary"
-)
-
 
 class CommunitiesGraphOps(Protocol):
     def community_overview(self, level: int, top_n: int) -> list[dict]: ...
 
     def entity_communities(self, name: str) -> list[dict]: ...
-
-
-class Neo4jCommunitiesGraphOps:
-    def __init__(self, store: Any):
-        self._store = store
-
-    def _rows(self, cypher: str, params: dict) -> list[dict]:
-        try:
-            rows = self._store.structured_query(cypher, param_map=params)
-            return list(rows or [])
-        except Exception as exc:  # fail-soft, like store_query.run_rows
-            logger.warning("analytics query failed: {e}", e=exc)
-            return []
-
-    def community_overview(self, level: int, top_n: int) -> list[dict]:
-        return self._rows(_COMMUNITY_OVERVIEW, {"level": level, "top_n": top_n})
-
-    def entity_communities(self, name: str) -> list[dict]:
-        return self._rows(_ENTITY_COMMUNITIES, {"name": name})
 
 
 def _nebula_fail_soft(method: Callable[..., list[dict]]) -> Callable[..., list[dict]]:
@@ -110,6 +78,4 @@ class NebulaCommunitiesGraphOps:
 
 
 def build_communities_graph_ops(store: Any) -> CommunitiesGraphOps:
-    if settings.graph.backend == "nebula":
-        return NebulaCommunitiesGraphOps(store)
-    return Neo4jCommunitiesGraphOps(store)
+    return NebulaCommunitiesGraphOps(store)

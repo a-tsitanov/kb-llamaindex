@@ -19,7 +19,7 @@ async def test_alerts_reads_alert_nodes_newest_first():
         ]
     )
     res = await al.alerts(store, kind="risk_rise")
-    # _FakeStore drives the default Neo4jAlertStore path (read_alerts_cypher).
+    # _FakeStore drives the NebulaAlertStore path.
     assert res.params["kind"] == "risk_rise"
     assert res.rows[0]["entity"] == "Shell"
 

@@ -7,7 +7,7 @@ from tests.test_analytics.conftest import _FakeStore
 @pytest.mark.asyncio
 async def test_new_events_filters_by_created_at(monkeypatch):
     monkeypatch.setattr(ev, "today_epoch_days", lambda: 19800)
-    # _FakeStore drives the default Neo4jEventsGraphOps (new_entities then new_edges).
+    # _FakeStore drives NebulaEventsGraphOps (new_entities then new_edges).
     store = _FakeStore(
         by_call=[
             [{"name": "NewCo", "type": "Organization", "created_at": 19799}],  # new entities

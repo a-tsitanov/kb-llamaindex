@@ -692,11 +692,6 @@ def test_parse_report_tolerates_bad_finding_shapes():
     assert out["findings"] == [{"statement": "ok", "importance": 0}]
 
 
-# NOTE: _WRITE_REPORT_CYPHER / _CHILD_REPORTS_CYPHER / _MEMBER_CONTEXT_CYPHER
-# moved to src/graph/community_summarize.py (the CommunitySummarize seam) —
-# their exact-Cypher-shape coverage now lives in
-# tests/test_graph/test_community_summarize.py (test_neo4j_*_issues_exact_cypher*).
-
 
 def test_project_cypher_is_undirected_for_leiden():
     # Leiden rejects a directed graph ("works only with undirected graphs").

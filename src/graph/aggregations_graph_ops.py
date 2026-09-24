@@ -1,15 +1,12 @@
-"""Backend-dispatched analytics "aggregations" graph ops (read-only,
-fail-soft counts/histograms/top-N reads).
+"""Analytics "aggregations" graph ops (read-only, fail-soft
+counts/histograms/top-N reads).
 
-``Neo4jAggregationsGraphOps`` wraps the existing Cypher constants verbatim
-(default path, byte-for-byte unchanged; the constants were MOVED here from
-``analytics/primitives/aggregations.py``'s inline ``cypher`` strings). Each
-method preserves the fail-soft behaviour of
+Each method preserves the fail-soft behaviour of
 ``analytics/store_query.py::run_rows`` (``try/except Exception -> []``, same
 warning log) — the seam replaces the raw ``run_rows(store, cypher, params)``
 call inside each primitive, not the fail-soft wrapper itself.
 
-``NebulaAggregationsGraphOps`` translates the same reads to nGQL per
+``NebulaAggregationsGraphOps`` implements the reads in nGQL per
 ``docs/superpowers/nebula-analytics-ngql-rules-2026-07-11.md``: plain
 ``MATCH``+aggregation (nebula 3.8's openCypher subset supports this
 natively, unlike ``connections``'s VID point-lookups which needed
@@ -25,7 +22,6 @@ from typing import Any, Protocol, get_args
 from loguru import logger
 
 from src.analytics.ids import ID_TYPES
-from src.config import settings
 from src.graph.schema import EntityType
 
 # The kb_analyze planner emits entity types in lowercase ('organization'), but
@@ -41,49 +37,6 @@ def _canonical_label(type_: str) -> str:
     """Normalise a caller-supplied entity type to its canonical EntityType
     casing; unknown types pass through unchanged."""
     return _CANONICAL_LABEL.get((type_ or "").strip().lower(), type_)
-
-# ── aggregations Cypher (moved verbatim from
-# analytics/primitives/aggregations.py) ────────────────────────────────
-
-_COUNT_ENTITIES = (
-    "MATCH (e:__Entity__) "
-    "WHERE ($type IS NULL OR $type IN labels(e)) "
-    "AND ($exclude_ids = false OR NONE(l IN labels(e) WHERE l IN $id_types)) "
-    "RETURN count(e) AS n"
-)
-_COUNT_RELATIONSHIPS = (
-    "MATCH (:__Entity__)-[r]->(:__Entity__) "
-    "WHERE ($rel_type IS NULL OR type(r) = $rel_type) "
-    "AND ($polarity IS NULL OR r.polarity = $polarity) "
-    "RETURN count(r) AS n"
-)
-_DISTRIBUTION_BY_TYPE = (
-    "MATCH (e:__Entity__) "
-    "WHERE ($exclude_ids = false OR NONE(l IN labels(e) WHERE l IN $id_types)) "
-    "WITH [l IN labels(e) WHERE l <> '__Entity__' AND l <> '__Node__'][0] AS type "
-    "RETURN type, count(*) AS n ORDER BY n DESC"
-)
-_DISTRIBUTION_BY_RELATION_TYPE = (
-    "MATCH (:__Entity__)-[r]->(:__Entity__) RETURN type(r) AS rel, count(*) AS n ORDER BY n DESC"
-)
-_DISTRIBUTION_BY_POLARITY = (
-    "MATCH (:__Entity__)-[r]->(:__Entity__) WHERE ($rel_type IS NULL OR type(r) = $rel_type) "
-    "RETURN r.polarity AS polarity, count(*) AS n ORDER BY n DESC"
-)
-_TOP_ENTITIES_BY_MENTIONS = (
-    "MATCH (e:__Entity__) "
-    "WHERE ($type IS NULL OR $type IN labels(e)) "
-    "AND ($exclude_ids = false OR NONE(l IN labels(e) WHERE l IN $id_types)) "
-    "AND e.mention_count IS NOT NULL "
-    "RETURN e.name AS name, e.mention_count AS mentions "
-    "ORDER BY e.mention_count DESC LIMIT $top_n"
-)
-_TOP_ENTITIES_BY_DEGREE = (
-    "MATCH (e:__Entity__) WHERE ($type IS NULL OR $type IN labels(e)) "
-    "OPTIONAL MATCH (e)-[r]-(:__Entity__) WHERE (r.polarity IS NULL OR r.polarity <> 'negated') "
-    "WITH e, count(r) AS degree "
-    "RETURN e.name AS name, degree ORDER BY degree DESC LIMIT $top_n"
-)
 
 
 class AggregationsGraphOps(Protocol):
@@ -106,63 +59,8 @@ class AggregationsGraphOps(Protocol):
     def top_entities_by_degree(self, type: str | None, top_n: int) -> list[dict]: ...
 
 
-class Neo4jAggregationsGraphOps:
-    """Runs the historical aggregations Cypher verbatim — zero behaviour
-    change from the pre-seam ``analytics/primitives/aggregations.py``
-    implementation. Fail-soft per method: mirrors
-    ``analytics/store_query.py::run_rows`` (``try/except -> []``, same
-    warning log)."""
-
-    def __init__(self, store: Any):
-        self._store = store
-
-    def _rows(self, cypher: str, params: dict) -> list[dict]:
-        try:
-            rows = self._store.structured_query(cypher, param_map=params)
-            return list(rows or [])
-        except Exception as exc:  # fail-soft, like store_query.run_rows
-            logger.warning("analytics query failed: {e}", e=exc)
-            return []
-
-    def count_entities(self, type: str | None, exclude_identifiers: bool) -> list[dict]:
-        params = {"type": type, "exclude_ids": exclude_identifiers, "id_types": ID_TYPES}
-        return self._rows(_COUNT_ENTITIES, params)
-
-    def count_relationships(
-        self, rel_type: str | None, polarity: str | None
-    ) -> list[dict]:
-        params = {"rel_type": rel_type, "polarity": polarity}
-        return self._rows(_COUNT_RELATIONSHIPS, params)
-
-    def distribution_by_type(self, exclude_identifiers: bool) -> list[dict]:
-        params = {"exclude_ids": exclude_identifiers, "id_types": ID_TYPES}
-        return self._rows(_DISTRIBUTION_BY_TYPE, params)
-
-    def distribution_by_relation_type(self) -> list[dict]:
-        return self._rows(_DISTRIBUTION_BY_RELATION_TYPE, {})
-
-    def distribution_by_polarity(self, rel_type: str | None) -> list[dict]:
-        params = {"rel_type": rel_type}
-        return self._rows(_DISTRIBUTION_BY_POLARITY, params)
-
-    def top_entities_by_mentions(
-        self, type: str | None, top_n: int, exclude_identifiers: bool
-    ) -> list[dict]:
-        params = {
-            "type": type,
-            "exclude_ids": exclude_identifiers,
-            "id_types": ID_TYPES,
-            "top_n": top_n,
-        }
-        return self._rows(_TOP_ENTITIES_BY_MENTIONS, params)
-
-    def top_entities_by_degree(self, type: str | None, top_n: int) -> list[dict]:
-        params = {"type": type, "top_n": top_n}
-        return self._rows(_TOP_ENTITIES_BY_DEGREE, params)
-
-
 def _nebula_fail_soft(method: Callable[..., list[dict]]) -> Callable[..., list[dict]]:
-    """Mirrors ``Neo4jAggregationsGraphOps._rows``'s ``try/except -> []``
+    """``run_rows``-style ``try/except -> []``
     (same warning log) at the method level."""
 
     @functools.wraps(method)
@@ -323,6 +221,4 @@ class NebulaAggregationsGraphOps:
 
 
 def build_aggregations_graph_ops(store: Any) -> AggregationsGraphOps:
-    if settings.graph.backend == "nebula":
-        return NebulaAggregationsGraphOps(store)
-    return Neo4jAggregationsGraphOps(store)
+    return NebulaAggregationsGraphOps(store)

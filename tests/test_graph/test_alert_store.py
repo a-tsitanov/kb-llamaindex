@@ -4,16 +4,6 @@ from src.graph import alert_store as als
 from src.graph.alert_store import alert_vid
 
 
-class _RecStore:
-    def __init__(self, rows=None):
-        self.calls: list[tuple[str, dict | None]] = []
-        self._rows = list(rows or [])
-
-    def structured_query(self, cypher, param_map=None):
-        self.calls.append((cypher, param_map))
-        return self._rows.pop(0) if self._rows else []
-
-
 class _NebulaRecStore:
     def __init__(self, canned: list[tuple[str, list[dict]]] | None = None):
         self.calls: list[tuple[str, dict | None]] = []
@@ -26,46 +16,6 @@ class _NebulaRecStore:
             if substr in stmt:
                 return rows
         return []
-
-
-# --- Neo4j: byte-for-byte -----------------------------------------------
-
-
-def test_neo4j_upsert_unscored_uses_create_only_cypher():
-    from src.graph.alerts import _UPSERT_ALERT
-
-    store = _RecStore()
-    als.Neo4jAlertStore(store).upsert_alert(
-        key="new_connection:A:OWNS:B", kind="new_connection", entity="A",
-        detail="OWNS:B", created_at=100, score=None,
-    )
-    assert store.calls[0][0] == _UPSERT_ALERT
-    assert store.calls[0][1]["key"] == "new_connection:A:OWNS:B"
-    assert "score" not in store.calls[0][1]
-
-
-def test_neo4j_upsert_scored_uses_scored_cypher():
-    from src.graph.alerts import _UPSERT_ALERT_SCORED
-
-    store = _RecStore()
-    als.Neo4jAlertStore(store).upsert_alert(
-        key="risk_rise:Shell:", kind="risk_rise", entity="Shell",
-        detail="", created_at=100, score=0.8,
-    )
-    assert store.calls[0][0] == _UPSERT_ALERT_SCORED
-    assert store.calls[0][1]["score"] == 0.8
-
-
-def test_neo4j_read_alerts_uses_read_cypher():
-    from src.graph.alerts import read_alerts_cypher
-
-    store = _RecStore(rows=[[{"key": "k", "kind": "risk_rise", "entity": "Shell"}]])
-    result = als.Neo4jAlertStore(store).read_alerts("risk_rise", None, 19000, 50)
-    assert result[0]["entity"] == "Shell"
-    assert store.calls[0] == (
-        read_alerts_cypher,
-        {"kind": "risk_rise", "entity": None, "since": 19000, "top_n": 50},
-    )
 
 
 # --- Nebula: MERGE semantics --------------------------------------------
@@ -139,9 +89,3 @@ def test_nebula_mark_watched_updates_each_entity():
     assert any(entity_vid("Bob") in s for s in stmts)
 
 
-# --- Dispatch ------------------------------------------------------------
-
-
-def test_dispatch_nebula(monkeypatch):
-    monkeypatch.setattr(als.settings.graph, "backend", "nebula")
-    assert isinstance(als.build_alert_store(_NebulaRecStore()), als.NebulaAlertStore)

@@ -1,22 +1,6 @@
 from __future__ import annotations
 
-from src.analytics.ids import ID_TYPES
 from src.graph import signals_graph_ops as sgo
-
-
-class _RecStore:
-    def __init__(self, rows=None):
-        self.calls: list[tuple[str, dict | None]] = []
-        self._rows = list(rows or [])
-
-    def structured_query(self, cypher, param_map=None):
-        self.calls.append((cypher, param_map))
-        return self._rows.pop(0) if self._rows else []
-
-
-class _RaisingStore:
-    def structured_query(self, cypher, param_map=None):
-        raise RuntimeError("boom")
 
 
 class _NebulaRecStore:
@@ -36,44 +20,6 @@ class _NebulaRecStore:
 class _NebulaRaisingStore:
     def structured_query(self, stmt, param_map=None):
         raise RuntimeError("boom")
-
-
-# --- Neo4j: byte-for-byte -----------------------------------------------
-
-
-def test_neo4j_risk_score_issues_moved_cypher():
-    store = _RecStore(rows=[[{"name": "S", "score": 0.8, "band": "high", "components": "{}"}]])
-    result = sgo.Neo4jSignalsGraphOps(store).risk_score("S", "high", 20)
-    assert result[0]["name"] == "S"
-    assert store.calls == [(sgo._RISK_SCORE, {"name": "S", "band": "high", "top_n": 20})]
-    assert "e.risk_score IS NOT NULL" in sgo._RISK_SCORE
-
-
-def test_neo4j_recommended_merges_issues_moved_cypher():
-    store = _RecStore(rows=[[{"key": "x", "names": ["X", "x"], "count": 2}]])
-    result = sgo.Neo4jSignalsGraphOps(store).recommended_merges(50)
-    assert result[0]["count"] == 2
-    assert store.calls == [(sgo._RECOMMENDED_MERGES, {"top_n": 50, "id_types": ID_TYPES})]
-    assert "toLower(trim(e.name))" in sgo._RECOMMENDED_MERGES
-
-
-def test_neo4j_review_queue_issues_moved_cypher():
-    store = _RecStore(rows=[[{"name": "Org", "degree": 2, "flag": "shell_signal"}]])
-    result = sgo.Neo4jSignalsGraphOps(store).review_queue(50)
-    assert result[0]["flag"] == "shell_signal"
-    assert store.calls == [(sgo._REVIEW_QUEUE, {"top_n": 50, "id_types": ID_TYPES})]
-
-
-def test_neo4j_circular_ownership_issues_moved_cypher():
-    store = _RecStore(rows=[[{"cycle": ["A", "B", "A"]}]])
-    result = sgo.Neo4jSignalsGraphOps(store).circular_ownership(20)
-    assert result[0]["cycle"] == ["A", "B", "A"]
-    assert store.calls == [(sgo._CIRCULAR_OWNERSHIP, {"top_n": 20})]
-    assert "OWNS*2..6" in sgo._CIRCULAR_OWNERSHIP
-
-
-def test_neo4j_fail_soft():
-    assert sgo.Neo4jSignalsGraphOps(_RaisingStore()).circular_ownership(20) == []
 
 
 # --- Nebula: blocked -> [] ----------------------------------------------
@@ -140,9 +86,3 @@ def test_nebula_fail_soft():
     assert sgo.NebulaSignalsGraphOps(_NebulaRaisingStore()).review_queue(20) == []
 
 
-# --- Dispatch ------------------------------------------------------------
-
-
-def test_dispatch_nebula(monkeypatch):
-    monkeypatch.setattr(sgo.settings.graph, "backend", "nebula")
-    assert isinstance(sgo.build_signals_graph_ops(_NebulaRecStore()), sgo.NebulaSignalsGraphOps)

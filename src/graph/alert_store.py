@@ -1,7 +1,6 @@
-"""Backend-dispatched Arc-2 :Alert store (upsert / read / mark_watched).
+"""Arc-2 Alert store (upsert / read / mark_watched).
 
-``Neo4jAlertStore`` runs the historical Cypher verbatim (the constants live in
-src/graph/alerts.py). ``NebulaAlertStore`` uses nGQL against the ``Alert`` TAG +
+``NebulaAlertStore`` uses nGQL against the ``Alert`` TAG +
 ``Entity.watched`` column (see nebula_schema): MERGE-on-key semantics are
 emulated with a FETCH-then-INSERT/UPDATE (unscored = create-only/first-write-wins;
 scored = create-or-refresh-score keeping created_at). All ops are fail-soft — the
@@ -13,8 +12,6 @@ from hashlib import blake2b
 from typing import Any, Protocol
 
 from loguru import logger
-
-from src.config import settings
 
 
 def alert_vid(key: str) -> str:
@@ -33,40 +30,6 @@ class AlertStore(Protocol):
     ) -> list[dict]: ...
 
     def mark_watched(self, names: list[str], watched: bool) -> None: ...
-
-
-class Neo4jAlertStore:
-    def __init__(self, store: Any):
-        self._store = store
-
-    def upsert_alert(self, *, key, kind, entity, detail, created_at, score):
-        from src.graph.alerts import _UPSERT_ALERT, _UPSERT_ALERT_SCORED
-
-        params: dict[str, Any] = {
-            "key": key, "kind": kind, "entity": entity,
-            "detail": detail, "created_at": created_at,
-        }
-        cypher = _UPSERT_ALERT
-        if score is not None:
-            params["score"] = score
-            cypher = _UPSERT_ALERT_SCORED
-        self._store.structured_query(cypher, param_map=params)
-
-    def read_alerts(self, kind, entity, since, top_n):
-        from src.graph.alerts import read_alerts_cypher
-
-        rows = self._store.structured_query(
-            read_alerts_cypher,
-            param_map={"kind": kind, "entity": entity, "since": since, "top_n": top_n},
-        )
-        return list(rows or [])
-
-    def mark_watched(self, names, watched):
-        from src.graph.alerts import _MARK_WATCHED
-
-        self._store.structured_query(
-            _MARK_WATCHED, param_map={"names": names, "watched": watched}
-        )
 
 
 class NebulaAlertStore:
@@ -142,6 +105,4 @@ class NebulaAlertStore:
 
 
 def build_alert_store(store: Any) -> AlertStore:
-    if settings.graph.backend == "nebula":
-        return NebulaAlertStore(store)
-    return Neo4jAlertStore(store)
+    return NebulaAlertStore(store)

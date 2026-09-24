@@ -1,28 +1,6 @@
 from __future__ import annotations
 
-from src.analytics.ids import ID_TYPES
 from src.graph import aggregations_graph_ops as ago
-
-
-class _RecStore:
-    """Records (cypher, param_map); returns canned rows popped in call order."""
-
-    def __init__(self, rows=None):
-        self.calls: list[tuple[str, dict | None]] = []
-        self._rows = list(rows or [])
-
-    def structured_query(self, cypher, param_map=None):
-        self.calls.append((cypher, param_map))
-        return self._rows.pop(0) if self._rows else []
-
-
-class _RaisingStore:
-    def __init__(self):
-        self.calls: list[tuple[str, dict | None]] = []
-
-    def structured_query(self, cypher, param_map=None):
-        self.calls.append((cypher, param_map))
-        raise RuntimeError("boom")
 
 
 class _NebulaRecStore:
@@ -49,77 +27,6 @@ class _NebulaRaisingStore:
     def structured_query(self, stmt, param_map=None):
         self.calls.append((stmt, param_map))
         raise RuntimeError("boom")
-
-
-# --- Neo4j: byte-for-byte guard (moved Cypher constants + params) --------
-
-
-def test_neo4j_count_entities_issues_moved_cypher():
-    store = _RecStore(rows=[[{"n": 7}]])
-    result = ago.Neo4jAggregationsGraphOps(store).count_entities("Organization", True)
-    assert result == [{"n": 7}]
-    assert store.calls == [
-        (ago._COUNT_ENTITIES, {"type": "Organization", "exclude_ids": True, "id_types": ID_TYPES}),
-    ]
-    assert ago._COUNT_ENTITIES == (
-        "MATCH (e:__Entity__) "
-        "WHERE ($type IS NULL OR $type IN labels(e)) "
-        "AND ($exclude_ids = false OR NONE(l IN labels(e) WHERE l IN $id_types)) "
-        "RETURN count(e) AS n"
-    )
-
-
-def test_neo4j_count_relationships_issues_moved_cypher():
-    store = _RecStore(rows=[[{"n": 3}]])
-    result = ago.Neo4jAggregationsGraphOps(store).count_relationships("OWNS", "negated")
-    assert result == [{"n": 3}]
-    assert store.calls == [(ago._COUNT_RELATIONSHIPS, {"rel_type": "OWNS", "polarity": "negated"})]
-
-
-def test_neo4j_distribution_by_type_issues_moved_cypher():
-    store = _RecStore(rows=[[{"type": "Person", "n": 5}]])
-    result = ago.Neo4jAggregationsGraphOps(store).distribution_by_type(True)
-    assert result == [{"type": "Person", "n": 5}]
-    assert store.calls == [(ago._DISTRIBUTION_BY_TYPE, {"exclude_ids": True, "id_types": ID_TYPES})]
-
-
-def test_neo4j_distribution_by_relation_type_issues_moved_cypher():
-    store = _RecStore(rows=[[{"rel": "OWNS", "n": 2}]])
-    result = ago.Neo4jAggregationsGraphOps(store).distribution_by_relation_type()
-    assert result == [{"rel": "OWNS", "n": 2}]
-    assert store.calls == [(ago._DISTRIBUTION_BY_RELATION_TYPE, {})]
-    assert "type(r) AS rel" in ago._DISTRIBUTION_BY_RELATION_TYPE
-
-
-def test_neo4j_distribution_by_polarity_issues_moved_cypher():
-    store = _RecStore(rows=[[{"polarity": "affirmed", "n": 5}]])
-    result = ago.Neo4jAggregationsGraphOps(store).distribution_by_polarity("OWNS")
-    assert result == [{"polarity": "affirmed", "n": 5}]
-    assert store.calls == [(ago._DISTRIBUTION_BY_POLARITY, {"rel_type": "OWNS"})]
-
-
-def test_neo4j_top_entities_by_mentions_issues_moved_cypher():
-    store = _RecStore(rows=[[{"name": "X", "mentions": 9}]])
-    result = ago.Neo4jAggregationsGraphOps(store).top_entities_by_mentions("Organization", 10, True)
-    assert result == [{"name": "X", "mentions": 9}]
-    assert store.calls == [
-        (
-            ago._TOP_ENTITIES_BY_MENTIONS,
-            {"type": "Organization", "exclude_ids": True, "id_types": ID_TYPES, "top_n": 10},
-        ),
-    ]
-
-
-def test_neo4j_top_entities_by_degree_issues_moved_cypher():
-    store = _RecStore(rows=[[{"name": "X", "degree": 4}]])
-    result = ago.Neo4jAggregationsGraphOps(store).top_entities_by_degree("Organization", 10)
-    assert result == [{"name": "X", "degree": 4}]
-    assert store.calls == [(ago._TOP_ENTITIES_BY_DEGREE, {"type": "Organization", "top_n": 10})]
-    assert "r.polarity <> 'negated'" in ago._TOP_ENTITIES_BY_DEGREE
-
-
-def test_neo4j_fail_soft_returns_empty_on_raise():
-    assert ago.Neo4jAggregationsGraphOps(_RaisingStore()).count_entities(None, True) == []
 
 
 # --- Nebula: nGQL shape per the rules doc --------------------------------
@@ -267,11 +174,3 @@ def test_nebula_fail_soft_returns_empty_on_raise():
     assert ago.NebulaAggregationsGraphOps(_NebulaRaisingStore()).count_entities(None, True) == []
 
 
-# --- Dispatch ------------------------------------------------------------
-
-
-def test_dispatch_returns_nebula_when_backend_nebula(monkeypatch):
-    monkeypatch.setattr(ago.settings.graph, "backend", "nebula")
-    assert isinstance(
-        ago.build_aggregations_graph_ops(_NebulaRecStore()), ago.NebulaAggregationsGraphOps
-    )

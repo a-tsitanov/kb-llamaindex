@@ -82,7 +82,7 @@ def group_specs_by_level(
     Returns a list of per-level groups ordered so the FINEST level (highest
     ``level`` number) comes first and the COARSEST (level 0) last.  The build
     workflow processes groups in this order so a coarser parent's child
-    reports are already persisted before it runs (``_CHILD_REPORTS_CYPHER``
+    reports are already persisted before it runs (``CommunitySummarize.read_child_reports``
     reads only children that already have a report).  Pure / unit-testable;
     within-group order is preserved from ``specs``.
     """
@@ -128,7 +128,7 @@ class CommunityBuildWorkflow:
 
         # ── 2. summarize level-by-level, FINEST-first ───────────────
         # A coarser parent's report is composed from its CHILD reports
-        # (_CHILD_REPORTS_CYPHER reads children that already have a report),
+        # (read_child_reports reads children that already have a report),
         # so the finest level must be fully persisted before the next
         # coarser level starts.  Within a level there is no such dependency,
         # so it fans out with bounded parallelism.  Pure grouping +

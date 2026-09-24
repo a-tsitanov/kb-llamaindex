@@ -1,8 +1,5 @@
-"""Backend-dispatched analytics "signals" graph ops (P2 decision-ready queues,
-read-only, fail-soft).
-
-``Neo4jSignalsGraphOps`` runs the existing Cypher verbatim (constants MOVED here
-from ``analytics/primitives/signals.py``). ``NebulaSignalsGraphOps``:
+"""Analytics "signals" graph ops (P2 decision-ready queues, read-only,
+fail-soft). ``NebulaSignalsGraphOps``:
 - ``recommended_merges``: fetch non-id entity names, group by case/space-
   insensitive display name in Python (nebula MATCH has no toLower/trim).
 - ``review_queue``: fetch each Organization's neighbour labels, classify shell
@@ -23,42 +20,10 @@ from typing import Any, Protocol
 from loguru import logger
 
 from src.analytics.ids import ID_TYPES
-from src.config import settings
 
 # defensive cap on var-len path enumeration under nebula (neo4j has none; a
 # circular-ownership red flag is rare, so this only guards pathological graphs).
 _CYCLE_SCAN_CAP = 10000
-
-_RISK_SCORE = (
-    "MATCH (e:__Entity__) WHERE e.risk_score IS NOT NULL "
-    "AND ($name IS NULL OR e.name=$name) AND ($band IS NULL OR e.risk_band=$band) "
-    "RETURN e.name AS name, e.risk_score AS score, e.risk_band AS band, "
-    "e.risk_components AS components ORDER BY e.risk_score DESC LIMIT $top_n"
-)
-_INVESTIGATE_NEXT = (
-    "MATCH (e:__Entity__) WHERE e.risk_score IS NOT NULL "
-    "RETURN e.name AS name, e.risk_score AS risk, "
-    "coalesce(e.completeness_score, 0.0) AS completeness "
-    "ORDER BY e.risk_score DESC, coalesce(e.completeness_score, 0.0) ASC LIMIT $top_n"
-)
-_RECOMMENDED_MERGES = (
-    "MATCH (e:__Entity__) WHERE NONE(l IN labels(e) WHERE l IN $id_types) "
-    "WITH toLower(trim(e.name)) AS key, collect(e.name) AS names, count(e) AS count "
-    "WHERE count > 1 RETURN key, names, count ORDER BY count DESC LIMIT $top_n"
-)
-_REVIEW_QUEUE = (
-    "MATCH (e:__Entity__:Organization) "
-    "OPTIONAL MATCH (e)-[]-(n:__Entity__) "
-    "WITH e, count(n) AS deg, "
-    "sum(CASE WHEN any(l IN labels(n) WHERE l IN $id_types) THEN 1 ELSE 0 END) "
-    "AS id_links "
-    "WHERE deg > 0 AND deg = id_links "
-    "RETURN e.name AS name, deg AS degree, 'shell_signal' AS flag ORDER BY deg DESC LIMIT $top_n"
-)
-_CIRCULAR_OWNERSHIP = (
-    "MATCH p=(a:__Entity__)-[:OWNS*2..6]->(a) "
-    "RETURN [n IN nodes(p) | n.name] AS cycle ORDER BY size(cycle) DESC LIMIT $top_n"
-)
 
 
 class SignalsGraphOps(Protocol):
@@ -71,34 +36,6 @@ class SignalsGraphOps(Protocol):
     def review_queue(self, top_n: int) -> list[dict]: ...
 
     def circular_ownership(self, top_n: int) -> list[dict]: ...
-
-
-class Neo4jSignalsGraphOps:
-    def __init__(self, store: Any):
-        self._store = store
-
-    def _rows(self, cypher: str, params: dict) -> list[dict]:
-        try:
-            rows = self._store.structured_query(cypher, param_map=params)
-            return list(rows or [])
-        except Exception as exc:  # fail-soft, like store_query.run_rows
-            logger.warning("analytics query failed: {e}", e=exc)
-            return []
-
-    def risk_score(self, name: str | None, band: str | None, top_n: int) -> list[dict]:
-        return self._rows(_RISK_SCORE, {"name": name, "band": band, "top_n": top_n})
-
-    def investigate_next(self, top_n: int) -> list[dict]:
-        return self._rows(_INVESTIGATE_NEXT, {"top_n": top_n})
-
-    def recommended_merges(self, top_n: int) -> list[dict]:
-        return self._rows(_RECOMMENDED_MERGES, {"top_n": top_n, "id_types": ID_TYPES})
-
-    def review_queue(self, top_n: int) -> list[dict]:
-        return self._rows(_REVIEW_QUEUE, {"top_n": top_n, "id_types": ID_TYPES})
-
-    def circular_ownership(self, top_n: int) -> list[dict]:
-        return self._rows(_CIRCULAR_OWNERSHIP, {"top_n": top_n})
 
 
 def _nebula_fail_soft(method: Callable[..., list[dict]]) -> Callable[..., list[dict]]:
@@ -214,6 +151,4 @@ class NebulaSignalsGraphOps:
 
 
 def build_signals_graph_ops(store: Any) -> SignalsGraphOps:
-    if settings.graph.backend == "nebula":
-        return NebulaSignalsGraphOps(store)
-    return Neo4jSignalsGraphOps(store)
+    return NebulaSignalsGraphOps(store)

@@ -16,7 +16,7 @@ async def test_topic_trend_buckets_epoch_days_in_python():
 
 @pytest.mark.asyncio
 async def test_relationship_timeline_routes_through_seam():
-    # _FakeStore drives the default Neo4jDynamicsGraphOps path.
+    # _FakeStore drives the NebulaDynamicsGraphOps path.
     store = _FakeStore(
         rows=[{"period": "2024-03", "rel": "OWNS", "name": "X", "polarity": "affirmed"}]
     )

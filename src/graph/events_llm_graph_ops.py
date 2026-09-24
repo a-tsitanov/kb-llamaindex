@@ -1,12 +1,11 @@
-"""Backend-dispatched analytics "events_llm" graph ops (E2 event reads,
+"""Analytics "events_llm" graph ops (E2 event reads,
 read-only, fail-soft): event_core / event_actors / event_timeline.
 
 trending_events (build_burst_cypher — a multi-window burst-rate detection) is NOT
 ported: it stays on run_rows and degrades to [] under nebula. Its nGQL port is a
 follow-up.
 
-``Neo4jEventsLlmGraphOps`` runs the existing Cypher verbatim (moved from
-``analytics/primitives/events_llm.py``). ``NebulaEventsLlmGraphOps`` reads the E2
+``NebulaEventsLlmGraphOps`` reads the E2
 event columns now carried on EventOrAction entities (see nebula_schema): FETCH by
 VID for the core, GO for actors, GO OVER PARTICIPATED_IN + Python window/sort for
 the timeline.
@@ -22,37 +21,6 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from loguru import logger
-
-from src.analytics.events_burst import build_burst_cypher
-from src.config import settings
-
-_EVENT_CORE = (
-    "MATCH (e:__Entity__:EventOrAction {name:$name}) "
-    "RETURN e.name AS name, e.event_type AS event_type, e.event_ts_raw AS event_ts_raw, "
-    "e.event_start_epoch AS event_start_epoch, e.event_end_epoch AS event_end_epoch, "
-    "e.event_ts_precision AS event_ts_precision, e.polarity AS polarity"
-)
-_EVENT_ACTORS = (
-    "MATCH (e:__Entity__:EventOrAction {name:$name})-[r]-(n) "
-    "RETURN n.name AS actor_name, type(r) AS rel "
-    "LIMIT $top_n"
-)
-_EVENT_TIMELINE = (
-    "MATCH (p:__Entity__ {name:$entity})-[:PARTICIPATED_IN]-(e:__Entity__:EventOrAction) "
-    "{where}"
-    "RETURN e.name AS name, e.event_type AS event_type, e.event_ts_raw AS event_ts_raw, "
-    "e.event_start_epoch AS event_start_epoch, e.event_end_epoch AS event_end_epoch, "
-    "e.event_ts_precision AS event_ts_precision "
-    "ORDER BY e.event_start_epoch IS NULL, e.event_start_epoch DESC LIMIT $top_n"
-)
-
-_EVENT_FIELDS = (
-    "event_type", "event_ts_raw", "event_start_epoch", "event_end_epoch", "event_ts_precision",
-)
-
-# E3 burst query (watched_only=False — the trending_events primitive). Single
-# source of truth is src/analytics/events_burst.py.
-_TRENDING = build_burst_cypher(watched_only=False)
 
 
 class EventsLlmGraphOps(Protocol):
@@ -71,54 +39,6 @@ class EventsLlmGraphOps(Protocol):
         ratio: float,
         top_n: int,
     ) -> list[dict]: ...
-
-
-class Neo4jEventsLlmGraphOps:
-    def __init__(self, store: Any):
-        self._store = store
-
-    def _rows(self, cypher: str, params: dict) -> list[dict]:
-        try:
-            rows = self._store.structured_query(cypher, param_map=params)
-            return list(rows or [])
-        except Exception as exc:  # fail-soft, like store_query.run_rows
-            logger.warning("analytics query failed: {e}", e=exc)
-            return []
-
-    def event_core(self, name: str) -> list[dict]:
-        return self._rows(_EVENT_CORE, {"name": name})
-
-    def event_actors(self, name: str, top_n: int) -> list[dict]:
-        return self._rows(_EVENT_ACTORS, {"name": name, "top_n": top_n})
-
-    def event_timeline(self, entity: str, since_secs: int | None, top_n: int) -> list[dict]:
-        params: dict[str, Any] = {"entity": entity, "top_n": top_n}
-        where = ""
-        if since_secs is not None:
-            params["since_secs"] = since_secs
-            where = "WHERE coalesce(e.event_start_epoch, e.created_at * 86400) >= $since_secs "
-        return self._rows(_EVENT_TIMELINE.replace("{where}", where), params)
-
-    def trending_events(
-        self,
-        since_recent: int,
-        since_baseline: int,
-        baseline_windows: int,
-        min_count: int,
-        ratio: float,
-        top_n: int,
-    ) -> list[dict]:
-        return self._rows(
-            _TRENDING,
-            {
-                "since_recent": since_recent,
-                "since_baseline": since_baseline,
-                "baseline_windows": baseline_windows,
-                "min_count": min_count,
-                "ratio": ratio,
-                "top_n": top_n,
-            },
-        )
 
 
 def _nebula_fail_soft(method: Callable[..., list[dict]]) -> Callable[..., list[dict]]:
@@ -320,6 +240,4 @@ class NebulaEventsLlmGraphOps:
 
 
 def build_events_llm_graph_ops(store: Any) -> EventsLlmGraphOps:
-    if settings.graph.backend == "nebula":
-        return NebulaEventsLlmGraphOps(store)
-    return Neo4jEventsLlmGraphOps(store)
+    return NebulaEventsLlmGraphOps(store)

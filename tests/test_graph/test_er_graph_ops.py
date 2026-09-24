@@ -33,69 +33,6 @@ def test_verdict_vid_distinct_per_key():
     assert ego.verdict_vid("key-a") != ego.verdict_vid("key-b")
 
 
-# --- Neo4j: byte-for-byte guard ---------------------------------------
-
-
-def test_neo4j_load_verdicts_issues_read_cypher_and_maps_rows():
-    rows = [[{"key": "k1", "same": True}, {"key": "k2", "same": False}]]
-    store = _RecStore(rows=rows)
-    ops = ego.Neo4jERGraphOps(store)
-
-    result = ops.load_verdicts(["k1", "k2"])
-
-    assert result == {"k1": True, "k2": False}
-    assert store.calls == [
-        (ego._LOAD_VERDICTS_CYPHER, {"keys": ["k1", "k2"]}),
-    ]
-    assert ego._LOAD_VERDICTS_CYPHER == (
-        "MATCH (v:ERVerdict) WHERE v.key IN $keys "
-        "RETURN v.key AS key, v.same AS same"
-    )
-
-
-def test_neo4j_store_verdicts_issues_constraint_then_unwind_merge():
-    store = _RecStore()
-    ops = ego.Neo4jERGraphOps(store)
-
-    ops.store_verdicts({"k": True})
-
-    assert store.calls == [
-        (ego._ENSURE_VERDICT_CONSTRAINT_CYPHER, None),
-        (ego._STORE_VERDICTS_CYPHER, {"rows": [{"key": "k", "same": True}]}),
-    ]
-    assert ego._ENSURE_VERDICT_CONSTRAINT_CYPHER == (
-        "CREATE CONSTRAINT er_verdict_key IF NOT EXISTS "
-        "FOR (v:ERVerdict) REQUIRE v.key IS UNIQUE"
-    )
-    assert ego._STORE_VERDICTS_CYPHER == (
-        "UNWIND $rows AS row MERGE (v:ERVerdict {key: row.key}) "
-        "SET v.same = row.same, v.updated = datetime()"
-    )
-
-
-def test_neo4j_ensure_verdict_schema_issues_constraint():
-    store = _RecStore()
-    ego.Neo4jERGraphOps(store).ensure_verdict_schema()
-    assert store.calls == [(ego._ENSURE_VERDICT_CONSTRAINT_CYPHER, None)]
-
-
-def test_neo4j_merge_loser_into_canonical_issues_apoc_merge_cypher():
-    store = _RecStore()
-    ops = ego.Neo4jERGraphOps(store)
-
-    ops.merge_loser_into_canonical(loser="L", canon="C")
-
-    assert len(store.calls) == 1
-    cypher, param_map = store.calls[0]
-    assert param_map == {"loser": "L", "canon": "C"}
-    assert "apoc.merge.relationship" in cypher
-    assert "DETACH DELETE loser" in cypher
-    assert cypher == ego._MERGE_LOSER_CYPHER
-
-
-# --- Dispatch ----------------------------------------------------------
-
-
 # The graph backend still decides who performs the GRAPH half. What
 # changed is that the verdict cache no longer rides along with it: by
 # default `build_er_graph_ops` wraps the backend in a composite whose

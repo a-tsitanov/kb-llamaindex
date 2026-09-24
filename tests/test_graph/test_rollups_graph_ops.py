@@ -3,21 +3,6 @@ from __future__ import annotations
 from src.graph import rollups_graph_ops as rgo
 
 
-class _RecStore:
-    def __init__(self, rows=None):
-        self.calls: list[tuple[str, dict | None]] = []
-        self._rows = list(rows or [])
-
-    def structured_query(self, cypher, param_map=None):
-        self.calls.append((cypher, param_map))
-        return self._rows.pop(0) if self._rows else []
-
-
-class _RaisingStore:
-    def structured_query(self, cypher, param_map=None):
-        raise RuntimeError("boom")
-
-
 class _NebulaRecStore:
     def __init__(self, canned: list[tuple[str, list[dict]]] | None = None):
         self.calls: list[tuple[str, dict | None]] = []
@@ -30,18 +15,6 @@ class _NebulaRecStore:
             if substr in stmt:
                 return rows
         return []
-
-
-def test_neo4j_amount_edges_issues_moved_cypher():
-    store = _RecStore(rows=[[{"counterparty": "A", "amount": "1 000"}]])
-    result = rgo.Neo4jRollupsGraphOps(store).amount_edges("A")
-    assert result == [{"counterparty": "A", "amount": "1 000"}]
-    assert store.calls == [(rgo._AMOUNT_EDGES, {"cp": "A"})]
-    assert ":Amount" in rgo._AMOUNT_EDGES
-
-
-def test_neo4j_fail_soft():
-    assert rgo.Neo4jRollupsGraphOps(_RaisingStore()).amount_edges(None) == []
 
 
 def test_nebula_amount_edges_matches_amount_label():
@@ -67,6 +40,3 @@ def test_nebula_fail_soft():
     assert rgo.NebulaRollupsGraphOps(_NebulaRaisingStore()).amount_edges(None) == []
 
 
-def test_dispatch_nebula(monkeypatch):
-    monkeypatch.setattr(rgo.settings.graph, "backend", "nebula")
-    assert isinstance(rgo.build_rollups_graph_ops(_NebulaRecStore()), rgo.NebulaRollupsGraphOps)

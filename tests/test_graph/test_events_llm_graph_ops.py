@@ -4,21 +4,6 @@ from src.graph import events_llm_graph_ops as ego
 from src.graph.nebula_store import entity_vid
 
 
-class _RecStore:
-    def __init__(self, rows=None):
-        self.calls: list[tuple[str, dict | None]] = []
-        self._rows = list(rows or [])
-
-    def structured_query(self, cypher, param_map=None):
-        self.calls.append((cypher, param_map))
-        return self._rows.pop(0) if self._rows else []
-
-
-class _RaisingStore:
-    def structured_query(self, cypher, param_map=None):
-        raise RuntimeError("boom")
-
-
 class _NebulaRecStore:
     def __init__(self, canned: list[tuple[str, list[dict]]] | None = None):
         self.calls: list[tuple[str, dict | None]] = []
@@ -36,40 +21,6 @@ class _NebulaRecStore:
 class _NebulaRaisingStore:
     def structured_query(self, stmt, param_map=None):
         raise RuntimeError("boom")
-
-
-# --- Neo4j: byte-for-byte -----------------------------------------------
-
-
-def test_neo4j_event_core_issues_moved_cypher():
-    store = _RecStore(rows=[[{"name": "E", "event_type": "PROTEST"}]])
-    result = ego.Neo4jEventsLlmGraphOps(store).event_core("E")
-    assert result[0]["event_type"] == "PROTEST"
-    assert store.calls == [(ego._EVENT_CORE, {"name": "E"})]
-    assert ":EventOrAction" in ego._EVENT_CORE
-
-
-def test_neo4j_event_actors_issues_moved_cypher():
-    store = _RecStore(rows=[[{"actor_name": "Ivan", "rel": "VICTIM"}]])
-    result = ego.Neo4jEventsLlmGraphOps(store).event_actors("E", 25)
-    assert result[0]["actor_name"] == "Ivan"
-    assert store.calls == [(ego._EVENT_ACTORS, {"name": "E", "top_n": 25})]
-
-
-def test_neo4j_event_timeline_windowless_and_windowed():
-    store = _RecStore(rows=[[{"name": "A"}], [{"name": "B"}]])
-    ops = ego.Neo4jEventsLlmGraphOps(store)
-    ops.event_timeline("John", None, 50)
-    assert store.calls[0][1] == {"entity": "John", "top_n": 50}
-    assert "WHERE" not in store.calls[0][0]
-    ops.event_timeline("John", 172800, 50)
-    assert store.calls[1][1] == {"entity": "John", "top_n": 50, "since_secs": 172800}
-    assert "coalesce(e.event_start_epoch, e.created_at * 86400) >= $since_secs" in store.calls[1][0]
-    assert "PARTICIPATED_IN" in store.calls[1][0]
-
-
-def test_neo4j_fail_soft():
-    assert ego.Neo4jEventsLlmGraphOps(_RaisingStore()).event_core("E") == []
 
 
 # --- Nebula: event_core (FETCH by vid + EventOrAction filter) -----------
@@ -147,18 +98,6 @@ def test_nebula_fail_soft():
 # --- trending_events -----------------------------------------------------
 
 
-def test_neo4j_trending_issues_burst_cypher():
-    store = _RecStore(rows=[[{"entity": "Acme", "event_type": "lawsuit", "recent": 6,
-                              "baseline_rate": 1.0, "burst_score": 6.0}]])
-    result = ego.Neo4jEventsLlmGraphOps(store).trending_events(19893, 19865, 4, 2, 1.0, 20)
-    assert result[0]["event_type"] == "lawsuit"
-    assert store.calls == [(ego._TRENDING, {
-        "since_recent": 19893, "since_baseline": 19865, "baseline_windows": 4,
-        "min_count": 2, "ratio": 1.0, "top_n": 20,
-    })]
-    assert "burst_score" in ego._TRENDING and "PARTICIPATED_IN" in ego._TRENDING
-
-
 def test_nebula_trending_computes_burst_in_python():
     p = entity_vid("Acme")
     e_recent, e_recent2, e_old = entity_vid("E1"), entity_vid("E2"), entity_vid("E0")
@@ -200,9 +139,3 @@ def test_nebula_trending_empty_when_no_events():
     assert ego.NebulaEventsLlmGraphOps(store).trending_events(90, 0, 1, 2, 1.0, 20) == []
 
 
-# --- Dispatch ------------------------------------------------------------
-
-
-def test_dispatch_nebula(monkeypatch):
-    monkeypatch.setattr(ego.settings.graph, "backend", "nebula")
-    assert isinstance(ego.build_events_llm_graph_ops(_NebulaRecStore()), ego.NebulaEventsLlmGraphOps)

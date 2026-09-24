@@ -3,21 +3,6 @@ from __future__ import annotations
 from src.graph import domain_graph_ops as dgo
 
 
-class _RecStore:
-    def __init__(self, rows=None):
-        self.calls: list[tuple[str, dict | None]] = []
-        self._rows = list(rows or [])
-
-    def structured_query(self, cypher, param_map=None):
-        self.calls.append((cypher, param_map))
-        return self._rows.pop(0) if self._rows else []
-
-
-class _RaisingStore:
-    def structured_query(self, cypher, param_map=None):
-        raise RuntimeError("boom")
-
-
 class _NebulaRecStore:
     """Returns canned rows keyed by first matching substring of the statement."""
 
@@ -37,30 +22,6 @@ class _NebulaRecStore:
 class _NebulaRaisingStore:
     def structured_query(self, stmt, param_map=None):
         raise RuntimeError("boom")
-
-
-# --- Neo4j: byte-for-byte -----------------------------------------------
-
-
-def test_neo4j_issue_stats_issues_moved_cypher():
-    store = _RecStore(rows=[[{"total": 10, "unresolved": 4}]])
-    result = dgo.Neo4jDomainGraphOps(store).issue_resolution_stats()
-    assert result == [{"total": 10, "unresolved": 4}]
-    assert store.calls == [(dgo._ISSUE_STATS, {})]
-    assert ":Issue" in dgo._ISSUE_STATS and ":Resolution" in dgo._ISSUE_STATS
-    assert "rr.polarity IS NULL OR rr.polarity <> 'negated'" in dgo._ISSUE_STATS
-
-
-def test_neo4j_comms_issues_moved_cypher():
-    store = _RecStore(rows=[[{"a": "A", "b": "B", "rel": "CONTACT", "interactions": 2}]])
-    result = dgo.Neo4jDomainGraphOps(store).communication_stats("A", 20)
-    assert result == [{"a": "A", "b": "B", "rel": "CONTACT", "interactions": 2}]
-    assert store.calls == [(dgo._COMMS, {"name": "A", "top_n": 20})]
-    assert "CONTACT|RESPONDED_TO" in dgo._COMMS
-
-
-def test_neo4j_fail_soft():
-    assert dgo.Neo4jDomainGraphOps(_RaisingStore()).issue_resolution_stats() == []
 
 
 # --- Nebula: issue_resolution_stats (two queries + Python) --------------
@@ -115,9 +76,3 @@ def test_nebula_fail_soft():
     assert dgo.NebulaDomainGraphOps(_NebulaRaisingStore()).communication_stats(None, 20) == []
 
 
-# --- Dispatch ------------------------------------------------------------
-
-
-def test_dispatch_nebula(monkeypatch):
-    monkeypatch.setattr(dgo.settings.graph, "backend", "nebula")
-    assert isinstance(dgo.build_domain_graph_ops(_NebulaRecStore()), dgo.NebulaDomainGraphOps)

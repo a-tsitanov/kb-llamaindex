@@ -42,9 +42,7 @@ from src.workflow.contracts import (
 
 # Semantic selection (v1): kNN over the structured community report
 # vectors, routed through ``CommunityReportVectorStore.knn`` (the
-# ``_SELECT_SEMANTIC_CYPHER`` this used to issue directly now lives
-# canonically in ``src/graph/community_vector_store.py`` — the Neo4j impl
-# wraps it verbatim, so the behaviour is unchanged; see
+# Milvus-backed store in ``src/graph/community_vector_store.py``; see
 # ``select_communities_semantic`` below).
 
 # Hierarchy-descent selection (v2): start at the coarsest level (0) and
@@ -114,11 +112,9 @@ async def select_communities_semantic(
     """kNN over the community report vectors → ``CommunitySummaryRef``s for
     ``level``, nearest-first, capped at ``limit`` (the queryNodes ``k``).
 
-    Routes through the ``CommunityReportVectorStore`` seam: the Neo4j impl
-    wraps ``_SELECT_SEMANTIC_CYPHER`` verbatim (identical behaviour to the
-    pre-seam direct-cypher path); a Milvus-backed store (nebula backend, or
-    opt-in ``community_vector_backend="milvus"``) searches its own
-    collection instead.  Same output shape as ``rank_summaries``.
+    Routes through the ``CommunityReportVectorStore`` seam (the
+    Milvus-backed store searches its own collection).  Same output shape
+    as ``rank_summaries``.
     Fail-open: returns ``[]`` on ANY error (store-build, knn, or mapping)
     so the caller can fall back to the lexical path."""
     try:

@@ -3,21 +3,6 @@ from __future__ import annotations
 from src.graph import dynamics_graph_ops as dgo
 
 
-class _RecStore:
-    def __init__(self, rows=None):
-        self.calls: list[tuple[str, dict | None]] = []
-        self._rows = list(rows or [])
-
-    def structured_query(self, cypher, param_map=None):
-        self.calls.append((cypher, param_map))
-        return self._rows.pop(0) if self._rows else []
-
-
-class _RaisingStore:
-    def structured_query(self, cypher, param_map=None):
-        raise RuntimeError("boom")
-
-
 class _NebulaRecStore:
     def __init__(self, canned: list[tuple[str, list[dict]]] | None = None):
         self.calls: list[tuple[str, dict | None]] = []
@@ -35,43 +20,6 @@ class _NebulaRecStore:
 class _NebulaRaisingStore:
     def structured_query(self, stmt, param_map=None):
         raise RuntimeError("boom")
-
-
-# --- Neo4j: byte-for-byte -----------------------------------------------
-
-
-def test_neo4j_relationship_timeline_issues_moved_cypher():
-    store = _RecStore(rows=[[{"period": "2024-03", "rel": "OWNS", "name": "X", "polarity": "a"}]])
-    result = dgo.Neo4jDynamicsGraphOps(store).relationship_timeline("Ромашка", None)
-    assert result[0]["period"] == "2024-03"
-    assert store.calls == [(dgo._RELATIONSHIP_TIMELINE, {"name": "Ромашка", "rel_type": None})]
-    assert "substring(r.valid_from,0,7)" in dgo._RELATIONSHIP_TIMELINE
-
-
-def test_neo4j_polarity_evolution_issues_moved_cypher():
-    store = _RecStore(rows=[[{"period": "2024-03", "polarity": "affirmed", "n": 2}]])
-    result = dgo.Neo4jDynamicsGraphOps(store).polarity_evolution(None, "OWNS")
-    assert result[0]["n"] == 2
-    assert store.calls == [(dgo._POLARITY_EVOLUTION, {"name": None, "rel_type": "OWNS"})]
-
-
-def test_neo4j_whats_changed_issues_moved_cypher():
-    store = _RecStore(rows=[[{"name": "A", "rel": "OWNS", "other": "B", "change": "appeared"}]])
-    result = dgo.Neo4jDynamicsGraphOps(store).whats_changed(
-        "2024-01-01", "2024-12-31", None, 100, 200, 50
-    )
-    assert result[0]["change"] == "appeared"
-    assert store.calls == [(
-        dgo._WHATS_CHANGED,
-        {"from": "2024-01-01", "to": "2024-12-31", "from_epoch": 100, "to_epoch": 200,
-         "entity": None, "top_n": 50},
-    )]
-    assert "created_at" in dgo._WHATS_CHANGED and "first_seen" in dgo._WHATS_CHANGED
-    assert "LIKELY_LINK" in dgo._WHATS_CHANGED
-
-
-def test_neo4j_fail_soft():
-    assert dgo.Neo4jDynamicsGraphOps(_RaisingStore()).relationship_timeline("X", None) == []
 
 
 # --- Nebula: relationship_timeline (substr, name-anchored) --------------
@@ -137,9 +85,3 @@ def test_nebula_fail_soft():
     ) == []
 
 
-# --- Dispatch ------------------------------------------------------------
-
-
-def test_dispatch_nebula(monkeypatch):
-    monkeypatch.setattr(dgo.settings.graph, "backend", "nebula")
-    assert isinstance(dgo.build_dynamics_graph_ops(_NebulaRecStore()), dgo.NebulaDynamicsGraphOps)

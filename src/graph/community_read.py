@@ -1,9 +1,6 @@
-"""Backend-dispatched community READ (map-phase summary fetch).
+"""Community READ (map-phase summary fetch).
 
-`Neo4jCommunityRead` wraps the existing ``_READ_SUMMARIES_CYPHER`` constant
-verbatim (default path, byte-for-byte unchanged; the constant was MOVED
-here from ``global_search.py``). `NebulaCommunityRead` translates the same
-read to nGQL. Only the lexical map-phase read lives here; semantic
+`NebulaCommunityRead` implements the read in nGQL. Only the lexical map-phase read lives here; semantic
 selection (report_vec) and hierarchy descent are deferred (report_vec is
 not on the nebula vertex — Milvus owns it), as is doc<->community linkage
 (chunks are not nebula graph nodes).
@@ -12,35 +9,9 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from src.config import settings
-
-# Read the stored community summaries for a level, largest first so the
-# most informative communities lead when ``limit`` truncates.  Empty/
-# unsummarised communities are skipped (summary IS NOT NULL / non-blank).
-_READ_SUMMARIES_CYPHER = """
-MATCH (c:Community {level: $level})
-WHERE c.summary IS NOT NULL AND trim(c.summary) <> ''
-RETURN c.id AS community_id, c.level AS level, c.summary AS summary,
-       coalesce(c.member_count, 0) AS member_count
-ORDER BY member_count DESC, community_id ASC
-"""
-
 
 class CommunityRead(Protocol):
     def read_summaries(self, *, level: int) -> list[dict]: ...
-
-
-class Neo4jCommunityRead:
-    """Runs the historical Cypher constant verbatim — zero behaviour change."""
-
-    def __init__(self, store: Any):
-        self._store = store
-
-    def read_summaries(self, *, level: int) -> list[dict]:
-        rows = self._store.structured_query(
-            _READ_SUMMARIES_CYPHER, param_map={"level": level},
-        )
-        return list(rows or [])
 
 
 class NebulaCommunityRead:
@@ -84,6 +55,4 @@ class NebulaCommunityRead:
 
 
 def build_community_read(store: Any) -> CommunityRead:
-    if settings.graph.backend == "nebula":
-        return NebulaCommunityRead(store)
-    return Neo4jCommunityRead(store)
+    return NebulaCommunityRead(store)
