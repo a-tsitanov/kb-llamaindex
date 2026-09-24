@@ -37,7 +37,8 @@ def test_upsert_rows():
 
 def test_knn_filters_level_and_maps():
     hit = {"entity": {"community_id": "c1", "level": 0, "summary": "s1"}}
-    c = _FakeClient(search_result=[[hit]])
+    blank = {"entity": {"community_id": "c2", "level": 0, "summary": "  "}}
+    c = _FakeClient(search_result=[[hit, blank]])
     out = _store(c).knn([0.0, 0.0], level=0, limit=5)
     assert c.searches[0]["filter"] == "level == 0" and c.searches[0]["limit"] == 5
     assert out == [{"community_id": "c1", "level": 0, "summary": "s1"}]

@@ -55,6 +55,29 @@ def test_nebula_stream_names_no_param_map():
     # got here without AssertionError, the seam is inline-only as required.
 
 
+def test_nebula_stream_names_stops_when_cursor_does_not_advance():
+    # ported from test_neo4j_stream_edges_stops_when_cursor_does_not_advance:
+    # a FULL page (== batch_size) whose last name does not advance the keyset
+    # cursor must stop, not loop forever re-issuing the same LOOKUP.
+    store = _RecNebula(lookup_pages=[[{"name": "A"}, {"name": None}]])
+    names = gee.NebulaGraphEdgeExport(store).stream_names(batch_size=2)
+    assert names == ["A"]
+    assert len(store.stmts) == 1
+
+    # last name present but not > after ("" -> "" never advances)
+    store = _RecNebula(lookup_pages=[[{"name": "B"}, {"name": ""}]])
+    names = gee.NebulaGraphEdgeExport(store).stream_names(batch_size=2)
+    assert names == ["B", ""]
+    assert len(store.stmts) == 1
+
+
+def test_nebula_stream_names_stops_on_empty_page():
+    # ported from test_neo4j_stream_names_stops_on_empty_page.
+    store = _RecNebula(lookup_pages=[[]])
+    assert gee.NebulaGraphEdgeExport(store).stream_names(batch_size=5) == []
+    assert len(store.stmts) == 1
+
+
 def test_nebula_stream_edges_with_names_skips_internal_name_scan():
     # Single-scan path: caller already streamed `names` (the real usage via
     # extract_entity_edges) -> stream_edges must NOT re-issue the LOOKUP
