@@ -1,19 +1,5 @@
-"""GRAPH_BACKEND toggle: default neo4j, env override to nebula."""
+"""NebulaGraph connection settings."""
 from __future__ import annotations
-
-
-def test_graph_backend_defaults_to_neo4j(monkeypatch):
-    monkeypatch.delenv("GRAPH_BACKEND", raising=False)
-    from src.config import GraphSettings
-
-    assert GraphSettings().backend == "neo4j"
-
-
-def test_graph_backend_env_override(monkeypatch):
-    monkeypatch.setenv("GRAPH_BACKEND", "nebula")
-    from src.config import GraphSettings
-
-    assert GraphSettings().backend == "nebula"
 
 
 def test_nebula_settings_default_port(monkeypatch):
