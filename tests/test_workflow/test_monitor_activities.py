@@ -11,9 +11,6 @@ from src.retrieval.date_filters import today_epoch_days
 # Import the module under test — will fail until activities.py exists.
 from src.workflow.monitor import activities as ma
 
-_EDGE_HINT = "a.watched = true OR b.watched = true"
-_RISK_HINT = "e.risk_score IS NOT NULL"
-_MERGE_HINT = "MERGE"
 # nebula has no MERGE: a new :Alert is an INSERT VERTEX (after a FETCH miss).
 _ALERT_INSERT = "INSERT VERTEX `Alert` "
 
@@ -62,30 +59,6 @@ class _NebulaStmtStore:
 
 
 _A, _B = entity_vid("Alice"), entity_vid("Bob")
-
-
-class _FakeStore:
-    """Records all structured_query calls and returns scripted rows."""
-
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, dict]] = []
-
-    def structured_query(self, cypher: str, param_map: dict | None = None) -> list[dict]:
-        self.calls.append((cypher, param_map or {}))
-        if _RISK_HINT in cypher:
-            return [{"name": "Alice", "score": 0.8}]
-        if _EDGE_HINT in cypher:
-            return [
-                {
-                    "src": "Alice",
-                    "rel": "KNOWS",
-                    "tgt": "Bob",
-                    "created_at": 12345,
-                    "a_watched": True,
-                    "b_watched": False,
-                }
-            ]
-        return []
 
 
 @pytest.mark.asyncio
@@ -158,47 +131,70 @@ async def test_detect_alerts_failsoft(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.risk_rise_alerts == 0
 
 
-class _BurstStore(_FakeStore):
-    def structured_query(self, cypher: str, param_map: dict | None = None) -> list[dict]:
-        self.calls.append((cypher, param_map or {}))
-        if "burst_score" in cypher:
-            return [
-                {
-                    "entity": "Acme",
-                    "event_type": "lawsuit",
-                    "recent": 6,
-                    "baseline_rate": 1.0,
-                    "burst_score": 6.0,
-                }
-            ]
-        return []  # no edges, no risk rows
+_BURST_ROW = {
+    "entity": "Acme",
+    "event_type": "lawsuit",
+    "recent": 6,
+    "baseline_rate": 1.0,
+    "burst_score": 6.0,
+}
+
+
+def _is_known_stmt(stmt: str) -> bool:
+    """The nebula reads/writes detect_alerts issues today besides burst: the
+    watched-edge / risk LOOKUPs and the Alert upsert (FETCH/INSERT/UPDATE)."""
+    return (
+        stmt in (_WATCHED_LOOKUP, _RISK_LOOKUP)
+        or stmt.startswith("FETCH PROP ON `Alert`")
+        or stmt.startswith(_ALERT_INSERT)
+        or stmt.startswith("UPDATE VERTEX ON `Alert`")
+    )
+
+
+class _NebulaBurstStore:
+    """Nebula fake for the burst sub-check: no watched entities (edges/risk
+    reads empty), every Alert FETCH misses (so an alert is INSERTed), and ANY
+    other statement — i.e. a future nebula burst read, whatever its nGQL —
+    answers the burst row.  Nebula binds no params."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def structured_query(self, query: str, param_map: dict | None = None) -> list[dict]:
+        assert not param_map, f"nebula binds no params, got {param_map!r}"
+        self.calls.append(query)
+        if _is_known_stmt(query):
+            return []
+        return [dict(_BURST_ROW)]
 
 
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "nebula behaves differently: watched_only burst detection is not "
-        "ported — _read_burst returns [] without querying under nebula "
+        "nebula gap: watched_only burst detection is not ported — "
+        "_read_burst returns [] under nebula without issuing any query "
         "(src/workflow/monitor/activities.py _read_burst), so no burst alert "
-        "can be raised; there is no nebula burst read for a fake to answer"
+        "is raised even when gated on.  The fake answers the burst row to ANY "
+        "non-watched/risk/Alert statement, so porting the read flips this to XPASS"
     ),
 )
 @pytest.mark.asyncio
 async def test_detect_alerts_burst_gated_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    store = _BurstStore()
+    store = _NebulaBurstStore()
     monkeypatch.setattr(ma, "_get_store", lambda: store)
     monkeypatch.setattr(ma.settings.monitor, "burst_enabled", True, raising=False)
     result = await ma.detect_alerts(MonitorIn(window_days=7, risk_rise_delta=0.1))
     assert result.burst_alerts == 1
-    merge_calls = [c for c, _ in store.calls if _MERGE_HINT in c]
-    assert len(merge_calls) == 1  # one burst alert MERGEd
+    inserts = [c for c in store.calls if c.startswith(_ALERT_INSERT)]
+    assert len(inserts) == 1  # one burst alert upserted (nebula: INSERT VERTEX)
 
 
 @pytest.mark.asyncio
 async def test_detect_alerts_burst_gated_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    store = _BurstStore()
+    store = _NebulaBurstStore()
     monkeypatch.setattr(ma, "_get_store", lambda: store)
     monkeypatch.setattr(ma.settings.monitor, "burst_enabled", False, raising=False)
     result = await ma.detect_alerts(MonitorIn())
     assert result.burst_alerts == 0
-    assert [c for c, _ in store.calls if "burst_score" in c] == []  # burst query never issued
+    # burst query never issued: only the watched/risk reads ran.
+    assert [c for c in store.calls if not _is_known_stmt(c)] == []

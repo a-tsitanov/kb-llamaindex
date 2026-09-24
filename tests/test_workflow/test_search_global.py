@@ -196,21 +196,6 @@ async def test_map_communities_no_store(monkeypatch):
 # ── select_communities_semantic (stubbed store) ─────────────────────
 
 
-class _FakeVecStore:
-    """Records the queries it received; returns canned queryNodes rows."""
-
-    def __init__(self, rows=None, raise_=False):
-        self._rows = rows if rows is not None else []
-        self._raise = raise_
-        self.queries: list[tuple[str, dict]] = []
-
-    def structured_query(self, cypher, param_map=None):
-        self.queries.append((cypher, param_map or {}))
-        if self._raise:
-            raise RuntimeError("vector index down")
-        return self._rows
-
-
 class _FakeEmbed:
     def __init__(self, vec=None, raise_=False):
         self._vec = vec or [0.1, 0.2, 0.3]
@@ -223,10 +208,15 @@ class _FakeEmbed:
 
 
 @pytest.mark.asyncio
-async def test_select_communities_semantic_failsafe_on_error():
-    store = _FakeVecStore(raise_=True)
+async def test_select_communities_semantic_failsafe_on_error(monkeypatch):
+    # building the report-vec store itself fails (e.g. Milvus unreachable) —
+    # deterministic: the seam raises, no real connection is attempted.
+    def _boom(store):
+        raise RuntimeError("vector index down")
+
+    monkeypatch.setattr(gs_mod, "build_community_report_vector_store", _boom)
     refs = await select_communities_semantic(
-        store, [0.1], level=0, limit=5,
+        object(), [0.1], level=0, limit=5,
     )
     assert refs == []
 
