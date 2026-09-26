@@ -2,10 +2,10 @@
 
 The entity/relationship MERGE lives inside llama_index, so we cannot set
 ON CREATE there. Instead, after upsert, stamp only elements that have no
-created_at yet, scoped to this ingest's elements. Combined with the one-time
-sentinel backfill (scripts/backfill_first_seen.py), this means: a node
+created_at yet, scoped to this ingest's elements. This means: a node
 created this pass gets stamped now; a re-mentioned old node keeps its
-original stamp.
+original stamp (elements that predate enabling E1 are stamped on their
+next mention — there is no backfill script for NebulaGraph).
 
 Per-entity ``UPDATE VERTEX ... WHEN created_at == 0`` and per-edge
 ``UPDATE EDGE ON `RELATED` ... WHEN created_at == 0`` (atomic, first-write-
@@ -20,6 +20,7 @@ from typing import Any
 from loguru import logger
 
 from src.graph.nebula_store import _q, entity_vid
+
 
 def stamp_first_seen(
     store: Any,

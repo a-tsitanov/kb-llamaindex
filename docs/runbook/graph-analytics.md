@@ -168,8 +168,7 @@ Fire-and-forget: `AnalyticsMaterializeWorkflow` на очереди **graph_buil
 link-prediction + risk и пишет обратно в граф (`src/analytics/materialize.py`).
 Параллелизм — `TEMPORAL_ANALYTICS_MATERIALIZE_CONCURRENCY`.
 
-**Когда запускать:** после каждого bulk-ингеста (например, tg_ingest) и после
-`reresolve_graph`; без прогона центральность/прогнозы отражают старый граф.
+**Когда запускать:** после каждого bulk-ингеста (например, tg_ingest); без прогона центральность/прогнозы отражают старый граф.
 Прогресс смотреть в Temporal UI (`analytics-materialize-*`).
 
 ## 6. Мониторинг Arc-2 (opt-in, выключен по умолчанию)

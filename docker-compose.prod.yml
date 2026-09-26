@@ -69,8 +69,9 @@ x-app-env: &app-env
   # "leidenalg".
   TEMPORAL_COMMUNITY_BACKEND: ${TEMPORAL_COMMUNITY_BACKEND:-leidenalg}
   # E1 first-seen stamping (created_at/first_doc_id on new graph elements) —
-  # powers volatility / burst / new-connections. Run
-  # scripts/backfill_first_seen ONCE before enabling on an existing graph.
+  # powers volatility / burst / new-connections. No backfill script exists for
+  # NebulaGraph: elements that predate enabling are stamped on their next
+  # mention (so they can briefly look "new").
   EVENTS_FIRST_SEEN_ENABLED: ${EVENTS_FIRST_SEEN_ENABLED:-false}
   # п.4 cross-channel event dedup: fold the entity-channel EventOrAction into
   # the same-chunk event-channel node it paraphrases (cosine >= threshold).
