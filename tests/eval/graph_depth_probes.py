@@ -5,7 +5,7 @@ Purpose: decide — with evidence — whether to raise the default
 1. These are connection-oriented questions where a 1-hop neighbourhood is
 expected to MISS the answer and a 2-hop neighbourhood should surface it.
 
-Running the comparison is MANUAL (needs a populated Neo4j graph): for each
+Running the comparison is MANUAL (needs a populated graph): for each
 probe, call ``graph_search(query, depth=1)`` then ``depth=2`` and compare
 the returned entities/relations against ``expects_at_2hops``. Score recall
 uplift and the extra node/token cost; only raise the default if the uplift

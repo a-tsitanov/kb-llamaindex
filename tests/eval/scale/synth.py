@@ -16,7 +16,8 @@ Two consumers:
 * ``gen_vectors`` → a plain ``(N, dim)`` float32 matrix + query set for
   the Milvus FLAT-vs-HNSW benchmark.
 * ``gen_edges`` → a degree-skewed edge list (with planted hubs) for the
-  graph_walk hub-cliff benchmark against a local Neo4j.
+  graph_walk hub-cliff benchmark against a local Neo4j (``bench_walk``;
+  legacy/manual, BYO instance — no Neo4j ships in this stack any more).
 """
 from __future__ import annotations
 

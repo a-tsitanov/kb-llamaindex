@@ -15,12 +15,15 @@ bracket the real graph by shape instead of measuring it directly.
 |---|---|---|---|
 | `er-cost` | **P0.2** ER candidate-gen O(N²) | nothing | how fast `_candidate_pairs` (the real function) blows up with entities-per-label |
 | `er-recall` | **P0.1** dedup window/floor | nothing | of planted near-duplicates, how many are surfaced as candidates (ceiling on dedup quality) |
-| `bench_er_native` | **P0.1 structural** native vs window | local Neo4j | native Neo4j vector kNN recall + latency vs what the 5000-window can even reach (justifies dropping the window) |
 | `milvus` | **P1.1** FLAT→HNSW | local Milvus | FLAT (exhaustive, the shipped-fix default) vs HNSW latency + HNSW recall vs FLAT |
-| `walk` | **P1.2** hub traversal | local Neo4j | `(e)-[*1..hops]-` walk latency from a normal node vs a planted hub |
+| `walk` | **P1.2** hub traversal | standalone Neo4j (legacy/manual — BYO instance; this stack no longer ships one) | `(e)-[*1..hops]-` walk latency from a normal node vs a planted hub |
 
-`milvus` / `walk` print a `skipped` line (never fail) when the local dev
-stack isn't up.
+`bench_er_native` (native Neo4j vector-kNN vs the 5000-window, P0.1
+structural) was removed with Neo4j — see "P0.1 structural" below for the
+historical result and `docs/superpowers/plans/2026-09-24-remove-neo4j.md`.
+
+`milvus` / `walk` print a `skipped` line (never fail) when the target
+infra isn't up.
 
 > **Never** point `--milvus-uri` / `--neo4j-uri` at production. These
 > write throwaway data (`:_ScaleBench` label / a temp collection) into
@@ -33,9 +36,9 @@ stack isn't up.
 uv run python -m tests.eval.scale.run_scale_bench er-cost   --sizes 200,400,800
 uv run python -m tests.eval.scale.run_scale_bench er-recall --n 600 --dup-rate 0.12 --knn-ks 5,10,20
 
-# needs a LOCAL dev stack (docker compose up -d milvus neo4j) — never prod
-uv run python -m tests.eval.scale.run_scale_bench milvus --n 200000 --dim 768
-uv run python -m tests.eval.scale.run_scale_bench walk   --hub-degrees 500,1000,5000 --hops 2
+# needs local infra — never prod
+uv run python -m tests.eval.scale.run_scale_bench milvus --n 200000 --dim 768   # docker compose up -d milvus
+uv run python -m tests.eval.scale.run_scale_bench walk   --hub-degrees 500,1000,5000 --hops 2  # BYO standalone Neo4j
 
 # everything available (infra ones skip if down)
 uv run python -m tests.eval.scale.run_scale_bench all
@@ -87,7 +90,7 @@ meaningful on *clustered* vectors — uniform-random vectors in 768-d are
 near-equidistant and give a misleading ~0.3; `gen_vectors` scales cluster
 noise by `1/sqrt(dim)` so the structure survives.)
 
-### P1.2 — graph_walk hub cliff (live Neo4j, 20k nodes, hops=2, cap=50)
+### P1.2 — graph_walk hub cliff (standalone Neo4j, 20k nodes, hops=2, cap=50)
 
 | start node | degree | walk p50 | slowdown vs normal |
 |---|---|---|---|
@@ -107,7 +110,7 @@ hops 2–3 and caps 50–200 the hub cliff never exceeded ~2× / ~20 ms —
 hub→hub→hub chain on a much larger graph could differ — re-measure on a
 restored graph before fully closing.)
 
-### P0.1 structural — native Neo4j vector kNN vs the 5000-window
+### P0.1 structural — native Neo4j vector kNN vs the 5000-window (HISTORICAL — bench script removed with Neo4j)
 
 Loading clustered entities into a native Neo4j vector index, querying
 `db.index.vector.queryNodes` for the nearest stored canonical per

@@ -1,15 +1,20 @@
 """graph_walk hub-degree cliff benchmark (P1.2).
 
-Loads a synthetic degree-skewed graph into a LOCAL Neo4j (dev stack —
-NOT production) and times the variable-length walk
-``(e)-[r*1..hops]-(m)`` from a low-degree node vs a planted hub.  The
-walk enumerates paths before the LIMIT applies, so on a hub the cost
-grows ~degree^hops — this benchmark makes that cliff visible and lets
-you find the degree threshold worth capping.
+LEGACY / MANUAL — this stack no longer ships a Neo4j service (Nebula is
+the sole graph backend); this Cypher-specific probe needs a standalone
+Neo4j instance you bring yourself, kept only for historical comparison.
+Skips cleanly (``status='skipped'``) with no such instance reachable —
+that's the normal case in CI and on a stock dev stack.
 
-Skips cleanly when no Neo4j is reachable.  Writes into an isolated label
-(``:_ScaleBench``) and deletes it afterwards, so it never touches real
-``:__Entity__`` data — but still: point it at a dev Neo4j, never prod.
+Loads a synthetic degree-skewed graph into that LOCAL Neo4j and times
+the variable-length walk ``(e)-[r*1..hops]-(m)`` from a low-degree node
+vs a planted hub.  The walk enumerates paths before the LIMIT applies,
+so on a hub the cost grows ~degree^hops — this benchmark makes that
+cliff visible and lets you find the degree threshold worth capping.
+
+Writes into an isolated label (``:_ScaleBench``) and deletes it
+afterwards, so it never touches real ``:__Entity__`` data — but still:
+point it at a throwaway Neo4j, never prod.
 """
 from __future__ import annotations
 

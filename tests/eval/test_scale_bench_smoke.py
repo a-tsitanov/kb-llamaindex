@@ -4,12 +4,17 @@ Tiny N so they run in CI in well under a second.  They verify the
 harness wiring (generators + the infra-free ER benchmarks + graceful
 skip when Milvus/Neo4j are down) — NOT the scaling numbers themselves
 (those come from running the CLI against bigger sizes / local infra).
+
+``bench_walk`` is the one remaining infra-bound bench that talks to a
+LOCAL Neo4j directly (Cypher-specific hub-walk cliff probe, kept as a
+legacy/manual tool — bring your own instance, none ships in this stack
+any more); the Nebula-bound benches (native ER kNN, graph-write
+contention) were removed with Neo4j (see docs/superpowers/plans/
+2026-09-24-remove-neo4j.md).
 """
 from __future__ import annotations
 
 from tests.eval.scale.bench_er import bench_cost_curve, bench_dedup_recall
-from tests.eval.scale.bench_er_native import bench_milvus_vs_native, bench_native_vs_window
-from tests.eval.scale.bench_graph_write import bench_graph_write
 from tests.eval.scale.bench_milvus import bench_flat_vs_hnsw
 from tests.eval.scale.bench_walk import bench_hub_walk
 from tests.eval.scale.synth import gen_edges, gen_items, gen_vectors
@@ -57,45 +62,3 @@ def test_milvus_bench_skips_without_infra() -> None:
 def test_walk_bench_skips_without_infra() -> None:
     out = bench_hub_walk(n_nodes=100, uri="bolt://127.0.0.1:1")  # nothing there
     assert out["status"] == "skipped"
-
-
-def test_er_native_bench_skips_without_infra() -> None:
-    out = bench_native_vs_window(n_stored=100, dim=8, uri="bolt://127.0.0.1:1")
-    assert out["status"] == "skipped"
-
-
-def test_milvus_vs_native_bench_skips_without_infra() -> None:
-    out = bench_milvus_vs_native(n_stored=100, n_new=10, milvus_uri="http://127.0.0.1:1")
-    assert out["status"] == "skipped"
-
-
-def test_graph_write_bench_skips_without_infra() -> None:
-    out = bench_graph_write(writers_sweep=(1, 2), rounds=2, uri="bolt://127.0.0.1:1")
-    assert out["status"] == "skipped"
-
-
-def test_graph_write_workload_shape_and_hub_overlap() -> None:
-    from tests.eval.scale.bench_graph_write import _gen_workload
-
-    work = _gen_workload(writers=4, rounds=3, batch=5, n_hubs=8, seed=1)
-    assert len(work) == 4 and all(len(w) == 3 for w in work)
-    assert all(len(r) == 5 for w in work for r in w)
-    # hub ids stay in range; local keys are per-writer unique (no contention)
-    hubs = {row["hub"] for w in work for r in w for row in r}
-    assert hubs and all(0 <= h < 8 for h in hubs)
-    locals_ = [row["local"] for w in work for r in w for row in r]
-    assert len(locals_) == len(set(locals_))
-
-
-def test_graph_write_retryable_detection() -> None:
-    from tests.eval.scale.bench_graph_write import _is_retryable
-
-    class _Err(Exception):
-        code = "Neo.TransientError.Transaction.DeadlockDetected"
-
-    class _Other(Exception):
-        code = "Neo.ClientError.Statement.SyntaxError"
-
-    assert _is_retryable(_Err())
-    assert not _is_retryable(_Other())
-    assert not _is_retryable(ValueError("no code attr"))
