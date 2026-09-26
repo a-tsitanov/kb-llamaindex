@@ -265,8 +265,11 @@ def materialize(
                     fk, tk = f"{namespace}:{from_v}", f"{namespace}:{to_v}"
                     if to_v is None or fk == tk or fk not in endpoints or tk not in endpoints:
                         continue
+                    kind = rule.kind
+                    if kind.startswith("$"):  # LLMs sometimes give the kind as a path
+                        kind = _one(item, kind, ctx) or "связан"
                     _add_relation(relations, RelationEl(
-                        from_key=fk, to_key=tk, kind=rule.kind,
+                        from_key=fk, to_key=tk, kind=kind,
                         refs=[Ref(call_id=call_id, path=base)]))
         except PathError as e:
             errors.append(f"relation {rule.kind!r}: {e}")

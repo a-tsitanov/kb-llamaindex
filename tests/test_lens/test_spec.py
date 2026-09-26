@@ -250,3 +250,14 @@ def test_relation_each_pointing_at_the_list_is_expanded():
                     aggregate_threshold=25, args={"query": "Росатом"},
                     known_keys={"kb:Росатом"})
     assert len(m.relations) == 4
+
+
+def test_relation_kind_may_be_a_path_with_fallback():
+    payload = {"links": [{"a": "E1", "b": "P1", "rel": "участник"}, {"a": "E1", "b": "P2"}],
+               "objs": [{"id": "E1"}, {"id": "P1"}, {"id": "P2"}]}
+    s = spec(objects=[{"name": "o", "each": "$.objs[*]", "id": "$.id", "label": "$.id",
+                       "type": "person"}],
+             relations=[{"each": "$.links[*]", "from_id": "$.a", "to_id": "$.b",
+                         "kind": "$.rel"}])
+    assert {r.key for r in run(s, payload=payload).relations} == {
+        "kb:E1|участник|kb:P1", "kb:E1|связан|kb:P2"}
