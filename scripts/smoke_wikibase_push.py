@@ -95,7 +95,7 @@ async def main() -> int:
     counts = await push_entities(
         entities=[person, phone],
         relations=[rel],
-        neo4j_store=gs,
+        graph_store=gs,
         wb_client=wb,
         base_class_qids=base_qids,
         property_pids=property_pids,

@@ -30,15 +30,12 @@ real store via ``_cleanup_stored_losers``.
 PREREQUISITES (read before running ``--no-dry-run``)
 ----------------------------------------------------
 1. Take a Nebula backup first.  Merges DETACH DELETE the loser nodes.
-2. For ``--candidate-source native`` (the default), the ER vector index
-   (``er_embedding_vec`` over ``__Entity__.er_vec``) and ``er_vec`` must
-   already exist — the read-only proxy NO-OPs the ``CREATE VECTOR INDEX``
-   write, so this job cannot build it.  Run::
-
-       python -m scripts.backfill_er_vector --no-dry-run
-
-   first.  Otherwise use ``--candidate-source window`` (bounded
-   mention_count window, no index needed).
+2. KNOWN GAP on Nebula: both ``--candidate-source`` modes load stored
+   candidates through the legacy parameterised Cypher loaders in
+   ``src/graph/entity_resolution.py`` (``native`` is the default), which
+   the Nebula store does not execute — they degrade to no stored
+   candidates, so this job currently only merges duplicates found WITHIN
+   each batch (no ``vector_store`` is passed to ``resolve_entities``).
 
 Usage::
 
@@ -342,9 +339,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--candidate-source",
         choices=["native", "window"],
         default="native",
-        help="How to load stored candidates: 'native' uses the ER vector "
-        "index (run backfill_er_vector first), 'window' uses the bounded "
-        "mention_count window (default: native).",
+        help="How to load stored candidates: 'native' = vector kNN, "
+        "'window' = bounded mention_count window (default: native). "
+        "Both are within-batch only on Nebula (see module docstring).",
     )
     p.add_argument(
         "--batch-size", type=int, default=200,
