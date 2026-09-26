@@ -7,10 +7,9 @@ only ever compares a NEW batch against stored canonicals, this job
 sweeps every eligible entity already in the graph and consolidates the
 duplicates that slipped through.
 
-Unlike ``scripts/merge_identifier_duplicates`` — which covers only
-deterministic identifier nodes (Phone / Email / INN / …) and flattens
-every redirected edge to ``RELATED_TO`` — THIS job operates on semantic
-entities and PRESERVES the original relationship types: it reuses
+THIS job operates on semantic entities (deterministic identifiers are
+canonicalised at ingest) and PRESERVES the original relationship types:
+it reuses
 ``entity_resolution._cleanup_stored_losers`` →
 ``build_er_graph_ops(...).merge_loser_into_canonical`` (nGQL: the loser's
 ``RELATED`` edges are repointed onto the canonical with their ``rel_type``,

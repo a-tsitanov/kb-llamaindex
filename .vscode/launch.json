@@ -52,17 +52,6 @@
       "justMyCode": false
     },
     {
-      "name": "CLI: merge identifier duplicates (dry-run)",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "scripts.merge_identifier_duplicates",
-      "args": ["--dry-run"],
-      "cwd": "${workspaceFolder}",
-      "envFile": "${workspaceFolder}/.env",
-      "console": "integratedTerminal",
-      "justMyCode": false
-    },
-    {
       "name": "CLI: check ingestion state",
       "type": "debugpy",
       "request": "launch",

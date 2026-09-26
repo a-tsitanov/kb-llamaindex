@@ -11,11 +11,9 @@ Concept / …), накопившиеся за много независимых 
 между ингестами или не попали в окно сравнения, ретроспективно не схлопываются —
 этот скрипт закрывает пробел, прогоняя ER по каждой уже существующей сущности.
 
-Отличия от соседних инструментов:
-- `scripts/merge_identifier_duplicates.py` — только **детерминированные
-  идентификаторы** (телефоны/ИНН/email) и **плющит** перецепленные рёбра в
-  обобщённый `RELATED_TO`.
-- **`reresolve_graph`** — **смысловые** сущности и **сохраняет тип связи**:
+Особенности:
+- **`reresolve_graph`** — **смысловые** сущности (детерминированные
+  идентификаторы канонизируются на инжесте) и **сохраняет тип связи**:
   `WORKS_AT` после слияния остаётся `WORKS_AT` (через
   `entity_resolution._cleanup_stored_losers` → `NebulaERGraphOps.merge_loser_into_canonical`,
   переносящий рёбра `RELATED` с их `rel_type`).
@@ -87,8 +85,8 @@ uv run python -m scripts.reresolve_graph --no-dry-run --yes
 SUBMIT JOB STATS;   # дождаться завершения (SHOW JOBS), затем
 SHOW STATS;         # число вершин тега Entity
 ```
-Типы связей перецепленных рёбер сохраняются — проверь, что `WORKS_AT`/`SIGNED`
-и т.п. не превратились в `RELATED_TO` (в этом и отличие от identifier-скрипта).
+Типы связей перецепленных рёбер сохраняются — проверь, что `rel_type` у
+перецепленных рёбер `RELATED` остался исходным (`WORKS_AT`/`SIGNED` и т.п.).
 
 ## 7. Откат
 
@@ -101,4 +99,3 @@ dry-run, потом бэкап, потом применение.
 - [`er-native-vector-knn.md`](er-native-vector-knn.md) — vector-kNN ER через Milvus
   на пути инжеста (источник кандидатов по всему графу).
 - [`../CONCEPTS.md`](../CONCEPTS.md) — раздел Entity Resolution (как устроен движок).
-- `scripts/merge_identifier_duplicates.py` — аналог для идентификаторов.
