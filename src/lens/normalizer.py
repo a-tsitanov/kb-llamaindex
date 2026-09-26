@@ -23,23 +23,30 @@ from src.lens.shape import sample_json
 from src.lens.spec import Materialized, SpecError, ViewSpec, materialize
 from src.lens.store import LensStore
 
-PROMPT_VERSION = "v2"
+PROMPT_VERSION = "v3"
 
 SYSTEM = """You convert an MCP tool response into extraction rules for an object canvas.
 Return ONLY a JSON object:
 {"objects":[{"name":str,"each":path|null,"id":path,"label":path,"type":str,
-             "attrs":{attr_name: path}}],
+             "type_path":path|null,"attrs":{attr_name: path}}],
  "relations":[{"each":path,"from_id":path,"to_each":path|null,"to_id":path,"kind":str}]}
 Path syntax: "$" then ".key", "[n]", "[*]", ["key with spaces"].
 Path scopes:
-- "each" is an absolute path to a list of items (or null: the whole response is ONE object).
+- "each" is an absolute path to the ITEMS of a list — end it with "[*]", e.g. "$.entities[*]"
+  (or null: the whole response is ONE object).
 - other paths are relative to ONE item and start with "$";
   "$root..." reads the whole response, "$args..." reads the tool call arguments
   (use them for the entity a call was ABOUT, e.g. the centre of a neighbours list).
 - relation: from_id relative to the item; to_each relative to the item (a list of targets)
   or null (target = the item itself); to_id relative to the target.
   Endpoints may be objects already on the canvas (listed below) — use the same ids.
-- "type" MUST be one of the vocabulary.
+- "type" MUST be one of the vocabulary. When items carry their own type field (e.g.
+  "entity_type": "Organization"), ALSO set "type_path" to it ("$.entity_type"): it is mapped
+  onto the vocabulary per item and "type" becomes the fallback (usually "other").
+  One rule per list — never several rules over the same list just to vary the type.
+- For a list ABOUT one thing given in the arguments (neighbours/links of X), add a relation
+  from "$args.<arg>" to each item, e.g. {"each":"$.entities[*]","from_id":"$args.query",
+  "to_id":"$.entity_name","kind":"связан"}.
 - NEVER copy values from the response; only write paths.
 - Prefer stable identifiers (ids, qids, ips, domains) for "id"; human names for "label".
 - If nothing in the response is an object (plain prose, counts only), return {"objects":[]}.
@@ -121,10 +128,12 @@ class Normalizer:
         vocabulary: list[str],
         aggregate_threshold: int,
         sample_chars: int,
+        aggregate_preview: int = 10,
     ) -> None:
         self.llm, self.store, self.model = llm, store, model
         self.vocabulary, self.threshold = vocabulary, aggregate_threshold
         self.sample_chars = sample_chars
+        self.preview = aggregate_preview
         self._salt = hashlib.sha1(f"{model}|{PROMPT_VERSION}".encode()).hexdigest()[:8]
 
     def cache_key(self, call: ToolCallRecord) -> str:
@@ -139,7 +148,8 @@ class Normalizer:
     ) -> Materialized:
         return materialize(spec, call.payload, namespace=call.ns, call_id=call.id,
                            vocabulary=self.vocabulary, aggregate_threshold=self.threshold,
-                           args=call.args, known_keys=known_keys)
+                           args=call.args, known_keys=known_keys,
+                           aggregate_preview=self.preview)
 
     async def normalize(
         self,

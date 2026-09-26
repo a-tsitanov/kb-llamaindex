@@ -178,3 +178,75 @@ def test_repeated_relation_keeps_all_refs():
         relations=[{"each": "$.pairs[*]", "from_id": "$.a", "to_id": "$.b", "kind": "k"}])
     (rel,) = run(s, payload=payload).relations
     assert [r.path for r in rel.refs] == ["$.pairs[0]", "$.pairs[1]"]
+
+
+KB_ENTITIES = {"entities": [
+    {"entity_name": "Росатом Квантовые технологии", "entity_type": "Organization",
+     "description": "d1"},
+    {"entity_name": "Аппаратные закладки", "entity_type": "Concept", "description": "d2"},
+    {"entity_name": "Лихачёв", "entity_type": "Person", "description": "d3"},
+    {"entity_name": "Постановление №719", "entity_type": "LegalAct", "description": "d4"},
+]}
+VOCAB_ALL = ["person", "organization", "event", "location", "document", "topic", "other"]
+
+
+def run_kb(s, payload=KB_ENTITIES, threshold=25, preview=0):
+    return materialize(s, payload, namespace="kb", call_id="c1", vocabulary=VOCAB_ALL,
+                       aggregate_threshold=threshold, aggregate_preview=preview)
+
+
+def test_each_pointing_at_the_list_itself_is_expanded():
+    rule = {"name": "e", "each": "$.entities", "id": "$.entity_name",
+            "label": "$.entity_name", "type": "other"}
+    star = dict(rule, each="$.entities[*]")
+    a, b = run_kb(spec(objects=[rule])), run_kb(spec(objects=[star]))
+    assert [o.key for o in a.objects] == [o.key for o in b.objects]
+    assert len(a.objects) == 4
+    assert a.objects[0].refs[0].path == "$.entities[0]"
+
+
+def test_type_path_maps_kb_types_to_vocabulary():
+    m = run_kb(spec(objects=[{"name": "e", "each": "$.entities[*]", "id": "$.entity_name",
+                              "label": "$.entity_name", "type": "other",
+                              "type_path": "$.entity_type"}]))
+    assert {o.label: o.type for o in m.objects} == {
+        "Росатом Квантовые технологии": "organization", "Аппаратные закладки": "topic",
+        "Лихачёв": "person", "Постановление №719": "other"}
+
+
+def test_type_path_unknown_value_falls_back_to_rule_type():
+    m = run_kb(spec(objects=[{"name": "e", "each": "$.entities[*]", "id": "$.entity_name",
+                              "label": "$.entity_name", "type": "document",
+                              "type_path": "$.entity_type"}]))
+    assert {o.label: o.type for o in m.objects}["Постановление №719"] == "document"
+
+
+def test_type_path_missing_on_item_uses_rule_type():
+    payload = {"entities": [{"entity_name": "X"}]}
+    m = run_kb(spec(objects=[{"name": "e", "each": "$.entities[*]", "id": "$.entity_name",
+                              "label": "$.entity_name", "type": "person",
+                              "type_path": "$.entity_type"}]), payload=payload)
+    assert m.objects[0].type == "person"
+
+
+def test_aggregate_preview_puts_first_items_on_canvas():
+    payload = {"entities": [{"entity_name": f"E{i}", "entity_type": "Person"}
+                            for i in range(30)]}
+    m = run_kb(spec(objects=[{"name": "e", "each": "$.entities[*]", "id": "$.entity_name",
+                              "label": "$.entity_name", "type": "other",
+                              "type_path": "$.entity_type"}]),
+               payload=payload, threshold=25, preview=5)
+    assert [o.label for o in m.objects] == ["E0", "E1", "E2", "E3", "E4"]
+    (agg,) = m.aggregates
+    assert agg.count == 30 and agg.item_type == "person" and agg.label == "person · 30"
+
+
+def test_relation_each_pointing_at_the_list_is_expanded():
+    s = spec(objects=[{"name": "e", "each": "$.entities[*]", "id": "$.entity_name",
+                       "label": "$.entity_name", "type": "other"}],
+             relations=[{"each": "$.entities", "from_id": "$args.query",
+                         "to_id": "$.entity_name", "kind": "связан"}])
+    m = materialize(s, KB_ENTITIES, namespace="kb", call_id="c1", vocabulary=VOCAB_ALL,
+                    aggregate_threshold=25, args={"query": "Росатом"},
+                    known_keys={"kb:Росатом"})
+    assert len(m.relations) == 4

@@ -127,3 +127,20 @@ async def test_error_call_is_raw_without_llm():
     r = await norm(llm).normalize(call(is_error=True), "")
     assert r.source == "raw" and "boom" in r.raw.reason
     assert llm.json_calls == []
+
+
+def test_prompt_v3_documents_type_path_and_each_star():
+    from src.lens.normalizer import PROMPT_VERSION, SYSTEM
+
+    assert PROMPT_VERSION == "v3"
+    assert '"type_path"' in SYSTEM and "[*]" in SYSTEM and "$args" in SYSTEM
+
+
+async def test_aggregate_preview_reaches_materialize():
+    payload = {"results": [{"qid": f"Q{i}", "name": f"N{i}"} for i in range(30)]}
+    llm = FakeLLM(json_replies=[GOOD])
+    n = Normalizer(llm, MemoryLensStore(), model="m", vocabulary=["organization"],
+                   aggregate_threshold=25, sample_chars=4000, aggregate_preview=3)
+    r = await n.normalize(call(payload), "")
+    assert [o.key for o in r.materialized.objects] == ["kb:Q0", "kb:Q1", "kb:Q2"]
+    assert r.materialized.aggregates[0].count == 30

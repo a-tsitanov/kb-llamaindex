@@ -64,8 +64,13 @@ def test_object_defaults():
 
 
 def test_namespace_keys_and_cors_lists():
-    s = LensSettings(api_keys=" a, b ,", cors_origins="http://x, http://y")
+    # explicit stream_secret: a developer .env may set LENS_STREAM_SECRET
+    s = LensSettings(api_keys=" a, b ,", cors_origins="http://x, http://y", stream_secret="")
     assert s.keys_list() == ["a", "b"] and s.cors_list() == ["http://x", "http://y"]
     assert s.stream_secret_value() == "a"
     s2 = LensSettings(mcp_servers=[{"name": "kb-tools", "namespace": "kb", "url": "u"}])
     assert s2.mcp_servers[0].ns == "kb"
+
+
+def test_aggregate_preview_default():
+    assert LensSettings().aggregate_preview == 10
