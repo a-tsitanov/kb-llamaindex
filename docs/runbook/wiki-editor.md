@@ -2,7 +2,7 @@
 
 ## 1. Что это
 
-Непрерывный редактор Wiki-статей — превращает сущности графа Neo4j в per-entity
+Непрерывный редактор Wiki-статей — превращает сущности графа NebulaGraph в per-entity
 MediaWiki-статьи. Каждая сущность получает отдельную страницу MediaWiki; если у
 сущности есть `wikibase_qid`, статья дополнительно привязывается к Wikibase Item
 через sitelink. Единица работы — одна сущность; триггер — гибридный: ingest
@@ -53,7 +53,7 @@ Ingest
         |                             # и endpoint'ах её связей
         ▼
   WikiSweepWorkflow (kb-wiki)
-        ├─ select_dirty_entities      # выбирает пачку dirty-сущностей из Neo4j
+        ├─ select_dirty_entities      # выбирает пачку dirty-сущностей из NebulaGraph
         └─ write_entity_article ×N   # для каждой: генерирует бот-секцию,
                                      # сравнивает hash, пишет в MediaWiki API
                                      # (sitelink → Wikibase Item, если есть qid)
@@ -74,7 +74,7 @@ curl -X POST "http://localhost:8000/api/v1/admin/wiki/rebuild?all=true" \
 ```
 
 Параметр `?all=true` сначала выставляет `wiki_dirty=true` на все сущности в
-Neo4j, потом запускает свип. Свип дренирует по `WIKI_SWEEP_BATCH` сущностей за
+NebulaGraph, потом запускает свип. Свип дренирует по `WIKI_SWEEP_BATCH` сущностей за
 раз; при большом графе запускайте ещё раз пока Temporal показывает выполнение.
 
 ## 4. Конфигурация (`WIKI_*`)

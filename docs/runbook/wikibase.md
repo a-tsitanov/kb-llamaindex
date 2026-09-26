@@ -2,9 +2,21 @@
 
 ## 1. Overview
 
-The Wikibase populator pushes canonical entities and their relations from the ingest pipeline into a self-hosted Wikibase instance. Owner-class entities (Person, Organization, etc.) become Wikibase **Items**; identifier-typed entities (phone, email, INN, ...) become **external-id statements** attached to their owner; relation labels between two owners are written as object-property statements between the two Items. Properties that don't yet exist in the instance are lazy-created on first use. Wikibase is maintained separately from Neo4j because consumers outside the RAG team want a queryable, schema-rich source of truth (Wikibase REST API + WDQS SPARQL) without being granted Neo4j access. QIDs are stored back on `:__Entity__` nodes (`wikibase_qid` property) so the next ingest knows whether to **create** or **update**.
+The Wikibase populator pushes canonical entities and their relations from the ingest pipeline into a self-hosted Wikibase instance. Owner-class entities (Person, Organization, etc.) become Wikibase **Items**; identifier-typed entities (phone, email, INN, ...) become **external-id statements** attached to their owner; relation labels between two owners are written as object-property statements between the two Items. Properties that don't yet exist in the instance are lazy-created on first use. Wikibase is maintained separately from the graph store (NebulaGraph) because consumers outside the RAG team want a queryable, schema-rich source of truth (Wikibase REST API + WDQS SPARQL) without being granted graph-database access. QIDs are stored back on `:__Entity__` nodes (`wikibase_qid` property) so the next ingest knows whether to **create** or **update**.
 
 Source plan: `docs/superpowers/plans/2026-05-18-wikibase-population.md`.
+
+> **Known gap on NebulaGraph (graph backend).** The populator's graph-side
+> caches are still Cypher: `push_wikibase._load_base_classes` /
+> `_load_properties` (`MATCH (b:WikibaseBaseClass)` / `(p:WikibaseProperty)`),
+> and `src/storage/wikibase.py`'s `_lookup_qid_for_entity` /
+> `_persist_qid_for_entity` / `_persist_property_pid` (parameterised
+> `MATCH`/`MERGE`). The Nebula store executes none of them (no such tags;
+> `param_map` is rejected), so with `WIKIBASE_ENABLED=true` the cache load
+> fails (`status="failed"`) and QID writeback / create-vs-update idempotency
+> does not work until these are ported to nGQL. The `WikibaseBaseClass` /
+> `WikibaseProperty` cache checks below therefore cannot succeed today; the
+> QID checks are given in nGQL against the `Entity.wikibase_qid` column.
 
 ## 2. Bring-up
 
@@ -51,12 +63,12 @@ If the source taxonomy changes and you want to force a re-read of remote labels,
 uv run python -m scripts.setup_wikibase --refresh-cache
 ```
 
-Verify cache nodes were written to Neo4j (the populator queries these on every push):
+Verify cache rows were written to the graph store (the populator queries these on every push; legacy Cypher — fails on NebulaGraph, see the gap note in §1):
 
 ```bash
 uv run python -c "
-from src.graph.store import build_neo4j_graph_store
-gs = build_neo4j_graph_store()
+from src.graph.store import build_graph_store
+gs = build_graph_store()
 rows = gs.structured_query('MATCH (b:WikibaseBaseClass) RETURN count(b) AS n')
 print('base classes cached:', rows[0]['n'])  # expect 10
 rows = gs.structured_query('MATCH (p:WikibaseProperty) RETURN count(p) AS n')
@@ -112,16 +124,15 @@ uv run python -m scripts.smoke_wikibase_push
 # Last successful run created Q11 in the live instance.
 ```
 
-Verify Neo4j has QIDs on every canonical entity from this run:
+Verify the graph has QIDs on every canonical entity from this run:
 
 ```bash
 uv run python -c "
-from src.graph.store import build_neo4j_graph_store
-gs = build_neo4j_graph_store()
-rows = gs.structured_query('''
-    MATCH (e:__Entity__) WHERE e.wikibase_qid IS NOT NULL
-    RETURN count(e) AS n
-''')
+from src.graph.store import build_graph_store
+gs = build_graph_store()
+rows = gs.structured_query(
+    'MATCH (e:Entity) WHERE e.Entity.wikibase_qid != \"\" RETURN count(e) AS n;'
+)
 print('entities with qid:', rows[0]['n'])
 "
 ```
@@ -203,10 +214,10 @@ curl -X POST http://localhost:8000/api/v1/ingest \
 # `updated_items > 0` and `created_items == 0`.
 ```
 
-If `created_items > 0` on a re-ingest, the QID writeback in Neo4j didn't persist, or the lookup is broken. Quick check:
+If `created_items > 0` on a re-ingest, the QID writeback to the graph didn't persist, or the lookup is broken. Quick check:
 
-```cypher
-MATCH (e:__Entity__) RETURN e.name, e.wikibase_qid LIMIT 10
+```ngql
+MATCH (e:Entity) RETURN e.Entity.name AS name, e.Entity.wikibase_qid AS qid LIMIT 10;
 ```
 
 Every canonical entity present in the previous run should have a non-null `wikibase_qid`. If they don't, see the troubleshooting row on QID writeback below.
@@ -219,11 +230,11 @@ pkill -f "src.workflow.worker"
 uv run python -m src.workflow.worker &
 ```
 
-`push_wikibase` activity returns `status="skipped"` instantly without touching Wikibase or Neo4j caches. Ingest behaves exactly as it did before this feature.
+`push_wikibase` activity returns `status="skipped"` instantly without touching Wikibase or the graph-side caches. Ingest behaves exactly as it did before this feature.
 
 ## 9. Full reset
 
-**WARNING — destructive.** The steps below delete every Item and Property in the local Wikibase instance, drop the MySQL volume, and remove the QID writeback from every Neo4j entity. Only do this on a dev/test instance.
+**WARNING — destructive.** The steps below delete every Item and Property in the local Wikibase instance, drop the MySQL volume, and remove the QID writeback from every graph entity. Only do this on a dev/test instance.
 
 ```bash
 # Drop the Wikibase data volumes.  WARNING — deletes ALL Items / Properties.
@@ -233,13 +244,14 @@ docker volume rm \
   kb-llamaindex_wikibase_images \
   kb-llamaindex_wikibase_wdqs_data 2>/dev/null || true
 
-# Clear the Neo4j cache nodes and entity QIDs:
+# Clear the graph-side cache rows and entity QIDs (legacy Cypher for the
+# WikibaseBaseClass/WikibaseProperty caches — fails on NebulaGraph, see §1):
 uv run python -c "
-from src.graph.store import build_neo4j_graph_store
-gs = build_neo4j_graph_store()
+from src.graph.store import build_graph_store
+gs = build_graph_store()
 gs.structured_query('MATCH (n:WikibaseBaseClass) DELETE n')
 gs.structured_query('MATCH (n:WikibaseProperty) DELETE n')
-gs.structured_query('MATCH (e:__Entity__) REMOVE e.wikibase_qid')
+# entity QIDs (nGQL): per entity, UPDATE VERTEX ON Entity "<vid>" SET wikibase_qid = ""
 "
 
 # Bring back up + bootstrap:
@@ -255,9 +267,9 @@ After this, the next ingest gets fresh QIDs (Q1, Q2, ...) — they won't match t
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `push_wikibase` heartbeat shows `enabled=False` despite env var | Worker started before env was set | `pkill -f src.workflow.worker; uv run python -m src.workflow.worker` after `export WIKIBASE_ENABLED=true` |
-| `push_wikibase` status="failed" in result | Wikibase container down / Neo4j cache empty / bootstrap not run | `docker compose -p kb-llamaindex ps wikibase` + verify cache counts (section 3) |
-| `Item not found` errors in Temporal logs | Bootstrap missed a step OR Neo4j cache was wiped | Re-run `uv run python -m scripts.setup_wikibase` |
-| `created_items > 0` on every re-ingest | QID writeback to Neo4j failing | Check `:__Entity__` nodes actually exist for these names (Neo4j-side bug); enable debug logs in `_persist_qid_for_entity` |
+| `push_wikibase` status="failed" in result | Wikibase container down / graph-side cache empty or unreadable (always, on NebulaGraph — see §1) / bootstrap not run | `docker compose -p kb-llamaindex ps wikibase` + verify cache counts (section 3) |
+| `Item not found` errors in Temporal logs | Bootstrap missed a step OR graph-side cache was wiped | Re-run `uv run python -m scripts.setup_wikibase` |
+| `created_items > 0` on every re-ingest | QID writeback to the graph failing (expected on NebulaGraph until ported — see §1) | Check `Entity` vertices actually exist for these names; enable debug logs in `_persist_qid_for_entity` |
 | MediaWiki "Main-account login deprecated" warning in logs | Bootstrap (admin path) + runtime bot login are both username/password style | Cosmetic; full migration to `Special:BotPasswords` token-auth is a future improvement (see section 11) |
 | `push_wikibase` keeps failing with `Login failed: Incorrect username or password` | KbBot user never provisioned, or its password drifted from `WIKIBASE_BOT_PASSWORD` | Re-run `uv run python -m scripts.setup_wikibase` — it idempotently reprovisions the bot via `createAndPromote --bot --force` |
 | `wbsearchentities` returning weird results | Label exists in wrong language slot | Confirm `WIKIBASE_LANGUAGE` matches what bootstrap used (default `ru`) |

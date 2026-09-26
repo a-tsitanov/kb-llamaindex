@@ -30,9 +30,9 @@
 |---|---|---|
 | `POST /api/v1/analyze` | Полный plan→compute→synthesize | `X-API-Key` |
 | MCP-1 `kb_analyze(query, top_n)` | То же самое через MCP (`src/mcp/search_server.py`) | `Authorization: Bearer <API_KEYS>` |
-| `POST /admin/graph/{stats,pagerank,personalized-pagerank,components,shortest-path}` | Прямые GDS-запросы без LLM | `X-API-Key` |
+| `POST /admin/graph/{stats,pagerank,personalized-pagerank,components,shortest-path}` | Прямые графовые алгоритмы (igraph в воркере / материализованный `pagerank`) без LLM | `X-API-Key` |
 | `POST /admin/graph/materialize` | Запуск офлайн-материализации (§6) | `X-API-Key` |
-| MCP-2 `graph_pagerank`, `graph_personalized_pagerank`, `graph_components`, `graph_shortest_path`, `graph_stats` | GDS-тулы для агентских клиентов | Bearer |
+| MCP-2 `graph_pagerank`, `graph_personalized_pagerank`, `graph_components`, `graph_shortest_path`, `graph_stats` | Графовые аналитические тулы для агентских клиентов | Bearer |
 
 ## 3. Контракт запроса/ответа
 

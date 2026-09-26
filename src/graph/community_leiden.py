@@ -19,7 +19,7 @@ from src.graph.graph_edge_export import build_graph_edge_export
 def extract_entity_edges(
     store: Any, *, batch_size: int = 50_000,
 ) -> tuple[list[tuple[str, str, float]], list[str]]:
-    """Stream the ``__Entity__`` graph out via the backend-dispatched
+    """Stream the ``Entity``/``RELATED`` graph out via the
     ``GraphEdgeExport`` seam as (edges, node_names)."""
     exp = build_graph_edge_export(store)
     names = exp.stream_names(batch_size=batch_size)

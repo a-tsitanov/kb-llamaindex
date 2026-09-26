@@ -160,7 +160,7 @@ curl -s -X POST 'localhost:8000/admin/wiki/rebuild?all=true'
 # → {"status":"started","workflow_id":"wiki-sweep-manual"}  | {"status":"disabled"} если WIKI_ENABLED=false
 ```
 
-`?all=true` сначала ставит `wiki_dirty=true` на каждый `:__Entity__` в Neo4j,
+`?all=true` сначала ставит `wiki_dirty=true` на каждую вершину `Entity` в NebulaGraph,
 затем запускает `WikiSweepWorkflow` на очереди `kb-wiki`. Без флага пересобираются
 только уже помеченные грязными сущности. При `WIKI_ENABLED=false` возвращает
 `{"status":"disabled"}` и ничего не делает.

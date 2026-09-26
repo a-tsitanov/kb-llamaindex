@@ -11,7 +11,7 @@ Hermes. Интеграция **аддитивна**: поведение MCP-се
 
 ## 1. Поднять SSE-сервисы
 
-Рядом с Temporal worker (тот же стек: Milvus, Neo4j, Postgres, LiteLLM):
+Рядом с Temporal worker (тот же стек: Milvus, NebulaGraph, Postgres, LiteLLM):
 
 ```bash
 # Атомарные тулы (основная поверхность для интерактивного цикла)

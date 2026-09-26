@@ -1,52 +1,53 @@
-# ER native vector kNN (снятие окна 5000)
+# ER vector kNN через Milvus (снятие окна 5000)
 
 ## Зачем
 Инкрементальный entity-resolution при каждом инжесте сравнивает новые
-сущности с уже сохранёнными. По умолчанию он грузит окно из
-`ER_INCREMENTAL_WINDOW` (5000) канонических сущностей, отсортированных по
+сущности с уже сохранёнными. Исходный путь грузил окно из
+`incremental_window` (5000) канонических сущностей, отсортированных по
 `mention_count`. На большом графе это потолок: замерено на синтетике —
 при **200k** канонических окно 5000 «видит» лишь **~2%** истинных
 ближайших матчей, остальное фрагментируется в дубли.
 
-Опциональный режим заменяет загрузку окна на **нативный векторный kNN
-Neo4j** по `er_vec` — для каждой новой сущности ищет ближайших
-канонических по **всему графу** (без окна). Бенч: recall ~96% при ~6 мс
-на запрос (`tests/eval/scale/bench_er_native`).
+Режим vector kNN заменяет загрузку окна на **kNN по Milvus-коллекции
+`entity_er_vec`** (шов `EntityVectorStore` → `MilvusEntityVectorStore`):
+для каждой новой сущности ищутся ближайшие канонические по **всему графу**
+(без окна). Бенч: recall ~96% (`tests/eval/scale/bench_er_native`).
 
-## Включение — строгий порядок (backfill → флаг)
+## Состояние по умолчанию
+Включено: `AGENT_ER_USE_NATIVE_VECTOR_KNN=true` (префикс `AGENT_` —
+`AgentSettings`). Ingest-активности `merge_and_resolve` всегда передают
+`vector_store=build_entity_vector_store(...)`, поэтому kNN идёт в Milvus, а
+разрешённые канонические сущности upsert'ятся обратно в `entity_er_vec`
+в конце ER — коллекция наполняется по мере инжеста.
 
-> Сначала backfill, потом флаг. Если включить флаг до backfill, индекс
-> пуст / у старых сущностей нет `er_vec`, и kNN ничего не найдёт (ER
-> деградирует до within-batch — без потери данных, но без пользы).
+```bash
+AGENT_ER_USE_NATIVE_VECTOR_KNN=true
+AGENT_ER_VECTOR_KNN_K=20   # соседей на новую сущность (по умолчанию 20)
+```
 
-1. **Бэкап Neo4j.**
-2. **Backfill `er_vec` + индекс** (один проход, без переэкстракции;
-   парсит `er_embedding` JSON → нативный список через APOC):
-   ```bash
-   python -m scripts.backfill_er_vector              # dry-run, считает сколько нужно
-   python -m scripts.backfill_er_vector --no-dry-run # применить
-   ```
-   Идемпотентно (повторный прогон трогает только сущности без `er_vec`).
-3. **Включить флаг** (префикс `AGENT_` — `AgentSettings`):
-   ```bash
-   AGENT_ER_USE_NATIVE_VECTOR_KNN=true
-   AGENT_ER_VECTOR_KNN_K=20   # соседей на новую сущность (по умолчанию 20)
-   ```
-   Перезапустить ingest-воркер. С этого момента инжест ещё и dual-write'ит
-   `er_vec` новым сущностям, так что индекс остаётся актуальным.
+Отдельного бэкфилла нет: сущности, записанные в граф до появления коллекции,
+находятся kNN только после ре-инжеста их документов.
 
 ## Откат
-Снять `AGENT_ER_USE_NATIVE_VECTOR_KNN` (→ `false`) и перезапустить воркер —
-вернётся загрузка окна. `er_vec` и индекс можно оставить (не мешают).
+`AGENT_ER_USE_NATIVE_VECTOR_KNN=false` + перезапуск ingest-воркера вернёт
+легаси-загрузку окна (`_load_existing_canonicals`). **Внимание:** это
+параметризованный Cypher, который хранилище NebulaGraph не выполняет — на
+Nebula откат означает ER только внутри батча (без кросс-документного
+дедупа). Используйте только как аварийный выключатель Milvus-зависимости.
 
 ## Проверка
-- `MATCH (e:__Entity__) WHERE e.er_vec IS NOT NULL RETURN count(e)` —
-  должно совпадать с числом сущностей, у которых есть `er_embedding`.
-- `SHOW INDEXES YIELD name, state WHERE name='er_embedding_vec'` →
-  `ONLINE`.
-- В логах merge/resolve активности склейки растут (меньше дублей в графе).
+- Размер коллекции растёт по мере инжеста:
+  ```bash
+  uv run python -c "
+  from pymilvus import MilvusClient
+  from src.config import settings
+  c = MilvusClient(uri=settings.milvus.uri)
+  print(c.get_collection_stats('entity_er_vec'))
+  "
+  ```
+- В логах merge/resolve нет `ER vector-store kNN failed`; склейки растут
+  (меньше дублей в графе).
 
 ## Требования
-Neo4j 5.x с поддержкой vector index; APOC (уже зависимость проекта —
-`graph_walk` использует `apoc.coll.flatten`). Размерность вектора берётся
-из `MILVUS_DIM` (`settings.milvus.dim`, по умолчанию 768).
+Milvus (тот же, что для чанков). Размерность вектора берётся из `MILVUS_DIM`
+(`settings.milvus.dim`, по умолчанию 768).

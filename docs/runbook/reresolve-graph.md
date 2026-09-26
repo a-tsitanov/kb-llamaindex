@@ -2,7 +2,7 @@
 
 ## 1. Что это
 
-`scripts/reresolve_graph.py` проходит по **всему** графу Neo4j и сливает
+`scripts/reresolve_graph.py` проходит по **всему** графу NebulaGraph и сливает
 фрагментированные дубли **смысловых** сущностей (Person / Organization /
 Concept / …), накопившиеся за много независимых ингестов.
 
@@ -17,35 +17,39 @@ Concept / …), накопившиеся за много независимых 
   обобщённый `RELATED_TO`.
 - **`reresolve_graph`** — **смысловые** сущности и **сохраняет тип связи**:
   `WORKS_AT` после слияния остаётся `WORKS_AT` (через
-  `entity_resolution._cleanup_stored_losers` → `apoc.merge.relationship` с
-  `type(r)`).
+  `entity_resolution._cleanup_stored_losers` → `NebulaERGraphOps.merge_loser_into_canonical`,
+  переносящий рёбра `RELATED` с их `rel_type`).
 
 ## 2. Как работает (коротко)
 
 Реальный ER-движок `resolve_entities` переиспользуется как **чистая функция
 решения**: граф-стор оборачивается в **read-only proxy** (`_ReadOnlyGraphStore`),
-который пропускает чтения (загрузку кандидатов через native-kNN), но глушит любые
+который пропускает чтения (загрузку кандидатов), но глушит любые
 записи. Поэтому `resolve_entities` ничего не меняет, а его `name_map`
 (`проигравший → канонический`) — чистый план слияний. План аккумулируется по всем
 батчам, схлопываются транзитивные цепочки, и **только при `--no-dry-run`** мёржи
 применяются уже настоящим стором через `_cleanup_stored_losers` (перецепить рёбра
-с сохранением типа → `DETACH DELETE` проигравшего; идемпотентно,
+с сохранением типа → `DELETE VERTEX … WITH EDGE` проигравшего; идемпотентно,
 safe-by-inaction).
 
 ## 3. Предусловия
 
-1. **Бэкап Neo4j** перед `--no-dry-run` (применение делает `DETACH DELETE`).
-2. Для `--candidate-source native` (по умолчанию) — сперва построить ER-векторный
-   индекс: `uv run python -m scripts.backfill_er_vector --no-dry-run` (иначе
-   read-only proxy глушит создание индекса, kNN ничего не находит → 0 кандидатов).
-   Альтернатива без индекса — `--candidate-source window` (окно по `mention_count`).
+1. **Бэкап NebulaGraph** перед `--no-dry-run` (применение удаляет вершины
+   проигравших вместе с рёбрами).
+2. **Известный разрыв на NebulaGraph:** оба источника кандидатов
+   (`--candidate-source native` по умолчанию и `window`) грузят сохранённых
+   каноников легаси-Cypher'ом (`_load_candidates_native` /
+   `_load_existing_canonicals`), который хранилище Nebula не выполняет → 0
+   stored-кандидатов. Скрипт не передаёт `vector_store` (Milvus `entity_er_vec`)
+   в `resolve_entities`, поэтому сейчас сливает только дубли **внутри каждого
+   батча** (`--batch-size`). Крупный `--batch-size` частично компенсирует.
 
 ## 4. Запуск
 
 ```bash
 # 1. Сухой прогон — показывает план слияний, граф НЕ меняется (по умолчанию)
 uv run python -m scripts.reresolve_graph
-uv run python -m scripts.reresolve_graph --candidate-source window   # без native-индекса
+uv run python -m scripts.reresolve_graph --candidate-source window   # легаси-окно (на Nebula тоже within-batch)
 
 # 2. Применить (ТОЛЬКО после бэкапа)
 uv run python -m scripts.reresolve_graph --no-dry-run --yes
@@ -56,7 +60,7 @@ uv run python -m scripts.reresolve_graph --no-dry-run --yes
 | Флаг | По умолчанию | Назначение |
 |---|---|---|
 | `--dry-run` / `--no-dry-run` | `--dry-run` | Превью плана без изменений / применить |
-| `--candidate-source {native,window}` | `native` | Источник кандидатов: kNN по `er_vec` (весь граф) или окно `mention_count` |
+| `--candidate-source {native,window}` | `native` | Источник кандидатов: kNN или окно `mention_count` (на Nebula оба сейчас дают 0 stored-кандидатов — см. §3.2) |
 | `--batch-size N` | `200` | Сколько сущностей прогонять через ER за раз |
 | `--types T [T ...]` | все | Ограничить типами (напр. `Person Organization`) |
 | `--limit N` | без лимита | Кап на общее число сущностей (для теста) |
@@ -67,7 +71,8 @@ uv run python -m scripts.reresolve_graph --no-dry-run --yes
 - **Доминирующая** — переэмбеддинг всех сущностей графа (ER всегда эмбеддит
   «новую» пачку, а здесь каждая сущность — «новая»). На большом графе это полный
   переэмбед; запускай нечасто, в тихое окно.
-- `native` дополнительно делает один kNN-запрос к векторному индексу на сущность.
+- `native` пытается сделать один kNN-запрос на сущность (на Nebula он падает и
+  логируется как `ER native kNN query failed`).
 - LLM-judge вызывается только для borderline-пар (кэш вердиктов в dry-run
   заглушен proxy — повторный прогон будет судить заново).
 
@@ -77,9 +82,10 @@ uv run python -m scripts.reresolve_graph --no-dry-run --yes
 # До/после: число сущностей (должно уменьшиться на applied-merges)
 # (в логе скрипта — summary={'entities_scanned', 'planned_merges'/'applied', 'batches'})
 ```
-```cypher
-// что слилось: у выживших каноников растёт mention_count; дубли исчезают
-MATCH (e:__Entity__) RETURN count(e) AS entities;
+```ngql
+# что слилось: у выживших каноников растёт mention_count; дубли исчезают
+SUBMIT JOB STATS;   # дождаться завершения (SHOW JOBS), затем
+SHOW STATS;         # число вершин тега Entity
 ```
 Типы связей перецепленных рёбер сохраняются — проверь, что `WORKS_AT`/`SIGNED`
 и т.п. не превратились в `RELATED_TO` (в этом и отличие от identifier-скрипта).
@@ -87,12 +93,12 @@ MATCH (e:__Entity__) RETURN count(e) AS entities;
 ## 7. Откат
 
 Отдельной «разъединяющей» операции нет — слияние удаляет проигравшие узлы.
-Откат = восстановление из бэкапа Neo4j (см. §3.1). Поэтому сперва **всегда**
+Откат = восстановление из бэкапа NebulaGraph (см. §3.1). Поэтому сперва **всегда**
 dry-run, потом бэкап, потом применение.
 
 ## 8. Связанное
 
-- [`er-native-vector-knn.md`](er-native-vector-knn.md) — включение native-vector
-  ER (даёт kNN-источник кандидатов по всему графу).
+- [`er-native-vector-knn.md`](er-native-vector-knn.md) — vector-kNN ER через Milvus
+  на пути инжеста (источник кандидатов по всему графу).
 - [`../CONCEPTS.md`](../CONCEPTS.md) — раздел Entity Resolution (как устроен движок).
 - `scripts/merge_identifier_duplicates.py` — аналог для идентификаторов.

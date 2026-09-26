@@ -1076,14 +1076,14 @@ async def _cleanup_stored_losers(
     """Repoint relations from each loser stored node onto its
     canonical sibling, then detach-delete the loser.
 
-    Uses ``apoc.merge.relationship`` to copy each loser's incoming and
-    outgoing edges onto the canonical with the original (dynamic)
-    relationship type and dedup, then ``DETACH DELETE`` the loser.
-    APOC is already a project-wide dependency (e.g. ``graph_walk`` uses
-    ``apoc.coll.flatten``).
+    Uses ``build_er_graph_ops(...).merge_loser_into_canonical``: copies
+    each loser's outgoing and incoming ``RELATED`` edges onto the
+    canonical (preserving ``rel_type``/polarity/validity/weight;
+    re-inserts are idempotent upserts), then ``DELETE VERTEX ... WITH
+    EDGE`` on the loser.
 
-    Failure is SAFE-BY-INACTION: if the repoint+delete throws (APOC
-    missing, transient error), the loser node is LEFT INTACT — it stays
+    Failure is SAFE-BY-INACTION: if the repoint+delete throws (nGQL
+    error, transient fault), the loser node is LEFT INTACT — it stays
     an un-merged duplicate (recoverable on a later run) rather than
     losing its relationships.  The old fallback ``DETACH DELETE``d the
     loser *without* moving its edges, silently dropping them.

@@ -159,7 +159,7 @@ DocumentIngestWorkflow (parent, queue=kb-ingest)
    ├─ GraphBuildWorkflow         ◀────── child, awaited
    │      ↓ runs on queue=kb-ingest-llm
    │   ┌─ merge_and_resolve     [role=judge]
-   │   └─ build_property_graph  [Neo4j writes]
+   │   └─ build_property_graph  [NebulaGraph writes]
    │      ↓ возвращает GraphBuildResult(merged, built)
    │      ↓ при ошибке → ChildWorkflowError → graph_status=vector_only
    ├─ push_wikibase             (skipped если vector_only)
@@ -359,12 +359,12 @@ llm_worker = Worker(
    - Читает `KGExtracted` (новые ноды документа) из staging-blob (MinIO)
    - Зовёт `merge_kg_extraction` ([`src/graph/merge.py`](../../src/graph/merge.py)) — орфографический dedup внутри документа
    - Зовёт `consolidate_phone_entities` ([`src/graph/phone_consolidation.py`](../../src/graph/phone_consolidation.py)) — нормализация E.164
-   - Зовёт **`resolve_entities`** ([`src/graph/entity_resolution.py`](../../src/graph/entity_resolution.py)) — это и есть **сличение новых сущностей с уже-сохранёнными в Neo4j** (см. [§ 8](#8-entity-resolution--как-новые-ноды-сличаются-с-существующими-graph-нодами))
+   - Зовёт **`resolve_entities`** ([`src/graph/entity_resolution.py`](../../src/graph/entity_resolution.py)) — это и есть **сличение новых сущностей с уже-сохранёнными в графе** (см. [§ 8](#8-entity-resolution--как-новые-ноды-сличаются-с-существующими-graph-нодами))
    - Пишет результат в staging-blob, возвращает `Merged`
 
 2. **`build_property_graph` activity** ([build_property_graph.py](../../src/workflow/activities/build_property_graph.py)):
    - Читает `Merged` из staging
-   - Через LlamaIndex `PropertyGraphIndex` делает `MERGE` в Neo4j (`MERGE (n:__Entity__ {name: ...}) SET ...`)
+   - Делает `upsert_nodes` / `upsert_relations` в NebulaGraph (вершины `Entity` по VID из имени, рёбра `RELATED`)
    - Возвращает `GraphBuilt(entities, relations)`
 
 Child возвращает `GraphBuildResult(merged=..., built=...)` обратно в parent.
@@ -398,7 +398,7 @@ ACTIVITY_TO_ROLE: Final[dict[str, LLMRole | None]] = {
     "inject_canonical":     None,           # regex identifier injection
     "extract_kg":           "extraction",   # LightRAG KG extraction
     "merge_and_resolve":    "judge",        # ER LLM-judge + cross-chunk merge
-    "build_property_graph": None,           # Neo4j writes only
+    "build_property_graph": None,           # graph writes only
     "push_wikibase":        None,           # MediaWiki REST, no LLM
     "finalize":             None,           # Postgres + cleanup only
 }
@@ -502,7 +502,8 @@ push_wikibase        |                    | mm-judge-swap  |           3
 ```
 1. Filter eligible labels (drop deterministic identifiers —
    Phone/Email/INN/etc. already canonicalised).
-2. (incremental) Load canonical entities + embeddings from Neo4j.
+2. (incremental) Load stored canonical entities + embeddings (Milvus
+     EntityVectorStore kNN on the ingest path).
 3. Compute embeddings for new entities (single batched call).
 4. Deterministic pre-pass — initialism regex, exact-normalised
    after stripping diacritics / punctuation.
@@ -523,49 +524,31 @@ push_wikibase        |                    | mm-judge-swap  |           3
 
 **Консервативный ER** — LLM-judge дефолтится на `DIFFERENT` при timeout / failure. False-negative (не смёрджили, хотя надо было) лучше, чем false-positive (смёрджили двух разных людей → KG испорчен).
 
-### 8.2 Загрузка существующих каноникалов — выдержка
+### 8.2 Загрузка существующих каноникалов
 
-[`src/graph/entity_resolution.py:976-1004`](../../src/graph/entity_resolution.py):
+На пути инжеста кандидаты из уже сохранённого графа приходят **kNN'ом из
+Milvus** (коллекция `entity_er_vec`, шов `EntityVectorStore`):
+`merge_and_resolve` передаёт `vector_store=build_entity_vector_store(...)`, и при
+`AGENT_ER_USE_NATIVE_VECTOR_KNN=true` (по умолчанию) `resolve_entities` зовёт
+`_load_candidates_via_store` — для каждой новой сущности `k`
+(`AGENT_ER_VECTOR_KNN_K`, 20) ближайших канонических по **всему графу**. После
+ER разрешённые канонические upsert'ятся обратно в `entity_er_vec`.
 
-```python
-async def _load_existing_canonicals(
-    graph_store: Any | None,
-) -> list[_Item]:
-    """Read Neo4j entities with `er_canonical_name` and their stored
-    embedding.  Returns empty when graph_store is None or any error
-    occurs (incremental ER is best-effort — without it we still do
-    within-batch ER).
-    """
-    if graph_store is None:
-        return []
-    try:
-        rows = await asyncio.to_thread(
-            graph_store.structured_query,
-            """
-            MATCH (n:__Entity__)
-            WHERE n.er_canonical_name IS NOT NULL
-            RETURN n.name AS name,
-                   labels(n) AS labels,
-                   n.er_embedding AS er_embedding,
-                   coalesce(n.mention_count, 1) AS mention_count,
-                   coalesce(n.description, '') AS description
-            LIMIT 5000
-            """,
-        )
-    except Exception as exc:
-        logger.warning("ER load existing canonicals failed: {err}", err=exc)
-        return []
-    ...
-```
-
-Загружает до 5000 канонических сущностей с embedding'ами из Neo4j. Дальше в `resolve_entities` они кладутся в одну корзину с новыми и идут через pipeline embedding-cosine + LLM-judge.
+Легаси-загрузчик окна `_load_existing_canonicals` (Cypher, до 5000 по
+`mention_count`) остался только для `AGENT_ER_USE_NATIVE_VECTOR_KNN=false`; на
+NebulaGraph он деградирует до `[]` (ER только внутри батча). Подробнее —
+[`er-native-vector-knn.md`](er-native-vector-knn.md).
 
 ### 8.3 Когда сличение фактически произойдёт
 
-Внутри `resolve_entities` ([line 1109](../../src/graph/entity_resolution.py)):
+Внутри `resolve_entities` ([`src/graph/entity_resolution.py`](../../src/graph/entity_resolution.py)):
 
 ```python
-stored_items = await _load_existing_canonicals(graph_store)
+if cfg.use_native_vector_knn:
+    if vector_store is not None:
+        stored_items = await _load_candidates_via_store(
+            vector_store, new_items, k=cfg.vector_knn_k,
+        )
 ```
 
 Затем `stored_items` сливаются с новыми из текущего документа в один большой список, после чего pipeline KNN-cosine + judge решает, кто чей дубликат. Если `Иван Иванов (stored)` и `Иванов И.И. (new)` дали cosine 0.92 + одинаковый script — auto-merge. Если cosine 0.7 — пограничный случай → LLM-judge с моделью роли `judge` (по дефолту small tier = `LITELLM_MODEL_SMALL`).
@@ -585,11 +568,11 @@ stored_items = await _load_existing_canonicals(graph_store)
   ER done  new_entities=3  canonical_clusters=1  merged=1  review=0
 ```
 
-Третья строка — пример **именно того, что ты спрашивал**: 'Морозова А. С.' (новая из текущего документа) смёрджилась с 'Анна Морозова (stored)' (уже в Neo4j). Каноническое имя выбрано как 'Анна Морозова'. Когда дальше `build_property_graph` напишет в Neo4j — обновит существующую ноду 'Анна Морозова' с новыми chunk-references, не создаст вторую.
+Третья строка — пример **именно того, что ты спрашивал**: 'Морозова А. С.' (новая из текущего документа) смёрджилась с 'Анна Морозова (stored)' (уже в графе). Каноническое имя выбрано как 'Анна Морозова'. Когда дальше `build_property_graph` напишет в NebulaGraph — обновит существующую вершину 'Анна Морозова' с новыми chunk-references, не создаст вторую.
 
-### 8.5 Запись обратно в Neo4j
+### 8.5 Запись обратно в NebulaGraph
 
-После ER-кластеризации `resolve_entities` возвращает `name_map: dict[str, str]`, который применяется к chunk-level KG-метаданным. Затем `build_property_graph` идёт в Neo4j через LlamaIndex `PropertyGraphIndex`. Каждый узел делается через `MERGE (n:__Entity__ {name: $name})` — `MERGE` в Cypher это upsert: создаст ноду, если её нет, прочитает, если есть. Через тот же MERGE добавляются property (`mention_count++`, `er_canonical_name`, embedding если меняется).
+После ER-кластеризации `resolve_entities` возвращает `name_map: dict[str, str]`, который применяется к chunk-level KG-метаданным и концам рёбер. Затем `build_property_graph` пишет в NebulaGraph явными `upsert_nodes` / `upsert_relations` (`src/graph/nebula_store.py`): вершина `Entity` адресуется VID, детерминированно выведенным из имени (`entity_vid`), поэтому `INSERT` — это upsert по имени (свойства `mention_count`, `er_canonical_name`, `description` обновляются, а first-seen провенанс сохраняется read-back'ом). Отношения становятся рёбрами `RELATED` с исходным типом в `rel_type`.
 
 ---
 
@@ -715,7 +698,7 @@ SELECT DISTINCT version_tag FROM ingest_metrics ORDER BY version_tag;
 | `merge_and_resolve.model` всё ещё small, env применён | `LITELLM_ROLE_TIERS` — JSON-строка; pydantic мёржит её на дефолты. Опечатка в JSON ⇒ парсинг падает/игнорируется | Проверь синтаксис: `LITELLM_ROLE_TIERS='{"judge":"large"}'` (кавычки!). Роль должна быть из `LLMRole`, tier ∈ {small,large} |
 | Lane `…` saturated — caller waiting (warning в логе) | Роль упёрлась в свой LLMPool lane-cap; новые вызовы ждут | Норма под нагрузкой. Если хронически — подними `LLM_POOL_LANE_CAPS` для роли (и tier-total, если упёрлись в него). См. [§ 3.5](#35-llmpool--владелец-конкурентности) |
 | Два разных workflow ID `ingest-X` и `graph-X` для одного ingest'а | Нормально — child workflow живёт отдельной execution | Это не баг. См. [§ 4.2](#42-три-практических-профита) |
-| `graph_status="vector_only"` после ingest'а | Child workflow упал (LLM лежит, ER timeout, Neo4j недостижим) | Открой `graph-{doc_id}` в Temporal UI — там видна активность, которая упала, + её stack. Это **best-effort** — документ доступен для vector-поиска |
+| `graph_status="vector_only"` после ingest'а | Child workflow упал (LLM лежит, ER timeout, NebulaGraph недостижим) | Открой `graph-{doc_id}` в Temporal UI — там видна активность, которая упала, + её stack. Это **best-effort** — документ доступен для vector-поиска |
 | Worker занят старыми workflow'ами из других worktree'ов | Несколько worker'ов из разных worktree подключены к одному Temporal-кластеру и конкурируют за task queue | `lsof -p <pid>` → `cwd` показывает worktree. Убей `kill <pid>` тот, что не нужен |
 | Warning `ingest_metrics: child history fetch skipped` в worker-логе | Путь был `vector_only` → child не запускался → `get_workflow_handle("graph-X").fetch_history()` вернул NotFound | Это норма — warning не валит pipeline; metrics-строки для parent-части записываются нормально |
 | Регистрация Temporal SA в `setup_db` падает с "advanced visibility unsupported" | Postgres visibility-store не поддерживает custom SA | Не блокирует — путь `ingest_metrics` работает без SA. Можно проигнорить либо мигрировать Temporal на ES visibility (большой шаг) |
