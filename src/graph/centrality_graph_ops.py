@@ -4,7 +4,7 @@ reads: top-by-metric + link prediction, read-only, fail-soft).
 ``NebulaCentralityGraphOps`` reads the
 centrality columns now materialized on Entity (analytics/materialize.py writes
 them in-worker under nebula). link_prediction → [] under nebula: there is no
-LIKELY_LINK edge (gds.nodeSimilarity has no in-worker port yet).
+LIKELY_LINK edge (link prediction has no in-worker port yet).
 """
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ class NebulaCentralityGraphOps:
 
     @_nebula_fail_soft
     def link_prediction(self, name: str, top_n: int) -> list[dict]:
-        # No LIKELY_LINK edge under nebula (gds.nodeSimilarity has no in-worker
+        # No LIKELY_LINK edge under nebula (link prediction has no in-worker
         # port yet). Documented degrade.
         return []
 

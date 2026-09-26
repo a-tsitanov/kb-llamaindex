@@ -7,12 +7,10 @@ sentinel backfill (scripts/backfill_first_seen.py), this means: a node
 created this pass gets stamped now; a re-mentioned old node keeps its
 original stamp.
 
-Backend dispatch (``settings.graph.backend``):
-- neo4j (default): the Cypher templates below via ``structured_query``.
-- nebula: per-entity ``UPDATE VERTEX ... WHEN created_at == 0`` and per-edge
-  ``UPDATE EDGE ON `RELATED` ... WHEN created_at == 0`` (atomic, first-write-
-  wins). RELATED carries created_at/first_doc_id columns (see nebula_schema),
-  and upsert_relations read-back-preserves them across re-upserts.
+Per-entity ``UPDATE VERTEX ... WHEN created_at == 0`` and per-edge
+``UPDATE EDGE ON `RELATED` ... WHEN created_at == 0`` (atomic, first-write-
+wins). RELATED carries created_at/first_doc_id columns (see nebula_schema),
+and upsert_relations read-back-preserves them across re-upserts.
 """
 
 from __future__ import annotations
@@ -21,29 +19,7 @@ from typing import Any
 
 from loguru import logger
 
-from src.config import settings
 from src.graph.nebula_store import _q, entity_vid
-
-# ── Cypher templates (neo4j) ─────────────────────────────────────────────────
-# Both use WHERE created_at IS NULL so that re-mentioned existing elements
-# keep their original first_seen stamp (ON CREATE semantics without an
-# explicit APOC / ON CREATE SET clause, which is unavailable from the
-# llama_index upsert path).
-
-_STAMP_ENTITIES = (
-    "UNWIND $names AS nm "
-    "MATCH (e:__Entity__ {name: nm}) "
-    "WHERE e.created_at IS NULL "
-    "SET e.created_at = $ts, e.first_doc_id = $doc_id"
-)
-
-_STAMP_RELS = (
-    "UNWIND $rels AS rel "
-    "MATCH (a:__Entity__ {name: rel.src})-[r]->(b:__Entity__ {name: rel.tgt}) "
-    "WHERE type(r) = rel.label AND r.created_at IS NULL "
-    "SET r.created_at = $ts, r.first_doc_id = $doc_id"
-)
-
 
 def stamp_first_seen(
     store: Any,
@@ -61,7 +37,7 @@ def stamp_first_seen(
     never blocks ingest.
 
     Args:
-        store: A graph store that exposes ``structured_query(cypher, param_map)``.
+        store: A Nebula graph store that exposes ``structured_query(stmt)``.
         entity_names: Display names of the entities upserted in this pass.
         relations: Triples ``(src_name, label, tgt_name)`` for relations upserted.
         ingest_epoch: Days since 1970-01-01 (UTC) — use ``today_epoch_days()``.
@@ -71,46 +47,15 @@ def stamp_first_seen(
         return
 
     try:
-        if settings.graph.backend == "nebula":
-            _stamp_first_seen_nebula(
-                store,
-                entity_names=entity_names,
-                relations=relations,
-                ingest_epoch=ingest_epoch,
-                doc_id=doc_id,
-            )
-        else:
-            _stamp_first_seen_neo4j(
-                store,
-                entity_names=entity_names,
-                relations=relations,
-                ingest_epoch=ingest_epoch,
-                doc_id=doc_id,
-            )
+        _stamp_first_seen_nebula(
+            store,
+            entity_names=entity_names,
+            relations=relations,
+            ingest_epoch=ingest_epoch,
+            doc_id=doc_id,
+        )
     except Exception as exc:
         logger.warning("stamp_first_seen failed (non-fatal): {e}", e=exc)
-
-
-def _stamp_first_seen_neo4j(
-    store: Any,
-    *,
-    entity_names: list[str],
-    relations: list[tuple[str, str, str]],
-    ingest_epoch: int,
-    doc_id: str,
-) -> None:
-    if entity_names:
-        store.structured_query(
-            _STAMP_ENTITIES,
-            param_map={"names": list(entity_names), "ts": ingest_epoch, "doc_id": doc_id},
-        )
-
-    if relations:
-        rels = [{"src": src, "label": lbl, "tgt": tgt} for src, lbl, tgt in relations]
-        store.structured_query(
-            _STAMP_RELS,
-            param_map={"rels": rels, "ts": ingest_epoch, "doc_id": doc_id},
-        )
 
 
 def _stamp_first_seen_nebula(

@@ -29,7 +29,6 @@ from typing import Any
 import numpy as np
 from temporalio import activity
 
-from src.config import settings
 from src.graph.community_read import build_community_read
 from src.graph.community_vector_store import build_community_report_vector_store
 from src.workflow.contracts import (
@@ -48,19 +47,8 @@ from src.workflow.contracts import (
 # Hierarchy-descent selection (v2): start at the coarsest level (0) and
 # greedily descend the ``PARENT_OF`` tree (coarse→fine) toward the most
 # query-relevant communities, collecting the finest relevant communities.
-# ``_DESCENT_ROOT_CYPHER`` seeds the level-0 frontier; ``_DESCENT_CHILDREN_
-# CYPHER`` expands one community into its finer children.
-_DESCENT_ROOT_CYPHER = """
-MATCH (c:Community {level: 0})
-WHERE c.report_vec IS NOT NULL
-RETURN c.id AS community_id, c.level AS level, c.summary AS summary, c.report_vec AS report_vec
-"""
-
-_DESCENT_CHILDREN_CYPHER = """
-MATCH (c:Community {id: $community_id, level: $level})-[:PARENT_OF]->(ch:Community)
-WHERE ch.report_vec IS NOT NULL
-RETURN ch.id AS community_id, ch.level AS level, ch.summary AS summary, ch.report_vec AS report_vec
-"""
+# ``_descent_root`` seeds the level-0 frontier; ``_descent_children``
+# expands one community into its finer children.
 
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
 
@@ -160,8 +148,8 @@ def _cosine(a: list[float] | None, b: list[float] | None) -> float:
 
 def _attach_report_vecs_nebula(store: Any, rows: list[dict]) -> list[dict]:
     """Attach each community's report_vec (from the Milvus store — it is NOT on
-    the nebula vertex) and DROP communities with no vector (mirrors neo4j's
-    ``WHERE c.report_vec IS NOT NULL``). Empty when the store can't fetch vectors."""
+    the nebula vertex) and DROP communities with no vector. Empty when the
+    store can't fetch vectors."""
     from src.graph.community_vector_store import build_community_report_vector_store
 
     fetch = getattr(build_community_report_vector_store(store), "fetch_vectors", None)
@@ -178,40 +166,34 @@ def _attach_report_vecs_nebula(store: Any, rows: list[dict]) -> list[dict]:
 
 
 def _descent_root(store: Any) -> list[dict]:
-    """Level-0 communities with report_vec. neo4j reads the vec off the vertex;
-    nebula reads the tree from the graph + the vec from Milvus."""
-    if settings.graph.backend == "nebula":
-        rows = store.structured_query(
-            "MATCH (c:`Community`) WHERE c.`Community`.level == 0 "
-            "RETURN c.`Community`.id AS community_id, c.`Community`.level AS level, "
-            "c.`Community`.summary AS summary"
-        )
-        rows = [r for r in (rows or []) if isinstance(r, dict) and r.get("community_id") is not None]
-        return _attach_report_vecs_nebula(store, rows)
-    return store.structured_query(_DESCENT_ROOT_CYPHER, {})
+    """Level-0 communities with report_vec: the tree from the graph + the vec
+    from Milvus."""
+    rows = store.structured_query(
+        "MATCH (c:`Community`) WHERE c.`Community`.level == 0 "
+        "RETURN c.`Community`.id AS community_id, c.`Community`.level AS level, "
+        "c.`Community`.summary AS summary"
+    )
+    rows = [r for r in (rows or []) if isinstance(r, dict) and r.get("community_id") is not None]
+    return _attach_report_vecs_nebula(store, rows)
 
 
 def _descent_children(store: Any, community_id: Any, level: Any) -> list[dict]:
     """PARENT_OF children of one community, with report_vec (see _descent_root)."""
-    if settings.graph.backend == "nebula":
-        from src.graph.community_writeback import community_vid
+    from src.graph.community_writeback import community_vid
 
-        vid = community_vid(str(community_id), int(level or 0))
-        edges = store.structured_query(f'GO FROM "{vid}" OVER `PARENT_OF` YIELD dst(edge) AS child')
-        child_vids = [e.get("child") for e in (edges or []) if isinstance(e, dict) and e.get("child")]
-        if not child_vids:
-            return []
-        quoted = ", ".join('"' + v + '"' for v in child_vids)
-        rows = store.structured_query(
-            f"FETCH PROP ON `Community` {quoted} YIELD "
-            "`Community`.id AS community_id, `Community`.level AS level, "
-            "`Community`.summary AS summary"
-        )
-        rows = [r for r in (rows or []) if isinstance(r, dict) and r.get("community_id") is not None]
-        return _attach_report_vecs_nebula(store, rows)
-    return store.structured_query(
-        _DESCENT_CHILDREN_CYPHER, {"community_id": community_id, "level": level},
+    vid = community_vid(str(community_id), int(level or 0))
+    edges = store.structured_query(f'GO FROM "{vid}" OVER `PARENT_OF` YIELD dst(edge) AS child')
+    child_vids = [e.get("child") for e in (edges or []) if isinstance(e, dict) and e.get("child")]
+    if not child_vids:
+        return []
+    quoted = ", ".join('"' + v + '"' for v in child_vids)
+    rows = store.structured_query(
+        f"FETCH PROP ON `Community` {quoted} YIELD "
+        "`Community`.id AS community_id, `Community`.level AS level, "
+        "`Community`.summary AS summary"
     )
+    rows = [r for r in (rows or []) if isinstance(r, dict) and r.get("community_id") is not None]
+    return _attach_report_vecs_nebula(store, rows)
 
 
 async def select_communities_descent(

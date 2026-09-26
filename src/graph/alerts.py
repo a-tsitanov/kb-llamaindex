@@ -1,7 +1,9 @@
-"""Arc 2 — Alert store + watchlist Cypher helpers (called off-loop from activities).
+"""Arc 2 — Alert store + watchlist helpers (called off-loop from activities).
 
 Helpers here are synchronous and must never raise — they log a WARNING on failure
 so the monitoring sweep stays alive even when the graph is transiently unavailable.
+All reads/writes are dispatched through ``build_alert_store`` (nebula); no Cypher
+lives in this module.
 """
 
 from __future__ import annotations
@@ -11,55 +13,6 @@ from typing import Any
 from loguru import logger
 
 from src.graph.alert_store import build_alert_store
-
-# ── Key construction ──────────────────────────────────────────────────────────
-
-_UPSERT_ALERT = """
-MERGE (a:Alert {key: $key})
-ON CREATE SET
-  a.kind       = $kind,
-  a.entity     = $entity,
-  a.detail     = $detail,
-  a.created_at = $created_at
-"""
-
-# Scored variant: the volatile value (risk/burst score) is NOT in the key, so
-# one :Alert per (kind, entity, detail) is kept and its score is refreshed in
-# place on re-detection (ON MATCH) instead of minting a new node each drift.
-_UPSERT_ALERT_SCORED = """
-MERGE (a:Alert {key: $key})
-ON CREATE SET
-  a.kind       = $kind,
-  a.entity     = $entity,
-  a.detail     = $detail,
-  a.created_at = $created_at,
-  a.score      = $score,
-  a.updated_at = $created_at
-ON MATCH SET
-  a.score      = $score,
-  a.updated_at = $created_at
-"""
-
-_MARK_WATCHED = """
-UNWIND $names AS n
-MATCH (e:__Entity__ {name: n})
-SET e.watched = $watched
-"""
-
-# Canonical :Alert read query — the single source of truth reused by the
-# `alerts` catalog primitive (Task 11). Optional filters are NULL-guarded so
-# the caller passes them as params ($kind/$entity/$since/$top_n), newest-first.
-read_alerts_cypher = (
-    "MATCH (a:Alert) "
-    "WHERE ($kind IS NULL OR a.kind = $kind) "
-    "AND ($entity IS NULL OR a.entity = $entity) "
-    "AND ($since IS NULL OR a.created_at >= $since) "
-    "RETURN a.key AS key, a.kind AS kind, a.entity AS entity, "
-    "a.detail AS detail, a.created_at AS created_at, "
-    "a.score AS score, a.updated_at AS updated_at "
-    "ORDER BY a.created_at DESC LIMIT $top_n"
-)
-
 
 # ── Public helpers ────────────────────────────────────────────────────────────
 
@@ -124,4 +77,4 @@ def mark_watched(store: Any, names: list[str], watched: bool = True) -> None:
         logger.warning("mark_watched failed (non-fatal): {e}", e=exc)
 
 
-__all__ = ["alert_key", "mark_watched", "read_alerts", "read_alerts_cypher", "upsert_alert"]
+__all__ = ["alert_key", "mark_watched", "read_alerts", "upsert_alert"]

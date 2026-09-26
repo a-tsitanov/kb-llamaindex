@@ -40,16 +40,6 @@ def test_surviving_community_ids():
     assert surviving_community_ids(partials) == ["1", "3"]
 
 
-def test_docs_for_communities_cypher_scoped_to_level0():
-    """После линковки членов на всех уровнях адресация по comm.id
-    коллизит между уровнями; траверс должен быть заскоуплен на level 0."""
-    from src.workflow.search.activities import documents
-
-    cy = documents._DOCS_FOR_COMMUNITIES_CYPHER
-    assert "-[:IN_COMMUNITY]->(comm:Community {level: 0})" in cy
-    assert "comm.id IN $ids" in cy
-
-
 # ── nebula doc↔community: member first_doc_id approximation ───────────
 
 
@@ -69,9 +59,7 @@ class _FakeNebulaStore:
 @pytest.mark.asyncio
 async def test_documents_for_communities_nebula_member_first_doc(monkeypatch):
     import src.workflow.search.activities.documents as mod
-    from src.config import settings
 
-    monkeypatch.setattr(settings.graph, "backend", "nebula")
     store = _FakeNebulaStore(canned=[
         ("OVER `IN_COMMUNITY` REVERSELY", [{"ent": "e1"}, {"ent": "e2"}]),
         ("FETCH PROP ON `Entity`", [{"doc_id": "dA"}, {"doc_id": "dB"}, {"doc_id": None}]),
@@ -82,3 +70,25 @@ async def test_documents_for_communities_nebula_member_first_doc(monkeypatch):
     # member first_doc_ids surfaced (None dropped by the downstream de-dup)
     assert set(res.doc_ids) == {"dA", "dB"}
     assert "IN_COMMUNITY` REVERSELY" in store.calls[0]
+
+
+@pytest.mark.asyncio
+async def test_docs_for_communities_scoped_to_level0(monkeypatch):
+    """Member links exist at every hierarchy level, but community ids are
+    unique only per level — the IN_COMMUNITY hop must start from the
+    LEVEL-0 community vertex, never another level's."""
+    import src.workflow.search.activities.documents as mod
+    from src.graph.community_writeback import community_vid
+
+    store = _FakeNebulaStore(canned=[
+        ("OVER `IN_COMMUNITY` REVERSELY", [{"ent": "e1"}]),
+        ("FETCH PROP ON `Entity`", [{"doc_id": "dA"}]),
+    ])
+    monkeypatch.setattr(mod, "_get_store", lambda: store)
+    await mod.documents_for_communities(
+        DocumentsForCommunitiesParams(community_ids=["1"]))
+    assert store.calls[0] == (
+        f'GO FROM "{community_vid("1", 0)}" OVER `IN_COMMUNITY` REVERSELY '
+        "YIELD src(edge) AS ent"
+    )
+    assert community_vid("1", 1) not in store.calls[0]

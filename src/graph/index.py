@@ -43,25 +43,18 @@ from src.retrieval._common import strip_thinking
 
 
 def _skip_under_nebula(fn):
-    """Short-circuit a neo4j ``ensure_*_index`` helper when the active graph
-    backend is nebula.
+    """Short-circuit a legacy neo4j ``ensure_*_index`` helper: always report
+    success without issuing any DDL.
 
-    All these helpers issue neo4j ``CREATE [FULLTEXT|VECTOR] INDEX`` DDL at
-    ``store.structured_query``. nebula 3.8 rejects that grammar
-    (``SyntaxError near 'INDEX'`` — it uses ``CREATE TAG INDEX``, created
-    separately by ``nebula_schema.ensure_schema``), so under nebula the DDL is
-    a guaranteed no-op that the fail-open ``except`` swallows — but it spams a
-    warning on every ingest / search bootstrap. Skip it and report success
-    (nothing to do), leaving the neo4j path byte-for-byte unchanged.
+    These helpers carry neo4j ``CREATE [FULLTEXT|VECTOR] INDEX`` DDL that
+    nebula 3.8 rejects (``SyntaxError near 'INDEX'`` — it uses ``CREATE TAG
+    INDEX``, created separately by ``nebula_schema.ensure_schema``).  Nebula
+    is the only graph backend, so the DDL is never sent.
     """
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        from src.config import settings
-
-        if settings.graph.backend == "nebula":
-            return True
-        return fn(*args, **kwargs)
+        return True
 
     return wrapper
 

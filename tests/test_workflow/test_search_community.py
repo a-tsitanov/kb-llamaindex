@@ -692,17 +692,6 @@ def test_parse_report_tolerates_bad_finding_shapes():
     assert out["findings"] == [{"statement": "ok", "importance": 0}]
 
 
-
-def test_project_cypher_is_undirected_for_leiden():
-    # Leiden rejects a directed graph ("works only with undirected graphs").
-    # The native projection MUST mark all relationships undirected.
-    from src.graph.communities import _project_cypher
-
-    cypher = _project_cypher("g-test")
-    assert "orientation: 'UNDIRECTED'" in cypher
-    assert "gds.graph.project(" in cypher
-
-
 @pytest.mark.asyncio
 async def test_detect_activity_hierarchy_branch_and_one_shot_index(monkeypatch):
     """max_levels>1 routes to detect_hierarchy and ensures the report vector

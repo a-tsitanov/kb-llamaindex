@@ -58,47 +58,25 @@ async def _build_retriever_once():
 
 
 async def _build_graph_retriever_once(embed_model, llm):
-    """Returns None when Neo4j unreachable — graph-tools handle this."""
+    """Returns None when the graph store is unreachable — graph-tools handle this.
+
+    ``embed_model`` / ``llm`` are unused: Nebula has no LlamaIndex
+    PropertyGraphStore, so the retriever works over nGQL (awalk/afind)."""
     try:
         from src.config import settings
-        from src.graph.index import (
-            build_kg_extractor,
-            build_property_graph_index,
-            ensure_entity_fulltext_index,
-            ensure_entity_lookup_indexes,
-        )
         from src.graph.retriever import GraphRetriever
         from src.graph.store import build_graph_store
         gs = build_graph_store()
-        if settings.graph.backend == "nebula":
-            # Nebula: no LlamaIndex PropertyGraphStore; the retriever works
-            # over nGQL (awalk/afind). Vector/synonym aretrieve is Phase 3.
-            return GraphRetriever.for_store(
-                gs,
-                similarity_top_k=settings.agent.graph_similarity_top_k,
-                filter_polarity_temporal=(
-                    settings.agent.graph_walk_filter_polarity_temporal
-                ),
-            )
-        pg = build_property_graph_index(
-            graph_store=gs, embed_model=embed_model,
-            extractor=build_kg_extractor(llm), nodes=None,
-            llm=llm,  # local LiteLLM model for the retriever's synonym step
-        )
-        # Existing-graph coverage: create the entity-name full-text index
-        # plus the range indexes (name / mention_count) once at bootstrap
-        # (idempotent, fail-open).
-        ensure_entity_fulltext_index(gs)
-        ensure_entity_lookup_indexes(gs)
-        return GraphRetriever(
-            pg, similarity_top_k=settings.agent.graph_similarity_top_k,
+        return GraphRetriever.for_store(
+            gs,
+            similarity_top_k=settings.agent.graph_similarity_top_k,
             filter_polarity_temporal=(
                 settings.agent.graph_walk_filter_polarity_temporal
             ),
         )
     except Exception as exc:
         logger.warning(
-            "search_deps: graph_retriever disabled (Neo4j unreachable?): {e}",
+            "search_deps: graph_retriever disabled (graph store unreachable?): {e}",
             e=exc,
         )
         return None

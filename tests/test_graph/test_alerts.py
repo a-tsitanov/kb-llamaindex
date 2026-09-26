@@ -1,7 +1,7 @@
 """Tests for src/graph/alerts.py — Alert store + watchlist helpers (nebula backend)."""
 
 from src.graph.alert_store import alert_vid
-from src.graph.alerts import alert_key, mark_watched, read_alerts_cypher, upsert_alert
+from src.graph.alerts import alert_key, mark_watched, upsert_alert
 
 
 class _Rec:
@@ -60,12 +60,3 @@ def test_upsert_alert_is_fail_soft():
 def test_mark_watched_is_fail_soft():
     # must not raise — fail-soft per the off-loop contract
     assert mark_watched(_Boom(), ["A", "B"]) is None
-
-
-# ── read_alerts_cypher shape ──────────────────────────────────────────────────
-
-
-def test_read_alerts_cypher_shape():
-    assert "ORDER BY a.created_at DESC" in read_alerts_cypher
-    for col in ("a.key", "a.kind", "a.entity", "a.detail", "a.created_at", "a.score"):
-        assert col in read_alerts_cypher, f"missing column reference: {col}"

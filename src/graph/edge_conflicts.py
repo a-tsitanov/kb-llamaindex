@@ -3,7 +3,7 @@
 The problem this closes: ingest merges each document's extraction on its own
 (`merge_kg_extraction`) and then upserts the result, and an upsert OVERWRITES
 the stored edge's `polarity` / validity window (nebula keys edges by
-(src, dst, rank=0); the neo4j path MERGEs on (src, type, tgt)).  A later, less
+(src, dst, rank=0)).  A later, less
 credible document therefore silently flipped a fact asserted by a more credible
 one — last writer wins, no trace.  That is also why the `quality.contradictions`
 primitive rarely fires: the two opposite-polarity edges it looks for cannot
@@ -34,19 +34,7 @@ from typing import Any
 
 from loguru import logger
 
-from src.config import settings
 from src.graph.nebula_store import _q, entity_vid
-
-# Read-back templates. Both return the stored belief and what backs it.
-_LOAD_RELS_NEO4J = (
-    "UNWIND $pairs AS p "
-    "MATCH (a:__Entity__ {name: p.src})-[r]->(b:__Entity__ {name: p.tgt}) "
-    "WHERE type(r) = p.label "
-    "RETURN p.src AS src, p.tgt AS tgt, type(r) AS label, "
-    "r.polarity AS polarity, r.source_trust AS source_trust, "
-    "r.first_doc_id AS first_doc_id"
-)
-
 
 @dataclass(frozen=True)
 class StoredEdge:
@@ -112,23 +100,8 @@ def _load_stored_nebula(store: Any, pairs: list[tuple[str, str]]) -> dict:
     return out
 
 
-def _load_stored_neo4j(store: Any, triples: list[tuple[str, str, str]]) -> dict:
-    rows = store.structured_query(
-        _LOAD_RELS_NEO4J,
-        param_map={"pairs": [{"src": s, "tgt": t, "label": lbl} for s, t, lbl in triples]},
-    )
-    out: dict = {}
-    for row in rows:
-        out[(row.get("src"), row.get("tgt"), row.get("label"))] = StoredEdge(
-            polarity=str(row.get("polarity") or ""),
-            source_trust=float(row.get("source_trust") or 0.0),
-            first_doc_id=str(row.get("first_doc_id") or ""),
-        )
-    return out
-
-
 def load_stored_edges(store: Any, relations: list[Any]) -> dict:
-    """Stored belief per edge key, keyed as the active backend identifies edges.
+    """Stored belief per edge key, keyed ``(src, tgt)`` as Nebula identifies edges.
 
     Fail-open: an unreadable graph yields ``{}`` (= "nothing stored"), which
     keeps ingest on the pre-existing last-writer-wins path.
@@ -136,11 +109,8 @@ def load_stored_edges(store: Any, relations: list[Any]) -> dict:
     if not relations:
         return {}
     try:
-        if settings.graph.backend == "nebula":
-            pairs = sorted({(_src(r), _tgt(r)) for r in relations})
-            return _load_stored_nebula(store, pairs)
-        triples = sorted({(_src(r), _tgt(r), _label(r)) for r in relations})
-        return _load_stored_neo4j(store, triples)
+        pairs = sorted({(_src(r), _tgt(r)) for r in relations})
+        return _load_stored_nebula(store, pairs)
     except Exception as exc:
         logger.warning(
             "edge-conflict read-back failed (no trust resolution this round): {e}",
@@ -151,7 +121,7 @@ def load_stored_edges(store: Any, relations: list[Any]) -> dict:
 
 def _src(r: Any) -> str:
     # `Relation.source_id` IS the entity display name (EntityNode.id == name),
-    # which is what nebula's vid hash and the neo4j name match both expect.
+    # which is what nebula's vid hash expects.
     return str(getattr(r, "source_id", "") or "")
 
 
@@ -164,9 +134,7 @@ def _label(r: Any) -> str:
 
 
 def _key(r: Any) -> tuple:
-    if settings.graph.backend == "nebula":
-        return (_src(r), _tgt(r))
-    return (_src(r), _tgt(r), _label(r))
+    return (_src(r), _tgt(r))
 
 
 def resolve_edge_conflicts(

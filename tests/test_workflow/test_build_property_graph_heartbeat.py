@@ -53,8 +53,6 @@ async def test_pulses_during_neo4j_upsert(monkeypatch):
         upsert_nodes=lambda *_a: None, upsert_relations=lambda *_a: None,
     )
     monkeypatch.setattr(bpg, "build_graph_store", lambda: graph_store)
-    monkeypatch.setattr(bpg, "build_embedding_model", lambda: object())
-    monkeypatch.setattr(bpg, "build_property_graph_index", lambda **_kw: None)
     # index DDL is imported from src.graph.index at call time → patch there.
     monkeypatch.setattr(gi, "ensure_entity_fulltext_index", lambda _s: None)
     monkeypatch.setattr(gi, "ensure_entity_lookup_indexes", lambda _s: None)

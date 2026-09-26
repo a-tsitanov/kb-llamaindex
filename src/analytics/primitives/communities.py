@@ -61,11 +61,11 @@ async def personalized_pagerank(
     params = {"seeds": list(seeds or []), "top_n": top_n}
     if store is None or not seeds:
         return PrimitiveResult(
-            cypher="gds.pageRank.stream(sourceNodes=$seeds)", params=params, rows=[]
+            cypher="analysis.personalized_pagerank", params=params, rows=[]
         )
     rows = await _analysis_ppr(store, list(seeds), top_n=top_n)
     return PrimitiveResult(
-        cypher="gds.pageRank.stream(sourceNodes=$seeds)", params=params, rows=rows
+        cypher="analysis.personalized_pagerank", params=params, rows=rows
     )
 
 

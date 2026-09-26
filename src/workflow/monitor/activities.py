@@ -18,7 +18,6 @@ from loguru import logger
 from temporalio import activity
 
 from src.analytics.contracts import DeliverIn, DeliverResult, MonitorIn, MonitorResult
-from src.analytics.events_burst import build_burst_cypher
 from src.config import settings
 from src.graph.alerts import upsert_alert
 from src.graph.store import build_graph_store
@@ -29,37 +28,17 @@ from src.workflow.monitor.delivery import post_alert
 # Maximum rows per sweep pass — keeps a single sweep bounded even on large graphs.
 _TOP_N = 200
 
-_WATCHED_EDGES_CYPHER = (
-    "MATCH (a:__Entity__)-[r]->(b:__Entity__) "
-    "WHERE r.created_at >= $since AND (a.watched = true OR b.watched = true) "
-    "RETURN a.name AS src, type(r) AS rel, b.name AS tgt, r.created_at AS created_at, "
-    "coalesce(a.watched,false) AS a_watched, coalesce(b.watched,false) AS b_watched "
-    "ORDER BY r.created_at DESC LIMIT $top_n"
-)
-
-_RISK_RISE_CYPHER = (
-    "MATCH (e:__Entity__) "
-    "WHERE e.watched = true AND e.risk_score IS NOT NULL "
-    "AND (e.risk_score - coalesce(e.risk_score_prev, 0)) >= $delta "
-    "RETURN e.name AS name, e.risk_score AS score ORDER BY e.risk_score DESC LIMIT $top_n"
-)
-
-
 def _get_store() -> Any:
     return build_graph_store()
 
 
-# ── Backend-dispatched detection reads ────────────────────────────────────────
+# ── Detection reads ─────────────────────────────────────────────────────────────
 # Under nebula, structured_query binds no param_map, and an edge-property WHERE
 # on an unanchored scan IndexNotFounds — so the detection reads anchor on the
 # (indexed) watched entities and aggregate in Python.
 
 
 def _read_watched_edges(store: Any, since: int, top_n: int) -> list[dict]:
-    if settings.graph.backend != "nebula":
-        return list(store.structured_query(
-            _WATCHED_EDGES_CYPHER, param_map={"since": since, "top_n": top_n}
-        ) or [])
     from src.graph.nebula_store import _q
 
     watched = store.structured_query(
@@ -111,10 +90,6 @@ def _read_watched_edges(store: Any, since: int, top_n: int) -> list[dict]:
 
 
 def _read_risk_rise(store: Any, delta: float, top_n: int) -> list[dict]:
-    if settings.graph.backend != "nebula":
-        return list(store.structured_query(
-            _RISK_RISE_CYPHER, param_map={"delta": delta, "top_n": top_n}
-        ) or [])
     watched = store.structured_query(
         "LOOKUP ON `Entity` WHERE `Entity`.watched == true "
         "YIELD `Entity`.name AS name, `Entity`.risk_score AS score, "
@@ -130,10 +105,6 @@ def _read_risk_rise(store: Any, delta: float, top_n: int) -> list[dict]:
 
 
 def _read_burst(store: Any, params: dict) -> list[dict]:
-    if settings.graph.backend != "nebula":
-        return list(store.structured_query(
-            build_burst_cypher(watched_only=True), param_map=params
-        ) or [])
     # watched_only burst is not ported to nebula (follow-up); burst_enabled is
     # off by default, so the sweep simply skips this sub-check under nebula.
     logger.debug("monitor burst detection skipped under nebula (watched_only burst unported)")
@@ -144,7 +115,7 @@ def _read_burst(store: Any, params: dict) -> list[dict]:
 async def detect_alerts(p: MonitorIn) -> MonitorResult:
     """Detect new-connection and risk-rise alerts for watched entities.
 
-    Both Cypher reads and ``upsert_alert`` writes are synchronous Neo4j calls
+    Both graph reads and ``upsert_alert`` writes are synchronous store calls
     executed off the event loop via ``asyncio.to_thread``.
     """
     try:

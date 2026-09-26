@@ -50,8 +50,7 @@ def test_equal_trust_falls_back_to_recency():
 
 # ── resolution over a batch ─────────────────────────────────────────────────
 
-def test_low_trust_flip_is_held_back_but_edge_still_updates(monkeypatch):
-    monkeypatch.setattr("src.graph.edge_conflicts.settings.graph.backend", "nebula")
+def test_low_trust_flip_is_held_back_but_edge_still_updates():
     rel = _rel("Иванов", "ООО Ромашка", polarity="negated")
     stored = {("Иванов", "ООО Ромашка"): StoredEdge("affirmed", 0.9, "doc-old")}
 
@@ -68,8 +67,7 @@ def test_low_trust_flip_is_held_back_but_edge_still_updates(monkeypatch):
     ]
 
 
-def test_high_trust_flip_wins_and_stamps_supersede(monkeypatch):
-    monkeypatch.setattr("src.graph.edge_conflicts.settings.graph.backend", "nebula")
+def test_high_trust_flip_wins_and_stamps_supersede():
     rel = _rel("Иванов", "ООО Ромашка", polarity="negated")
     stored = {("Иванов", "ООО Ромашка"): StoredEdge("affirmed", 0.3, "doc-old")}
 
@@ -83,8 +81,7 @@ def test_high_trust_flip_wins_and_stamps_supersede(monkeypatch):
     assert [c.winner for c in conflicts] == ["new"]
 
 
-def test_agreement_keeps_the_strongest_trust_seen(monkeypatch):
-    monkeypatch.setattr("src.graph.edge_conflicts.settings.graph.backend", "nebula")
+def test_agreement_keeps_the_strongest_trust_seen():
     rel = _rel("Иванов", "ООО Ромашка", polarity="affirmed")
     stored = {("Иванов", "ООО Ромашка"): StoredEdge("affirmed", 0.9, "doc-old")}
 
@@ -96,8 +93,7 @@ def test_agreement_keeps_the_strongest_trust_seen(monkeypatch):
     assert rel.properties["source_trust"] == pytest.approx(0.9)
 
 
-def test_unknown_edge_is_written_with_this_documents_trust(monkeypatch):
-    monkeypatch.setattr("src.graph.edge_conflicts.settings.graph.backend", "nebula")
+def test_unknown_edge_is_written_with_this_documents_trust():
     rel = _rel("Петров", "МУП Заря")
 
     _, conflicts = resolve_edge_conflicts(
@@ -111,8 +107,7 @@ def test_unknown_edge_is_written_with_this_documents_trust(monkeypatch):
 
 # ── read-back ───────────────────────────────────────────────────────────────
 
-def test_load_stored_edges_is_fail_open(monkeypatch):
-    monkeypatch.setattr("src.graph.edge_conflicts.settings.graph.backend", "nebula")
+def test_load_stored_edges_is_fail_open():
 
     class _Broken:
         def structured_query(self, *_a, **_kw):
@@ -121,10 +116,9 @@ def test_load_stored_edges_is_fail_open(monkeypatch):
     assert load_stored_edges(_Broken(), [_rel("a", "b")]) == {}
 
 
-def test_load_stored_edges_nebula_keys_by_pair(monkeypatch):
+def test_load_stored_edges_nebula_keys_by_pair():
     from src.graph.nebula_store import entity_vid
 
-    monkeypatch.setattr("src.graph.edge_conflicts.settings.graph.backend", "nebula")
     seen = {}
 
     class _Store:

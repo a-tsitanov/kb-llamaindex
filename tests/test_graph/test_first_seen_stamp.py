@@ -4,7 +4,6 @@ Nebula issues per-entity ``UPDATE VERTEX ... WHEN created_at == 0`` and
 per-relation ``UPDATE EDGE ... WHEN created_at == 0`` (rank 0).
 """
 
-from src.graph import first_seen as first_seen_mod
 from src.graph.first_seen import stamp_first_seen
 from src.graph.nebula_store import entity_vid
 
@@ -21,8 +20,7 @@ class _Rec:
 # ── nebula backend dispatch ──────────────────────────────────────────────────
 
 
-def test_stamp_nebula_issues_update_vertex_when_created_at_zero(monkeypatch):
-    monkeypatch.setattr(first_seen_mod.settings.graph, "backend", "nebula", raising=False)
+def test_stamp_nebula_issues_update_vertex_when_created_at_zero():
     store = _Rec()
     stamp_first_seen(
         store,
@@ -57,8 +55,7 @@ def test_stamp_nebula_issues_update_vertex_when_created_at_zero(monkeypatch):
     assert all(param_map == {} for _, param_map in store.calls)
 
 
-def test_stamp_nebula_relations_only_issues_update_edge(monkeypatch):
-    monkeypatch.setattr(first_seen_mod.settings.graph, "backend", "nebula", raising=False)
+def test_stamp_nebula_relations_only_issues_update_edge():
     store = _Rec()
     stamp_first_seen(
         store,
@@ -74,8 +71,7 @@ def test_stamp_nebula_relations_only_issues_update_edge(monkeypatch):
     assert "WHEN created_at == 0" in stmt
 
 
-def test_stamp_nebula_fail_soft_on_store_error(monkeypatch):
-    monkeypatch.setattr(first_seen_mod.settings.graph, "backend", "nebula", raising=False)
+def test_stamp_nebula_fail_soft_on_store_error():
 
     class _Bad:
         def structured_query(self, cypher, param_map=None):
@@ -91,16 +87,14 @@ def test_stamp_nebula_fail_soft_on_store_error(monkeypatch):
     )
 
 
-def test_stamp_noop_on_empty_nebula(monkeypatch):
-    monkeypatch.setattr(first_seen_mod.settings.graph, "backend", "nebula", raising=False)
+def test_stamp_noop_on_empty_nebula():
     store = _Rec()
     stamp_first_seen(store, entity_names=[], relations=[], ingest_epoch=1, doc_id="d")
     assert store.calls == []
 
 
-def test_stamp_entities_only_no_relations_nebula(monkeypatch):
+def test_stamp_entities_only_no_relations_nebula():
     """When relations list is empty, only the entity pass fires."""
-    monkeypatch.setattr(first_seen_mod.settings.graph, "backend", "nebula", raising=False)
     store = _Rec()
     stamp_first_seen(store, entity_names=["Z"], relations=[], ingest_epoch=5, doc_id="d3")
     assert len(store.calls) == 1

@@ -2,9 +2,8 @@
 
 Mirrors src/graph/community_leiden.py: stream the graph out via the
 GraphEdgeExport seam, build a weighted undirected igraph, and compute the
-centrality metric in this worker process — off Neo4j's GDS heap, and usable
-under nebula which has no in-graph compute. Selected when
-``settings.graph.backend == "nebula"`` (see analytics/materialize.py).
+centrality metric in this worker process — nebula has no in-graph compute
+(see analytics/materialize.py).
 
 Fail-open: any error → ``{}`` (the same sentinel discipline as
 community_graphscope — a non-empty score dict is never mistaken for a

@@ -44,13 +44,8 @@ class _RecStore:
         return []
 
 
-@pytest.fixture
-def _nebula(monkeypatch):
-    monkeypatch.setattr(m.settings.graph, "backend", "nebula")
-
-
 @pytest.mark.asyncio
-async def test_compute_all_runs_once_for_every_metric(_nebula, monkeypatch):
+async def test_compute_all_runs_once_for_every_metric(monkeypatch):
     """The whole point: betweenness must be computed ONCE, not once per metric."""
     calls: list[int] = []
 
@@ -66,7 +61,7 @@ async def test_compute_all_runs_once_for_every_metric(_nebula, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_one_update_per_vertex_carries_every_metric(_nebula, monkeypatch):
+async def test_one_update_per_vertex_carries_every_metric(monkeypatch):
     monkeypatch.setattr(cc, "compute_all", lambda store, **kw: _SCORES)
     store = _RecStore()
 
@@ -83,7 +78,7 @@ async def test_one_update_per_vertex_carries_every_metric(_nebula, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_writes_are_batched_into_few_requests(_nebula, monkeypatch):
+async def test_writes_are_batched_into_few_requests(monkeypatch):
     """273069 sequential round-trips is the thing being removed."""
     n = 500
     scores = {metric: {f"E{i}": float(i) for i in range(n)} for metric in _ALL}
@@ -97,7 +92,7 @@ async def test_writes_are_batched_into_few_requests(_nebula, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_batch_respects_the_statement_size_budget(_nebula, monkeypatch):
+async def test_batch_respects_the_statement_size_budget(monkeypatch):
     """Nebula rejects a request over `max_allowed_query_size` (4 MiB) with
     `SyntaxError: Query is too large` — the same cap that broke the community
     write-back. Batches must be bounded by rendered size, not vertex count."""
@@ -113,7 +108,7 @@ async def test_batch_respects_the_statement_size_budget(_nebula, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_failed_batch_falls_back_to_per_vertex(_nebula, monkeypatch):
+async def test_failed_batch_falls_back_to_per_vertex(monkeypatch):
     """Fail-soft must survive batching: an ER-merged or deleted vertex raises
     `Vertex or edge not found`, and must not drop the rest of its batch."""
     monkeypatch.setattr(cc, "compute_all", lambda store, **kw: _SCORES)
@@ -127,11 +122,11 @@ async def test_failed_batch_falls_back_to_per_vertex(_nebula, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_rejects_unknown_metric(_nebula):
+async def test_rejects_unknown_metric():
     with pytest.raises(ValueError):
         await m.write_centrality_all(_RecStore(), ["bogus; DROP"])
 
 
 @pytest.mark.asyncio
-async def test_none_store_is_failsoft(_nebula):
+async def test_none_store_is_failsoft():
     assert await m.write_centrality_all(None, _ALL) == 0

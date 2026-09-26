@@ -8,10 +8,8 @@ from llama_index.core.graph_stores.types import KG_NODES_KEY, KG_RELATIONS_KEY
 from loguru import logger
 from temporalio import activity
 
-from src.graph.index import NoOpKGExtractor, build_property_graph_index
 from src.graph.store import build_graph_store
 from src.graph.write_retry import write_with_retry
-from src.ingestion.embeddings import build_embedding_model
 from src.workflow.contracts import GraphBuilt, Merged
 from src.workflow.heartbeat import heartbeat_every
 from src.workflow.staging import build_staging_store
@@ -86,17 +84,15 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
         ensure_first_seen_indexes,
     )
 
-    # Pulse on a timer throughout the blocking Neo4j region: store
-    # construction (driver I/O + schema refresh + index DDL, behind a
-    # process-global lock), the index build (Chunk + embedding writes), the
-    # entity/relation upserts, the gated first_seen stamp, and the lookup-index
+    # Pulse on a timer throughout the blocking graph-write region: store
+    # construction (driver I/O + schema refresh, behind a process-global
+    # lock), the entity/relation upserts, the gated first_seen stamp, and the lookup-index
     # DDL all run off the loop via to_thread and can each be slow under
     # hub-node lock contention. A one-shot heartbeat between steps is not
     # enough — a single step can outrun heartbeat_timeout. heartbeat_every
     # keeps a progressing-but-slow build from being mistaken for a dead one.
     async with heartbeat_every(_HEARTBEAT_INTERVAL_S, {"stage": "writing"}):
         graph_store = await asyncio.to_thread(build_graph_store)
-        embed_model = await asyncio.to_thread(build_embedding_model)
 
         _strip_neo4j_unsafe_metadata(nodes)
         activity.heartbeat({"stage": "scrubbed"})
@@ -105,23 +101,12 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
             "build_property_graph building index  chunks=%d",
             len(nodes),
         )
-        # The LlamaIndex PropertyGraphIndex write persists Chunk nodes + their
-        # embeddings + MENTIONS edges INTO the graph store — a neo4j-managed
-        # concern. Under nebula, chunks are NOT graph nodes (their vectors live
-        # in Milvus, written by the separate vector-half of ingest), and the
-        # bare NebulaGraphStore isn't a LlamaIndex PropertyGraphStore (no
-        # `supports_vector_queries` etc.), so this step is skipped. The real
-        # entity/relation graph write happens via the explicit upsert_* below.
+        # Chunks are NOT graph nodes under nebula (their vectors live in
+        # Milvus, written by the separate vector-half of ingest), so there is
+        # no LlamaIndex PropertyGraphIndex write here. The entity/relation
+        # graph write happens via the explicit upsert_* below.
         from src.config import settings
 
-        if settings.graph.backend != "nebula":
-            await asyncio.to_thread(
-                build_property_graph_index,
-                graph_store=graph_store,
-                embed_model=embed_model,
-                extractor=NoOpKGExtractor(),
-                nodes=nodes,
-            )
         activity.heartbeat({"stage": "index_built"})
 
         # Wrap in write_with_retry: concurrent MERGE into shared hub nodes can

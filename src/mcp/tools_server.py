@@ -97,42 +97,24 @@ async def _init() -> None:
         _deps["llm"] = llm
 
         try:
-            from src.graph.index import (
-                build_kg_extractor,
-                build_property_graph_index,
-            )
             from src.graph.retriever import GraphRetriever
             from src.graph.store import build_graph_store
             gs = build_graph_store()
-            if settings.graph.backend == "nebula":
-                # Nebula has no LlamaIndex PropertyGraphStore; use the
-                # store-only retriever (nGQL awalk/find). Mirrors
-                # _search_deps._get_graph_retriever. Vector/synonym aretrieve
-                # is Phase 3.
-                _deps["graph"] = GraphRetriever.for_store(
-                    gs,
-                    similarity_top_k=settings.agent.graph_similarity_top_k,
-                    filter_polarity_temporal=(
-                        settings.agent.graph_walk_filter_polarity_temporal
-                    ),
-                )
-            else:
-                pg = build_property_graph_index(
-                    graph_store=gs, embed_model=embed,
-                    extractor=build_kg_extractor(llm), nodes=None,
-                    llm=llm,  # local LiteLLM model for the retriever's synonym step
-                )
-                _deps["graph"] = GraphRetriever(
-                    pg,
-                    filter_polarity_temporal=(
-                        settings.agent.graph_walk_filter_polarity_temporal
-                    ),
-                )
-            # Raw store for the GDS analysis tools (need structured_query).
+            # Nebula has no LlamaIndex PropertyGraphStore; use the
+            # store-only retriever (nGQL awalk/find). Mirrors
+            # _search_deps._get_graph_retriever.
+            _deps["graph"] = GraphRetriever.for_store(
+                gs,
+                similarity_top_k=settings.agent.graph_similarity_top_k,
+                filter_polarity_temporal=(
+                    settings.agent.graph_walk_filter_polarity_temporal
+                ),
+            )
+            # Raw store for the graph analysis tools (need structured_query).
             _deps["graph_store"] = gs
         except Exception as exc:
             logger.warning(
-                "MCP-2: graph_retriever disabled (Neo4j down?): {e}",
+                "MCP-2: graph_retriever disabled (graph store down?): {e}",
                 e=exc,
             )
             _deps["graph"] = None
@@ -493,26 +475,23 @@ def _period_in_window(
     return not (until and start > date.fromisoformat(until))
 
 
-# Backends whose store cannot serve `topic_trend` AT ALL.  The primitive
+# `topic_trend` cannot be served on the nebula graph AT ALL.  The primitive
 # calls `run_rows(store, cypher, {"topic": topic})`; nebula's
 # `structured_query` raises NotImplementedError on a non-empty `param_map`
-# (src/graph/nebula_store.py:268-272) and `run_rows` fail-softs every
-# exception to `[]` (src/analytics/store_query.py:23-25).  The tool would
-# therefore answer "0 mentions, ever" for every topic — indistinguishable
-# from a real zero.  A missing answer is honest; a silent zero is not.
+# (src/graph/nebula_store.py) and `run_rows` fail-softs every exception to
+# `[]` (src/analytics/store_query.py).  The tool would therefore answer
+# "0 mentions, ever" for every topic — indistinguishable from a real zero.
+# A missing answer is honest; a silent zero is not.
 #
-# DELETE THIS GUARD (and this constant) as soon as NebulaGraphStore binds
-# nGQL parameters.  Nothing else needs to change.
-_TOPIC_TREND_UNSUPPORTED_BACKENDS = frozenset({"nebula"})
-
-
+# Once NebulaGraphStore binds nGQL parameters, re-add the primitive call
+# and shape its rows with `_period_in_window` / `_period_bounds` (kept
+# above for exactly that): drop buckets outside [since, until] and add
+# `period_start` (ISO first day) + `value` (= mentions) for `stat_align`.
 async def _topic_trend(
     store: Any, topic: str, granularity: str,
-    since: str | None, until: str | None, _fn: Any = None,
+    since: str | None, until: str | None,
 ) -> dict[str, Any]:
     from datetime import date
-
-    from src.analytics.primitives.dynamics import topic_trend as _primitive
 
     if not topic or not topic.strip():
         return {"error": "topic must be a non-empty string"}
@@ -526,31 +505,13 @@ async def _topic_trend(
                 return {"error": f"{name} must be ISO YYYY-MM-DD, got {value!r}"}
     if store is None:
         return {"error": "graph store unavailable"}
-    if settings.graph.backend in _TOPIC_TREND_UNSUPPORTED_BACKENDS:
-        return {"error": (
-            f"topic_trend is unavailable on the {settings.graph.backend} graph "
-            "backend: its query binds a parameter, which NebulaGraphStore "
-            "does not support yet, and the analytics layer degrades that to "
-            "an empty result — which would be reported as 'never mentioned'. "
-            "No trend can be returned for any topic on this backend."
-        )}
-    fn = _fn or _primitive
-    res = await fn(store, topic=topic.strip(), granularity=granularity)
-    rows = []
-    for r in res.rows:
-        if not _period_in_window(r["period"], granularity, since, until):
-            continue
-        # `period` is a LABEL (`"2026-Q1"`, `"2026-03"`, `"2026"`), which
-        # `date.fromisoformat` cannot parse.  MCP-3's `stat_align` wants
-        # `{period_start, value}`, so emit those too — additively, and
-        # from here, because this module is the one that knows both the
-        # label format and the granularity.  MCP-3 must not learn either.
-        rows.append({
-            **r,
-            "period_start": _period_bounds(r["period"], granularity)[0].isoformat(),
-            "value": r["mentions"],
-        })
-    return {"topic": topic.strip(), "granularity": granularity, "rows": rows}
+    return {"error": (
+        "topic_trend is unavailable on the nebula graph "
+        "backend: its query binds a parameter, which NebulaGraphStore "
+        "does not support yet, and the analytics layer degrades that to "
+        "an empty result — which would be reported as 'never mentioned'. "
+        "No trend can be returned for any topic on this backend."
+    )}
 
 
 async def _polarity_evolution(

@@ -38,16 +38,7 @@ async def test_aretrieve_empty_without_retriever():
 
 
 @pytest.mark.asyncio
-async def test_find_by_name_nebula_lookup(monkeypatch):
-    # Patch the backend flag on the exact `settings` object retriever.py
-    # reads from (its own module-level binding), not `src.config.settings`
-    # directly: test_llm_factory.py's `importlib.reload(src.config)` can
-    # rebind the latter to a fresh Settings() instance mid-session, which
-    # would silently desync the two and leave this test patching an object
-    # afind_entities_by_name never reads.
-    monkeypatch.setattr(
-        "src.graph.retriever.settings.graph.backend", "nebula", raising=False,
-    )
+async def test_find_by_name_nebula_lookup():
     rows = [{"vid": "abc", "name": "Иванов Иван", "label": "PERSON",
              "description": "инженер"}]
     store = _FakeStore(rows=rows)
@@ -69,10 +60,7 @@ async def test_find_by_name_nebula_lookup(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_find_by_name_nebula_ors_the_tokens(monkeypatch):
-    monkeypatch.setattr(
-        "src.graph.retriever.settings.graph.backend", "nebula", raising=False,
-    )
+async def test_find_by_name_nebula_ors_the_tokens():
     store = _FakeStore(rows=[])
     await GraphRetriever.for_store(store).afind_entities_by_name("Иванов Москва")
     assert store.last_query.count("STARTS WITH") == 2
@@ -80,10 +68,7 @@ async def test_find_by_name_nebula_ors_the_tokens(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_find_by_name_nebula_blank_query_issues_nothing(monkeypatch):
-    monkeypatch.setattr(
-        "src.graph.retriever.settings.graph.backend", "nebula", raising=False,
-    )
+async def test_find_by_name_nebula_blank_query_issues_nothing():
     store = _FakeStore(rows=[])
     out = await GraphRetriever.for_store(store).afind_entities_by_name("   ")
     assert store.last_query is None
@@ -91,12 +76,9 @@ async def test_find_by_name_nebula_blank_query_issues_nothing(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_find_by_name_nebula_reports_a_failure_instead_of_empty(monkeypatch):
+async def test_find_by_name_nebula_reports_a_failure_instead_of_empty():
     """The defect this replaced: a `GraphMemoryExceeded` came back as an
     empty entity list, which reads as "the graph has no such entity"."""
-    monkeypatch.setattr(
-        "src.graph.retriever.settings.graph.backend", "nebula", raising=False,
-    )
 
     class _Refusing(_FakeStore):
         def structured_query(self, query, param_map=None):
@@ -108,12 +90,9 @@ async def test_find_by_name_nebula_reports_a_failure_instead_of_empty(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_find_by_name_nebula_still_reads_the_older_row_shape(monkeypatch):
+async def test_find_by_name_nebula_still_reads_the_older_row_shape():
     """Accepts the `p` map the previous MATCH form returned, so a caller
     or fake feeding either shape keeps working."""
-    monkeypatch.setattr(
-        "src.graph.retriever.settings.graph.backend", "nebula", raising=False,
-    )
     store = _FakeStore(rows=[{"vid": "a", "p": {"name": "Киев", "label": "CITY"}}])
     out = await GraphRetriever.for_store(store).afind_entities_by_name("Киев")
     assert out.entities == [
@@ -122,10 +101,7 @@ async def test_find_by_name_nebula_still_reads_the_older_row_shape(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_awalk_nebula_uses_subgraph_and_clamps_hops(monkeypatch):
-    monkeypatch.setattr(
-        "src.graph.retriever.settings.graph.backend", "nebula", raising=False,
-    )
+async def test_awalk_nebula_uses_subgraph_and_clamps_hops():
     subgraph_rows = [{
         "entities": [
             {"name": "Иванов", "label": "PERSON", "description": "инженер"},
@@ -148,10 +124,7 @@ async def test_awalk_nebula_uses_subgraph_and_clamps_hops(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_awalk_nebula_applies_rel_filter(monkeypatch):
-    monkeypatch.setattr(
-        "src.graph.retriever.settings.graph.backend", "nebula", raising=False,
-    )
+async def test_awalk_nebula_applies_rel_filter():
     subgraph_rows = [{
         "entities": [
             {"name": "Иванов", "label": "PERSON", "description": ""},
@@ -173,9 +146,6 @@ async def test_awalk_nebula_applies_rel_filter(monkeypatch):
 @pytest.mark.asyncio
 async def test_aretrieve_nebula_knn_then_expands(monkeypatch):
     """graph_search under nebula: er_vec kNN picks entities, then subgraph-expand."""
-    monkeypatch.setattr(
-        "src.graph.retriever.settings.graph.backend", "nebula", raising=False,
-    )
 
     class _Embed:
         async def aget_text_embedding(self, q):
@@ -220,9 +190,6 @@ async def test_aretrieve_nebula_knn_then_expands(monkeypatch):
 async def test_aretrieve_unions_vector_and_table_seeds(monkeypatch):
     """The walk seeds from BOTH the vector kNN and the entity-table lexical
     hit — a named entity the vector misses still gets walked."""
-    monkeypatch.setattr(
-        "src.graph.retriever.settings.graph.backend", "nebula", raising=False,
-    )
     walked: list[str] = []
 
     class _Store:
@@ -254,9 +221,6 @@ async def test_aretrieve_vector_outage_does_not_blank_the_lexical_path(monkeypat
     """A naive try/except around the whole seeding block would blank both
     paths on a kNN raise. The kNN raise must be caught alone — the table
     seed still reaches the walk."""
-    monkeypatch.setattr(
-        "src.graph.retriever.settings.graph.backend", "nebula", raising=False,
-    )
     walked: list[str] = []
 
     class _Store:
@@ -304,10 +268,7 @@ async def test_entity_table_names_catches_repository_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_awalk_nebula_fails_open(monkeypatch):
-    monkeypatch.setattr(
-        "src.graph.retriever.settings.graph.backend", "nebula", raising=False,
-    )
+async def test_awalk_nebula_fails_open():
 
     class _BoomStore:
         def subgraph(self, vid, hops, *, edge="RELATED"):

@@ -76,9 +76,6 @@ async def test_trust_conflicts_are_resolved_and_logged_when_policy_configured(
         "src.workflow.activities.build_property_graph.build_graph_store",
         return_value=graph_store,
     ), patch(
-        "src.workflow.activities.build_property_graph.build_embedding_model",
-        return_value=MagicMock(),
-    ), patch(
         "src.graph.edge_conflicts.load_stored_edges",
         return_value={("Иванов", "ООО Ромашка"): StoredEdge("affirmed", 0.9, "doc-old")},
     ), patch(

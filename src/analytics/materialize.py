@@ -1,9 +1,9 @@
-"""Offline GDS compute + write-back into Neo4j. Mirrors src/graph/communities.py.
+"""Offline analytics compute + write-back into the Nebula graph.
 
-Under GRAPH_BACKEND=nebula there is no GDS: centrality is computed in-worker via
-igraph (analytics/centrality_compute.py, off the edge-export seam) and written
-back with nGQL UPDATE VERTEX. Link-prediction (gds.nodeSimilarity) has no in-worker
-port yet — it is a documented no-op under nebula (returns 0)."""
+Centrality is computed in-worker via igraph (analytics/centrality_compute.py,
+off the edge-export seam) and written back with nGQL UPDATE VERTEX.
+Link-prediction has no in-worker port yet — it is a documented no-op
+(returns 0)."""
 
 from __future__ import annotations
 
@@ -12,54 +12,28 @@ from typing import Any
 
 from loguru import logger
 
-from src.config import settings
-from src.graph.communities import _drop_cypher, _new_graph_name, _project_cypher  # noqa: F401
-
-# metric -> GDS stream cypher (graph name f-substituted; weighted where applicable)
-_CENTRALITY_STREAM: dict[str, str] = {
-    "pagerank": (
-        "CALL gds.pageRank.stream('{g}', {{relationshipWeightProperty:'weight'}}) "
-        "YIELD nodeId, score RETURN gds.util.asNode(nodeId).name AS name, score"
-    ),
-    "betweenness": (
-        "CALL gds.betweenness.stream('{g}') "
-        "YIELD nodeId, score RETURN gds.util.asNode(nodeId).name AS name, score"
-    ),
-    "eigenvector": (
-        "CALL gds.eigenvector.stream('{g}', {{relationshipWeightProperty:'weight'}}) "
-        "YIELD nodeId, score RETURN gds.util.asNode(nodeId).name AS name, score"
-    ),
-}
+# Allowlist of centrality metrics — validated BEFORE a metric name is inlined
+# into an nGQL write as a column name.
+_CENTRALITY_METRICS: frozenset[str] = frozenset({"pagerank", "betweenness", "eigenvector"})
 
 
 def _run_query(store: Any, cypher: str, params: dict | None = None) -> list[dict]:
     return list(store.structured_query(cypher, param_map=params or {}))
 
 
-async def _run(store: Any, cypher: str, params: dict | None = None) -> list[dict]:
-    return await asyncio.to_thread(_run_query, store, cypher, params)
-
-
 async def write_centrality(store: Any | None, graph_name: str, metric: str) -> int:
-    """Run the GDS centrality stream for ``metric`` and write scores back to __Entity__ nodes.
+    """Compute ``metric`` in-worker and write scores back to Entity vertices.
 
     ``metric`` must be one of ``{pagerank, betweenness, eigenvector}`` — validated
-    against the fixed allowlist BEFORE being inlined into the write-back Cypher.
-    Returns the number of rows written, or 0 on None store.  Propagates GDS errors.
+    against the fixed allowlist BEFORE being inlined into the write-back nGQL.
+    ``graph_name`` is unused (was the GDS projection name).
+    Returns the number of vertices written, or 0 on None store.
     """
     if store is None:
         return 0
-    if metric not in _CENTRALITY_STREAM:
+    if metric not in _CENTRALITY_METRICS:
         raise ValueError(f"unknown centrality metric: {metric!r}")
-    if settings.graph.backend == "nebula":
-        return await _write_centrality_nebula(store, metric)
-    rows = await _run(store, _CENTRALITY_STREAM[metric].format(g=graph_name))
-    if not rows:
-        return 0
-    # metric is from the fixed allowlist above — safe to inline as a property key
-    write = f"UNWIND $rows AS r MATCH (e:__Entity__ {{name: r.name}}) SET e.{metric} = r.score"
-    await _run(store, write, {"rows": rows})
-    return len(rows)
+    return await _write_centrality_nebula(store, metric)
 
 
 # Max chars in ONE nGQL request.  Nebula rejects anything over
@@ -73,7 +47,7 @@ _MAX_STMT_CHARS = 1_000_000
 def _centrality_update_stmt(vid: str, per_metric: dict[str, float]) -> str:
     """ONE ``UPDATE VERTEX`` carrying EVERY metric for this vertex.
 
-    Metric names come from the ``_CENTRALITY_STREAM`` allowlist (validated by
+    Metric names come from the ``_CENTRALITY_METRICS`` allowlist (validated by
     the callers below), so they are safe to inline as column names."""
     sets = ", ".join(f"{k} = {float(v)}" for k, v in per_metric.items())
     return f'UPDATE VERTEX ON `Entity` "{vid}" SET {sets};'
@@ -148,7 +122,7 @@ async def write_centrality_all(store: Any | None, metrics: list[str]) -> int:
     if store is None:
         return 0
     for metric in metrics:
-        if metric not in _CENTRALITY_STREAM:
+        if metric not in _CENTRALITY_METRICS:
             raise ValueError(f"unknown centrality metric: {metric!r}")
     return await asyncio.to_thread(
         _write_centrality_nebula_all_sync, store, list(metrics),
@@ -171,35 +145,11 @@ async def write_link_prediction(
     top_k: int,
     min_score: float,
 ) -> int:
-    """Full-refresh :LIKELY_LINK edges via gds.nodeSimilarity.stream.
-
-    Deletes ALL existing :LIKELY_LINK relationships, streams nodeSimilarity
-    (topK), and writes MERGE pairs whose score >= ``min_score``.
-    Returns the number of pairs written, or 0 on None store / any error (fail-soft).
+    """Link prediction (:LIKELY_LINK) has no in-worker port yet and no
+    LIKELY_LINK edge type exists — a documented no-op; link_prediction reads
+    return []. Always returns 0.
     """
     if store is None:
         return 0
-    if settings.graph.backend == "nebula":
-        # gds.nodeSimilarity has no in-worker port yet; no LIKELY_LINK edge type
-        # under nebula. Documented no-op — link_prediction reads return [].
-        logger.debug("link_prediction is a no-op under nebula (no in-worker port)")
-        return 0
-    await _run(store, "MATCH ()-[l:LIKELY_LINK]->() DELETE l")  # full refresh
-    rows = await _run(
-        store,
-        f"CALL gds.nodeSimilarity.stream('{graph_name}', {{topK: $k}}) "
-        "YIELD node1, node2, similarity "
-        "RETURN gds.util.asNode(node1).name AS a, gds.util.asNode(node2).name AS b, "
-        "similarity AS score",
-        {"k": int(top_k)},
-    )
-    pairs = [r for r in rows if float(r.get("score", 0.0)) >= min_score]
-    if pairs:
-        await _run(
-            store,
-            "UNWIND $pairs AS p "
-            "MATCH (a:__Entity__ {name:p.a}), (b:__Entity__ {name:p.b}) "
-            "MERGE (a)-[l:LIKELY_LINK]->(b) SET l.score = p.score",
-            {"pairs": pairs},
-        )
-    return len(pairs)
+    logger.debug("link_prediction is a no-op under nebula (no in-worker port)")
+    return 0

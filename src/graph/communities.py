@@ -5,43 +5,33 @@ the dedicated ``kb-graph-build`` queue (admin endpoint / schedule), NEVER
 on the query hot path.
 
 The Leiden COMPUTE backend is pluggable via ``community_backend``
-(ADR-0015): ``"gds"`` (default) runs ``gds.leiden.stream`` inside Neo4j;
-``"leidenalg"`` streams the edges out and runs hierarchical Leiden in this
-worker (``src/graph/community_leiden.py``) — moving the memory off Neo4j's
-JVM heap.  Both backends emit the SAME ``rows`` (``[{name, communityId,
-ids}]``), so the grouping + ``:Community`` materialisation below are
-backend-agnostic.
+(ADR-0015): ``"leidenalg"`` (default) streams the edges out and runs
+hierarchical Leiden in this worker (``src/graph/community_leiden.py``);
+``"graphscope"`` runs distributed single-level Leiden
+(``src/graph/community_graphscope.py``).  Both backends emit the SAME
+``rows`` (``[{name, communityId, ids}]``), so the grouping + ``:Community``
+materialisation below are backend-agnostic.
 
-``detect_communities`` runs Leiden over the ``__Entity__`` sub-graph and
-materialises ``:Community`` nodes (GDS path shown):
+``detect_communities`` runs Leiden over the entity sub-graph and
+materialises ``:Community`` nodes:
 
-  1. Project the ``__Entity__`` nodes + their relationships into an
-     in-memory GDS graph (Cypher projection — works for the arbitrary
-     relationship types the KG extractor emits).
-  2. ``gds.leiden.stream`` → one ``communityId`` per entity.
+  1. Stream the entity edges out through the edge-export seam.
+  2. Cluster them in-worker → one ``communityId`` (+ dendrogram ``ids``)
+     per entity.
   3. Group members by ``communityId``, drop communities below
      ``min_size``.
-  4. Idempotently MERGE one ``:Community {id, level}`` node per group and
-     link its members via ``(:__Entity__)-[:IN_COMMUNITY]->(:Community)``.
-  5. Drop the in-memory projection.
+  4. Idempotently write one ``:Community {id, level}`` node per group and
+     link its members (``IN_COMMUNITY``) via the community writeback.
 
-EVERYTHING is fail-safe: a ``None`` store or any GDS / Cypher error is
-logged and yields ``[]`` so the calling activity never raises through the
-Temporal boundary (mirrors the defensive ``structured_query`` helpers in
-``entity_resolution.py`` / ``storage/wikibase.py``).
-
-All Cypher/GDS lives in this module's constants so it's a single place to
-fix against the live GDS schema/version.  The exact GDS calls here are
-written per the Neo4j GDS 2.x API but are UNVERIFIED against a live GDS
-install in this sandbox (no Neo4j/GDS available) — see the R6 report.
+Detection is fail-safe: a ``None`` store or any detection error is logged
+and yields ``[]`` so the calling activity never raises through the
+Temporal boundary.  The write-back is NOT fail-open (see below).
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import hashlib
-import uuid
 from typing import Any
 
 from loguru import logger
@@ -54,201 +44,6 @@ from src.graph.community_leiden import (
     single_level_rows,
 )
 from src.workflow.contracts import CommunityRef
-
-# Prefix for the transient in-memory GDS projection.  The actual name is
-# generated PER CALL (``_new_graph_name``) with a random suffix so two
-# concurrent rebuilds (graph_build worker concurrency >= 2) never collide —
-# one run's ``gds.graph.drop`` must not kill another's live projection.
-_GDS_GRAPH_PREFIX = "kb-communities"
-
-
-def _new_graph_name() -> str:
-    """Unique GDS projection name for a single ``detect_communities`` call.
-
-    ``detect_communities`` runs inside a Temporal ACTIVITY (not a workflow
-    body), so non-determinism is fine here.  A per-call name isolates
-    concurrent rebuilds from each other's project/drop."""
-    return f"{_GDS_GRAPH_PREFIX}-{uuid.uuid4().hex[:8]}"
-
-
-# 1. NATIVE projection of the __Entity__ sub-graph — NOT the
-#    cypher-aggregation form (``MATCH … RETURN gds.graph.project(…) AS g``).
-#    The aggregation path deterministically exhausts a 4G heap on
-#    GDS 2.13.9 / Neo4j 5.26.25 even on a ~2k-entity graph and kills the
-#    JVM (repro 2026-07-03; the 2026-06-30 prod OOM blamed on "GDS at
-#    scale" was this same failure via the community backend).
-#
-#    Semantics are preserved: every __Entity__ node is projected
-#    (isolated ones land in singleton communities that the min_size floor
-#    drops); ``type: '*'`` covers the arbitrary relationship types the KG
-#    extractor emits, collapsed into one ``ALL`` type (nothing downstream
-#    filters by type); relationships are kept only when BOTH endpoints are
-#    projected — same as the old ``(s)-[r]->(t:__Entity__)`` match.
-#
-#    ``orientation: 'UNDIRECTED'`` — REQUIRED by Leiden, which rejects a
-#    directed graph ("works only with undirected graphs").  Edge direction
-#    is meaningless for community detection on a KG anyway.
-#    ``properties: {{ weight: {{ defaultValue: 1.0 }} }}`` projects the
-#    merge-layer edge weight (distinct co-occurrence count) so Leiden runs
-#    WEIGHTED; the default defends against legacy edges written before
-#    weights were meaningful (ex-``coalesce``).  The counts are re-aliased
-#    ``AS g`` so ``_projection_stats`` keeps reading the same row shape.
-def _project_cypher(graph_name: str) -> str:
-    return f"""
-CALL gds.graph.project(
-    '{graph_name}',
-    ['__Entity__'],
-    {{ ALL: {{ type: '*', orientation: 'UNDIRECTED',
-               properties: {{ weight: {{ defaultValue: 1.0 }} }} }} }}
-) YIELD nodeCount, relationshipCount
-RETURN {{ nodeCount: nodeCount, relationshipCount: relationshipCount }} AS g
-"""
-
-
-# 2. Leiden stream — full dendrogram per node.  ``includeIntermediate
-#    Communities: true`` yields ``intermediateCommunityIds`` (a list per
-#    node, finest→coarsest; its LAST element == the final ``communityId``).
-#    We read that list back as ``ids`` so ``_group_by_levels`` can build the
-#    HIERARCHY.  The legacy single-level path is just ``max_levels=1`` over
-#    the same stream (coarsest column = ids[-1] = today's ``communityId``).
-def _leiden_stream_cypher(
-    graph_name: str, *, gamma: float = 1.0, concurrency: int = 4,
-) -> str:
-    # ``gamma`` (resolution) and ``concurrency`` are config-tunable knobs;
-    # the defaults reproduce the pre-knob behaviour (gamma 1.0 == GDS
-    # default resolution, concurrency 4).
-    return f"""
-CALL gds.leiden.stream(
-    '{graph_name}',
-    {{ randomSeed: 19, includeIntermediateCommunities: true,
-       relationshipWeightProperty: 'weight',
-       gamma: {float(gamma)}, concurrency: {int(concurrency)} }}
-)
-YIELD nodeId, communityId, intermediateCommunityIds
-RETURN gds.util.asNode(nodeId).name AS name,
-       communityId AS communityId,
-       intermediateCommunityIds AS ids
-"""
-
-
-# 5. Drop the transient projection (idempotent: failIfMissing=false).
-def _drop_cypher(graph_name: str) -> str:
-    return f"CALL gds.graph.drop('{graph_name}', false) YIELD graphName"
-
-
-# Before re-writing a level's communities, DETACH DELETE the prior ones for
-# THAT level only: a re-run of Leiden can produce fewer/renumbered ids, so
-# stale ``:Community {level:$level}`` nodes (with orphaned summaries) would
-# otherwise linger.  Scoped to ``$level`` so other levels are untouched.
-_PRUNE_LEVEL_CYPHER = """
-MATCH (c:Community {level: $level})
-DETACH DELETE c
-"""
-
-# Hierarchy rebuild prunes EVERY level at once: a re-run of Leiden can
-# produce a different number of dendrogram levels (and renumbered ids), so
-# any prior ``:Community`` (at any level, with its PARENT_OF / IN_COMMUNITY
-# / summary edges) would otherwise leak.  Used by ``detect_hierarchy``.
-_PRUNE_ALL_CYPHER = """
-MATCH (c:Community)
-DETACH DELETE c
-"""
-
-# Read the PRIOR build's reports BEFORE the prune-all wipe so a community
-# whose (level, members_hash) is unchanged can carry its report over instead
-# of being re-summarised.  Only nodes that actually have a report are read.
-_READ_OLD_REPORTS_CYPHER = """
-MATCH (c:Community)
-WHERE c.members_hash IS NOT NULL AND c.report IS NOT NULL
-RETURN c.level AS level, c.members_hash AS h, c.report AS report,
-       c.title AS title, c.summary AS summary, c.report_vec AS report_vec,
-       c.summarized_at AS summarized_at
-"""
-
-# Constraint backing the :Community MERGE (idempotent, prevents dupes).
-_COMMUNITY_CONSTRAINT = (
-    "CREATE CONSTRAINT community_key IF NOT EXISTS "
-    "FOR (c:Community) REQUIRE (c.id, c.level) IS UNIQUE"
-)
-
-# 4. Idempotent MERGE of the :Community node + member links.  Keyed on
-#    (id, level) so a re-run UPDATES the same node rather than duplicating.
-#    Member links are MERGEd too; stale links from a previous detection are
-#    cleared first so a re-shuffled community doesn't keep ghost members.
-_MERGE_COMMUNITY_CYPHER = """
-MERGE (c:Community {id: $community_id, level: $level})
-SET c.member_count = $member_count, c.members_hash = $members_hash,
-    c.updated = timestamp()
-FOREACH (_ IN CASE WHEN $carry_report IS NULL THEN [] ELSE [1] END |
-    SET c.report = $carry_report, c.title = $carry_title,
-        c.summary = $carry_summary, c.report_vec = $carry_report_vec,
-        c.summarized_at = coalesce($carry_summarized_at, timestamp()))
-WITH c
-OPTIONAL MATCH (c)<-[old:IN_COMMUNITY]-(:__Entity__)
-DELETE old
-WITH c
-UNWIND $members AS member_name
-MATCH (e:__Entity__ {name: member_name})
-MERGE (e)-[:IN_COMMUNITY]->(c)
-"""
-
-# Sub-community MERGE for level k > 0 (the finer dendrogram columns).  Now
-# writes entity ``IN_COMMUNITY`` links at all levels (not just level 0) so
-# that finest (leaf) communities have member context for summarisation.
-# Also wire ``(parent:Community {level:$level-1})-[:PARENT_OF]->(this)``
-# coarser→finer so the dendrogram is navigable.  The parent is MATCHed (NOT
-# merged): the caller writes communities coarsest-first (``_group_by_levels``
-# sorts by level ascending), so the level-$level-1 parent already exists by
-# the time a level-$level child is written — ordering-DEPENDENT by design.
-_MERGE_SUBCOMMUNITY_CYPHER = """
-MERGE (c:Community {id: $community_id, level: $level})
-SET c.member_count = $member_count, c.members_hash = $members_hash,
-    c.updated = timestamp()
-FOREACH (_ IN CASE WHEN $carry_report IS NULL THEN [] ELSE [1] END |
-    SET c.report = $carry_report, c.title = $carry_title,
-        c.summary = $carry_summary, c.report_vec = $carry_report_vec,
-        c.summarized_at = coalesce($carry_summarized_at, timestamp()))
-WITH c
-MATCH (p:Community {id: $parent_id, level: $level - 1})
-MERGE (p)-[:PARENT_OF]->(c)
-WITH c
-OPTIONAL MATCH (c)<-[old:IN_COMMUNITY]-(:__Entity__)
-DELETE old
-WITH c
-UNWIND $members AS member_name
-MATCH (e:__Entity__ {name: member_name})
-MERGE (e)-[:IN_COMMUNITY]->(c)
-"""
-
-
-def _projection_stats(project_rows: list[dict]) -> dict[str, int]:
-    """Extract ``{nodes, rels}`` from the ``gds.graph.project`` result row
-    (aliased ``AS g``).  Returns zeros when the projection produced no
-    row — lets callers distinguish an EMPTY/disconnected entity graph
-    (0 nodes → Leiden finds nothing) from a GDS ERROR (raised, caught
-    separately) from an all-singletons graph (nodes > 0 but 0 communities
-    survive ``min_size``)."""
-    if not project_rows:
-        return {"nodes": 0, "rels": 0}
-    g = project_rows[0].get("g") if isinstance(project_rows[0], dict) else None
-    if not isinstance(g, dict):
-        return {"nodes": 0, "rels": 0}
-    return {
-        "nodes": int(g.get("nodeCount") or 0),
-        "rels": int(g.get("relationshipCount") or 0),
-    }
-
-
-def _run_query(store: Any, cypher: str, params: dict | None = None) -> list[dict]:
-    """Thin wrapper around the store's ``structured_query``.
-
-    Kept as a sync helper so callers can dispatch it via
-    ``asyncio.to_thread`` (the Neo4j driver is blocking) exactly like the
-    ER helpers do.  Returns the rows (or ``[]``).
-    """
-    rows = store.structured_query(cypher, param_map=params or {})
-    return list(rows or [])
-
 
 async def _read_old_reports(store: Any | None) -> dict[tuple[int, str], dict]:
     """{(level, members_hash) -> {report,title,summary,report_vec}} from the
@@ -332,9 +127,9 @@ def _group_by_levels(
         # INVARIANT (Leiden nesting): a level-(k-1) community is the union of
         # its level-k children, so member_count(parent) >= member_count(child).
         # Hence `min_size` can never drop a parent while keeping a child →
-        # the level>0 `MATCH (parent)` in _MERGE_SUBCOMMUNITY_CYPHER never
+        # the level>0 parent lookup in `merge_subcommunity` never
         # orphans. Holds only while intermediateCommunityIds stays strictly
-        # nested (GDS Leiden guarantees this).
+        # nested (hierarchical Leiden guarantees this).
         for cid, members in members_by_cid.items():
             if len(members) < min_size:
                 continue
@@ -392,9 +187,9 @@ def _coarsest_from_rows(
 async def _leiden_rows(
     store: Any, *, gamma: float, max_levels: int, seed: int = 19,
 ) -> list[dict]:
-    """leidenalg backend: stream edges + cluster in-worker (off Neo4j heap).
+    """leidenalg backend: stream edges + cluster in-worker.
 
-    Returns the SAME rows shape as the GDS leiden stream
+    Returns the canonical rows shape
     (``[{name, communityId, ids}]``).  CPU-bound clustering runs in a
     thread so the activity event loop (and its heartbeat) stays live.
     """
@@ -414,7 +209,7 @@ async def _graphscope_rows(
 ) -> list[dict]:
     """graphscope backend: stream edges + distributed single-level Leiden.
 
-    Same rows shape as ``_leiden_rows``/GDS (``[{name, communityId, ids}]``).
+    Same rows shape as ``_leiden_rows`` (``[{name, communityId, ids}]``).
     CPU/network-bound clustering runs in a thread so the activity event loop
     (and its heartbeat) stays live, mirroring ``_leiden_rows``.
     """
@@ -432,7 +227,7 @@ async def detect_communities(
     gamma: float = 1.0,
     concurrency: int = 4,
 ) -> list[CommunityRef]:
-    """Run GDS Leiden over ``__Entity__`` and materialise ``:Community``.
+    """Run Leiden over the entity graph and materialise ``:Community``.
 
     SINGLE-LEVEL (back-compat) path: detects only the coarsest dendrogram
     column (today's ``communityId``) and writes it at the requested
@@ -442,21 +237,15 @@ async def detect_communities(
     ``detect_hierarchy``.
 
     Returns the detected communities (``member_count >= min_size``).
-    Fail-safe: ``store is None`` or ANY GDS / Cypher error → ``[]`` (logged,
-    never raised) so the calling activity stays green.
+    Fail-safe: ``store is None`` or ANY detection error → ``[]`` (logged,
+    never raised) so the calling activity stays green.  ``concurrency`` was
+    the GDS thread count and is accepted but ignored (no in-worker use).
     """
     if store is None:
         logger.info("communities: no graph store — skipping detection")
         return []
 
-    if settings.temporal.community_backend == "leidenalg":
-        try:
-            rows = await _leiden_rows(store, gamma=gamma, max_levels=1)
-            stats = {"nodes": len({r["name"] for r in rows}), "rels": -1}
-        except Exception as exc:
-            logger.error("communities: leidenalg detection FAILED: {e}", e=exc)
-            return []
-    elif settings.temporal.community_backend == "graphscope":
+    if settings.temporal.community_backend == "graphscope":
         try:
             rows = await _graphscope_rows(store, gamma=gamma)
             stats = {"nodes": len({r["name"] for r in rows}), "rels": -1}
@@ -466,7 +255,7 @@ async def detect_communities(
         if not rows:
             # The graphscope adapter fail-opens to no rows on any import/API
             # error — and is a stub returning [] until the manual cluster gate
-            # finalises it.  Unlike an empty GDS/leidenalg projection (a
+            # finalises it.  Unlike an empty leidenalg result (a
             # legitimate "no communities" that SHOULD prune the stale layer),
             # an empty graphscope result is a FAILURE signal: return a true
             # no-op that leaves the existing :Community layer untouched (never
@@ -480,26 +269,11 @@ async def detect_communities(
             )
             return []
     else:
-        # Unique per-call projection name so concurrent rebuilds don't collide.
-        graph_name = _new_graph_name()
         try:
-            # Re-project from scratch: drop any stale projection first, then
-            # build a fresh one (a leftover projection from a crashed run would
-            # otherwise make gds.graph.project fail with "already exists").
-            await asyncio.to_thread(_run_query, store, _drop_cypher(graph_name))
-            proj_rows = await asyncio.to_thread(_run_query, store, _project_cypher(graph_name))
-            stats = _projection_stats(proj_rows)
-            rows = await asyncio.to_thread(
-                _run_query, store,
-                _leiden_stream_cypher(graph_name, gamma=gamma, concurrency=concurrency),
-            )
+            rows = await _leiden_rows(store, gamma=gamma, max_levels=1)
+            stats = {"nodes": len({r["name"] for r in rows}), "rels": -1}
         except Exception as exc:
-            # A genuine GDS/Cypher ERROR (vs an empty graph) — surfaced loudly
-            # so "0 communities" is never silently mistaken for an infra fault.
-            logger.error("communities: GDS Leiden detection FAILED: {e}", e=exc)
-            # Best-effort cleanup so we don't leak the projection.
-            with contextlib.suppress(Exception):
-                await asyncio.to_thread(_run_query, store, _drop_cypher(graph_name))
+            logger.error("communities: leidenalg detection FAILED: {e}", e=exc)
             return []
 
     if not rows:
@@ -516,8 +290,8 @@ async def detect_communities(
         pn=stats["nodes"], pr=stats["rels"],
     )
 
-    # Persist :Community nodes + member links via the backend writeback
-    # (neo4j: the historical Cypher verbatim; nebula: nGQL).
+    # Persist :Community nodes + member links via the community writeback
+    # (nGQL).
     from src.graph.community_writeback import build_community_writeback
     writeback = build_community_writeback(store)
     try:
@@ -539,14 +313,9 @@ async def detect_communities(
         # unusable — the caller fans out one summarize per ref and every report
         # write then fails ("Vertex or edge not found"), burning an LLM call
         # each.  Fail loudly so the build retries instead of silently
-        # producing nothing.  The `finally` below still drops the projection.
+        # producing nothing.
         logger.error("communities: :Community write failed: {e}", e=exc)
         raise
-    finally:
-        # Only the GDS path allocates an in-memory projection to drop.
-        if settings.temporal.community_backend not in ("leidenalg", "graphscope"):
-            with contextlib.suppress(Exception):
-                await asyncio.to_thread(_run_query, store, _drop_cypher(graph_name))
 
     return communities
 
@@ -559,7 +328,7 @@ async def detect_hierarchy(
     gamma: float = 1.0,
     concurrency: int = 4,
 ) -> list[CommunityRef]:
-    """Run GDS Leiden over ``__Entity__`` and materialise the community
+    """Run Leiden over the entity graph and materialise the community
     HIERARCHY (up to ``max_levels`` dendrogram levels).
 
     level 0 == coarsest (today's ``communityId``) and keeps
@@ -575,39 +344,31 @@ async def detect_hierarchy(
     the dendrogram depth/ids can change between runs.
 
     Returns the detected communities across all levels (coarsest first).
-    Fail-safe: ``store is None`` or ANY GDS / Cypher error → ``[]`` (logged,
-    never raised).
+    Fail-safe: ``store is None`` or ANY detection error → ``[]`` (logged,
+    never raised).  ``concurrency`` is accepted but ignored (was GDS-only).
     """
     if store is None:
         logger.info("communities: no graph store — skipping hierarchy detection")
         return []
 
-    if settings.temporal.community_backend == "leidenalg":
-        try:
-            rows = await _leiden_rows(store, gamma=gamma, max_levels=max_levels)
-            stats = {"nodes": len({r["name"] for r in rows}), "rels": -1}
-        except Exception as exc:
-            logger.error(
-                "communities: leidenalg hierarchy detection FAILED: {e}", e=exc,
-            )
-            return []
-    else:
-        graph_name = _new_graph_name()
-        try:
-            await asyncio.to_thread(_run_query, store, _drop_cypher(graph_name))
-            proj_rows = await asyncio.to_thread(_run_query, store, _project_cypher(graph_name))
-            stats = _projection_stats(proj_rows)
-            rows = await asyncio.to_thread(
-                _run_query, store,
-                _leiden_stream_cypher(graph_name, gamma=gamma, concurrency=concurrency),
-            )
-        except Exception as exc:
-            logger.error(
-                "communities: GDS Leiden hierarchy detection FAILED: {e}", e=exc,
-            )
-            with contextlib.suppress(Exception):
-                await asyncio.to_thread(_run_query, store, _drop_cypher(graph_name))
-            return []
+    if settings.temporal.community_backend == "graphscope":
+        # graphscope is single-level only; hierarchical detection has no
+        # graphscope implementation.  Previously this fell through to the
+        # (Neo4j-only) GDS path, which failed and yielded [] — kept as an
+        # explicit fail-safe no-op.
+        logger.error(
+            "communities: hierarchy detection is unavailable on the graphscope "
+            "backend (single-level only)",
+        )
+        return []
+    try:
+        rows = await _leiden_rows(store, gamma=gamma, max_levels=max_levels)
+        stats = {"nodes": len({r["name"] for r in rows}), "rels": -1}
+    except Exception as exc:
+        logger.error(
+            "communities: leidenalg hierarchy detection FAILED: {e}", e=exc,
+        )
+        return []
 
     if not rows:
         logger.warning(
@@ -704,10 +465,6 @@ async def detect_hierarchy(
         # an abort leaves the root vertex in place and EVERY descendant missing.
         logger.error("communities: :Community hierarchy write failed: {e}", e=exc)
         raise
-    finally:
-        if settings.temporal.community_backend != "leidenalg":
-            with contextlib.suppress(Exception):
-                await asyncio.to_thread(_run_query, store, _drop_cypher(graph_name))
 
     return communities
 

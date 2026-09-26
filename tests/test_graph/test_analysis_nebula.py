@@ -23,8 +23,7 @@ class _FakeNebulaStore:
 
 
 @pytest.mark.asyncio
-async def test_pagerank_nebula_reads_materialized_property(monkeypatch):
-    monkeypatch.setattr("src.graph.analysis.settings.graph.backend", "nebula", raising=False)
+async def test_pagerank_nebula_reads_materialized_property():
     store = _FakeNebulaStore([("`Entity`.pagerank", [
         {"name": "A", "score": 0.9}, {"name": "B", "score": 0.5}])])
     out = await analysis.pagerank(store, top_n=5)
@@ -37,8 +36,7 @@ async def test_pagerank_nebula_reads_materialized_property(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_pagerank_nebula_fail_soft(monkeypatch):
-    monkeypatch.setattr("src.graph.analysis.settings.graph.backend", "nebula", raising=False)
+async def test_pagerank_nebula_fail_soft():
 
     class _Boom:
         def structured_query(self, *a, **k):
@@ -48,8 +46,7 @@ async def test_pagerank_nebula_fail_soft(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_graph_stats_nebula_counts_degree_dup(monkeypatch):
-    monkeypatch.setattr("src.graph.analysis.settings.graph.backend", "nebula", raising=False)
+async def test_graph_stats_nebula_counts_degree_dup():
     store = _FakeNebulaStore([
         ("AS ent_n", [{"ent_n": 5}]),
         ("AS rel_n", [{"rel_n": 8}]),
@@ -69,12 +66,11 @@ async def test_graph_stats_nebula_counts_degree_dup(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_graph_stats_nebula_no_rows_is_not_zero(monkeypatch):
+async def test_graph_stats_nebula_no_rows_is_not_zero():
     """A count aggregate ALWAYS yields a row — verified on the live store,
     `MATCH (a:Alert) RETURN count(a)` returns [{'n': 0}] on an empty tag.
     So a query answering with nothing at all did not measure zero, and
     must not be reported as zero."""
-    monkeypatch.setattr("src.graph.analysis.settings.graph.backend", "nebula", raising=False)
     out = await analysis.graph_stats(_FakeNebulaStore([]))
     assert out["entities"] is None
     assert out["relationships"] is None
@@ -83,10 +79,9 @@ async def test_graph_stats_nebula_no_rows_is_not_zero(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_graph_stats_nebula_reports_a_measured_zero_as_zero(monkeypatch):
+async def test_graph_stats_nebula_reports_a_measured_zero_as_zero():
     """The other side of it: an empty graph that ANSWERS zero is zero,
     with no error recorded."""
-    monkeypatch.setattr("src.graph.analysis.settings.graph.backend", "nebula", raising=False)
     store = _FakeNebulaStore([
         ("AS ent_n", [{"ent_n": 0}]),
         ("AS rel_n", [{"rel_n": 0}]),
@@ -102,11 +97,10 @@ async def test_graph_stats_nebula_reports_a_measured_zero_as_zero(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_graph_stats_nebula_failure_is_none_not_zero(monkeypatch):
+async def test_graph_stats_nebula_failure_is_none_not_zero():
     """The 2026-08-16 defect: the counting scans were refused for memory
     and the handler turned that into 0, so the tool reported "no
     relationships, no communities" on a space holding 310 989 and 2 302."""
-    monkeypatch.setattr("src.graph.analysis.settings.graph.backend", "nebula", raising=False)
 
     class _Refusing:
         def structured_query(self, stmt, param_map=None):
@@ -122,11 +116,10 @@ async def test_graph_stats_nebula_failure_is_none_not_zero(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_graph_stats_nebula_prefers_show_stats(monkeypatch):
+async def test_graph_stats_nebula_prefers_show_stats():
     """`SHOW STATS` serves Nebula's own job results: exact, milliseconds,
     and no scan — the scans it replaces fail outright on the production
     space. The counting queries must not even be issued."""
-    monkeypatch.setattr("src.graph.analysis.settings.graph.backend", "nebula", raising=False)
     store = _FakeNebulaStore([
         ("SHOW STATS", [
             {"Type": "Tag", "Name": "Entity", "Count": 161367},
@@ -156,11 +149,10 @@ async def test_graph_stats_nebula_prefers_show_stats(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_graph_stats_nebula_falls_back_to_scanning(monkeypatch):
+async def test_graph_stats_nebula_falls_back_to_scanning():
     """No stats job has ever run — Nebula answers "please execute `submit
     job stats' firstly". Fall back to the scans rather than report
     nothing."""
-    monkeypatch.setattr("src.graph.analysis.settings.graph.backend", "nebula", raising=False)
     store = _FakeNebulaStore([
         ("AS ent_n", [{"ent_n": 5}]),
         ("AS rel_n", [{"rel_n": 8}]),
@@ -233,8 +225,7 @@ def test_personalized_pagerank_empty_seeds():
 
 
 @pytest.mark.asyncio
-async def test_refresh_stats_submits_the_job(monkeypatch):
-    monkeypatch.setattr("src.graph.analysis.settings.graph.backend", "nebula", raising=False)
+async def test_refresh_stats_submits_the_job():
     store = _FakeNebulaStore([("SUBMIT JOB STATS", [{"New Job Id": 7}])])
     out = await analysis.refresh_nebula_stats(store)
     assert out == {"submitted": True, "job_id": 7}
@@ -242,9 +233,8 @@ async def test_refresh_stats_submits_the_job(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_refresh_stats_fails_soft(monkeypatch):
+async def test_refresh_stats_fails_soft():
     """A maintenance trigger must not 500 the admin route."""
-    monkeypatch.setattr("src.graph.analysis.settings.graph.backend", "nebula", raising=False)
 
     class _Boom:
         def structured_query(self, *a, **k):
