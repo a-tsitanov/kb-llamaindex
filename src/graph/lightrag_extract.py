@@ -5,9 +5,8 @@ and relations (src + tgt + keywords + description) in a single
 structured response — LightRAG's algorithm, our taxonomy.
 
 A drop-in replacement for `SimpleLLMPathExtractor`: populates
-`KG_NODES_KEY` and `KG_RELATIONS_KEY` on each input node so
-`PropertyGraphIndex` (with a `NoOpKGExtractor`) can consume the
-output identically.
+`KG_NODES_KEY` and `KG_RELATIONS_KEY` on each input node, which the
+merge step (`merge_kg_extraction`) reads back.
 
 Cross-chunk consolidation (concatenating / summarising descriptions
 of the same entity across many chunks) is a *separate* step —

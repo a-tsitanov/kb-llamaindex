@@ -8,8 +8,8 @@ no descriptions.  This extractor is OPT-IN: it is registered as the
 ``src/graph/index.py:build_kg_extractor`` but is NOT a default.
 
 It populates ``KG_NODES_KEY`` on each input node with ``EntityNode``
-objects (mirroring ``LightRAGExtractor``'s contract), so a
-``NoOpKGExtractor`` downstream can persist/embed them identically.
+objects (mirroring ``LightRAGExtractor``'s contract), so the downstream
+merge step consumes them identically.
 Entities carry an empty ``description`` (GLiNER yields none) plus the
 raw ``gliner_score`` for debugging / downstream filtering.
 

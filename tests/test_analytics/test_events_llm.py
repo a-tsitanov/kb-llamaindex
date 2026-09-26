@@ -151,7 +151,7 @@ async def test_trending_events_windows_and_shape(monkeypatch):
     res = await events_llm.trending_events(store, window_days=7, baseline_windows=4)
     assert res.params["since_recent"] == 19900 - 7
     assert res.params["since_baseline"] == 19900 - 7 * (4 + 1)
-    assert "burst_score" in res.cypher
+    assert res.cypher == "events_llm_graph_ops.trending_events"
     assert res.rows[0]["event_type"] == "lawsuit"
 
 

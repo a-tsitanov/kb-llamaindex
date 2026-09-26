@@ -6,8 +6,9 @@ on the query hot path.
 
 Pipeline:
 
-  1. ``detect_communities_activity`` — GDS Leiden over ``__Entity__``,
-     materialise ``:Community`` nodes (idempotent MERGE).
+  1. ``detect_communities_activity`` — in-worker Leiden (``community_backend``)
+     over the exported entity edges; materialise ``Community`` vertices
+     (prune + INSERT, upsert by deterministic VID).
   2. fan-out — one ``summarize_community_activity`` per detected community,
      run with BOUNDED parallelism (``community_summary_parallelism``) so a
      single rebuild doesn't flood the small-tier LLM proxy.
@@ -111,7 +112,7 @@ class CommunityBuildWorkflow:
             params.min_size, params.level,
         )
 
-        # ── 1. detect (GDS Leiden + :Community MERGE) ───────────────
+        # ── 1. detect (in-worker Leiden + Community write) ───────────
         self._state["phase"] = "detect"
         detect: DetectCommunitiesResult = await workflow.execute_activity(
             "detect_communities_activity",

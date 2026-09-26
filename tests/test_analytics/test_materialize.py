@@ -36,16 +36,5 @@ async def test_write_centrality_rejects_unknown_metric():
 
 
 @pytest.mark.asyncio
-async def test_write_link_prediction_is_a_noop_on_nebula():
-    # gds.nodeSimilarity has no in-worker port: under nebula link prediction
-    # is a documented no-op (src/analytics/materialize.py) -- nothing is
-    # written and the store is never touched.
-    store = _NebulaStmtStore()
-    n = await m.write_link_prediction(store, "g1", top_k=10, min_score=0.5)
-    assert n == 0
-    assert store.calls == []
-
-
-@pytest.mark.asyncio
 async def test_failsoft_none_store():
     assert await m.write_centrality(None, "g", "pagerank") == 0

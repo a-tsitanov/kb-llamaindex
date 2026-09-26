@@ -36,6 +36,8 @@ def test_nebula_merge_community_inserts_vertex_and_member_edges():
     cvid = cw.community_vid("7", 0)
     assert 'INSERT VERTEX `Community`' in joined
     assert f'"{cvid}":(' in joined
+    # (id, level, member_count, members_hash, ...) — member_count lands as the literal 2
+    assert f'"{cvid}":("7", 0, 2, "h", ' in joined
     # report_vec never written to the vertex
     assert "report_vec" not in joined
     # IN_COMMUNITY edges from each member's entity_vid to the community vid, with level

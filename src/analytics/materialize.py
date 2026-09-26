@@ -2,8 +2,8 @@
 
 Centrality is computed in-worker via igraph (analytics/centrality_compute.py,
 off the edge-export seam) and written back with nGQL UPDATE VERTEX.
-Link-prediction has no in-worker port yet — it is a documented no-op
-(returns 0)."""
+Link-prediction has no in-worker port yet — the materialize stage
+(``materialize_link_prediction``) is a documented no-op (returns 0)."""
 
 from __future__ import annotations
 
@@ -136,20 +136,3 @@ async def _write_centrality_nebula(store: Any, metric: str) -> int:
     return await asyncio.to_thread(
         _write_centrality_nebula_all_sync, store, [metric],
     )
-
-
-async def write_link_prediction(
-    store: Any | None,
-    graph_name: str,
-    *,
-    top_k: int,
-    min_score: float,
-) -> int:
-    """Link prediction (:LIKELY_LINK) has no in-worker port yet and no
-    LIKELY_LINK edge type exists — a documented no-op; link_prediction reads
-    return []. Always returns 0.
-    """
-    if store is None:
-        return 0
-    logger.debug("link_prediction is a no-op under nebula (no in-worker port)")
-    return 0

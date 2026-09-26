@@ -36,6 +36,7 @@ from loguru import logger
 
 from src.graph.nebula_store import _q, entity_vid
 
+
 @dataclass(frozen=True)
 class StoredEdge:
     """The belief a stored edge currently carries."""

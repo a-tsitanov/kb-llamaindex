@@ -591,7 +591,7 @@ class DetectedCommunity(_Frozen):
 
 class DetectCommunitiesResult(_Frozen):
     """Output of ``detect_communities_activity`` — the communities to
-    summarise.  Empty on any GDS / store error (fail-safe)."""
+    summarise.  Empty on any detection / store error (fail-safe)."""
 
     communities: list[DetectedCommunity] = Field(default_factory=list)
 

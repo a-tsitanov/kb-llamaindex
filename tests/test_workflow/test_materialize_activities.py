@@ -79,8 +79,9 @@ async def test_materialize_centrality_failsoft(monkeypatch):
 async def test_materialize_link_prediction_runs(monkeypatch):
     monkeypatch.setattr(ma, "_get_store", lambda: _Store())
     res = await ma.materialize_link_prediction(LinkPredictionIn())
-    # _Store returns 1 stream row → but min_score filter may reduce to 0; just check no error
+    # Documented no-op on NebulaGraph (no link-prediction port): nothing written.
     assert res.error == ""
+    assert res.written == 0
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 """Analytics "communities" graph ops (read-only, fail-soft):
 community_overview + entity_communities. ``personalized_pagerank`` stays in the
-primitive (a GDS compute that already degrades to ``[]`` under nebula via
-``graph.analysis``'s fail-soft projection).
+primitive (an in-worker igraph compute in ``graph.analysis``, fail-soft to
+``[]``).
 
 ``NebulaCommunitiesGraphOps``:
 - ``community_overview``: MATCH the Community tag by level (community_level_idx),

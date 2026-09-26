@@ -1,9 +1,8 @@
 """Analytics "events_llm" graph ops (E2 event reads,
 read-only, fail-soft): event_core / event_actors / event_timeline.
 
-trending_events (build_burst_cypher — a multi-window burst-rate detection) is NOT
-ported: it stays on run_rows and degrades to [] under nebula. Its nGQL port is a
-follow-up.
+trending_events (multi-window burst-rate detection over event created_at): an
+EventOrAction scan + GO OVER RELATED (rel_type PARTICIPATED_IN), burst math in Python.
 
 ``NebulaEventsLlmGraphOps`` reads the E2
 event columns now carried on EventOrAction entities (see nebula_schema): FETCH by

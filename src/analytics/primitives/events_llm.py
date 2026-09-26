@@ -8,7 +8,6 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from src.analytics.catalog import Primitive, PrimitiveResult, register
-from src.analytics.events_burst import build_burst_cypher
 from src.analytics.ids import clamp_top_n
 from src.graph.events_llm_graph_ops import build_events_llm_graph_ops
 from src.retrieval.date_filters import today_epoch_days
@@ -74,7 +73,7 @@ async def event_timeline(
     return PrimitiveResult(cypher=cypher, params=params, rows=rows)
 
 
-_TRENDING = build_burst_cypher(watched_only=False)
+_TRENDING = "events_llm_graph_ops.trending_events"
 
 
 class TrendingEventsParams(_Params):

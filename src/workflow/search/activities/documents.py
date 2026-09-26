@@ -21,6 +21,7 @@ from src.workflow.contracts import (
     DocumentsForCommunitiesResult,
 )
 
+
 def _docs_for_communities_nebula(store: Any, ids: list[str]) -> list[dict]:
     """Nebula source-doc attribution for level-0 communities. Chunks are NOT
     nebula graph nodes, so a ``(:Chunk)-[:MENTIONS]->(entity)`` hop is

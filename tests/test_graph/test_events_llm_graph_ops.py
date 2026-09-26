@@ -122,6 +122,25 @@ def test_nebula_trending_computes_burst_in_python():
                        "baseline_rate": 1.0, "burst_score": 2.0}]
 
 
+def test_nebula_trending_counts_distinct_events():
+    # A doubled PARTICIPATED_IN edge (same event -> same participant) must
+    # not double-count that event for the (entity, event_type) pair.
+    p = entity_vid("Acme")
+    e1, e2 = entity_vid("E1"), entity_vid("E2")
+    store = _NebulaRecStore(canned=[
+        ("label == 'EventOrAction'", [
+            {"vid": e1, "event_type": "lawsuit", "created_at": 100},
+            {"vid": e2, "event_type": "lawsuit", "created_at": 100},
+        ]),
+        ("rel_type == 'PARTICIPATED_IN'", [
+            {"ev": e1, "p": p}, {"ev": e1, "p": p}, {"ev": e2, "p": p},
+        ]),
+        ("`Entity`.name AS name;", [{"vid": p, "name": "Acme"}]),
+    ])
+    result = ego.NebulaEventsLlmGraphOps(store).trending_events(90, 0, 1, 2, 1.0, 20)
+    assert [r["recent"] for r in result] == [2]
+
+
 def test_nebula_trending_filters_below_min_count():
     p = entity_vid("Acme")
     e1 = entity_vid("E1")

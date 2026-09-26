@@ -48,7 +48,7 @@ def build_graph(
     g.add_edges(elist)
     if weights:
         g.es["weight"] = weights
-    # Collapse parallel/self edges (GDS undirected projection is simple).
+    # Collapse parallel/self edges (Leiden/centrality want a simple undirected graph).
     # NB: simplify() mutates in place — do NOT reassign (it can return None).
     g.simplify(multiple=True, loops=True, combine_edges={"weight": "sum"})
     return g, names

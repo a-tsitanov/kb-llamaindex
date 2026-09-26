@@ -361,11 +361,11 @@ class TemporalSettings(BaseSettings):
     # before the (expensive) large-tier synthesis.
     rerank_top_n: int = 5
 
-    # Offline graph-community build (Search R6) — GDS Leiden detection +
-    # per-community batch summarisation.  Runs on its OWN dedicated queue
-    # so the heavy GDS projection + batch summary work NEVER touches the
-    # query hot path; an admin endpoint (and an optional Temporal Schedule)
-    # is the only trigger.  Concurrency is intentionally LOW: summaries use
+    # Offline graph-community build (Search R6) — Leiden detection (in-worker,
+    # see community_backend) + per-community batch summarisation.  Runs on its
+    # OWN dedicated queue so the edge export + clustering + batch summary work
+    # NEVER touches the query hot path; an admin endpoint (and an optional
+    # Temporal Schedule) is the only trigger.  Concurrency is intentionally LOW: summaries use
     # the small tier but there can be many communities, and we don't want
     # to flood the LLM proxy with a burst from a single rebuild.
     graph_build_task_queue: str = "kb-graph-build"
@@ -377,7 +377,7 @@ class TemporalSettings(BaseSettings):
     analytics_materialize_concurrency: int = Field(
         default=2,
         ge=1,
-        description="GDS-воркеры для офлайн-материализации аналитики (centrality/link-prediction)",
+        description="Параллелизм офлайн-материализации аналитики (centrality/risk); сейчас не читается кодом",
     )
     # Bounded parallelism for the per-community summarize fan-out inside
     # CommunityBuildWorkflow (independent of the worker-side activity cap).
@@ -887,11 +887,12 @@ class SignalsSettings(BaseSettings):
         default_factory=lambda: {"high": 0.66, "medium": 0.33},
         description="Пороги полос risk_score: >=high → high, >=medium → medium, иначе low",
     )
-    # GDS node-similarity (link prediction) knobs.
+    # Link-prediction (node-similarity) knobs.  Unused on NebulaGraph: link
+    # prediction has no in-worker port yet (materialize stage is a no-op).
     link_prediction_top_k: int = Field(
         default=10,
         ge=1,
-        description="top-K соседей на узел для GDS node-similarity (link prediction)",
+        description="top-K соседей на узел для link prediction (на NebulaGraph не используется — не портирован)",
     )
     link_prediction_min_score: float = Field(
         default=0.5,

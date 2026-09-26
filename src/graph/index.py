@@ -50,37 +50,6 @@ KGExtractor = TransformComponent
 ExtractorMode = Literal["lightrag", "simple", "schema", "gliner", "gliner+llm"]
 
 
-class NoOpKGExtractor(TransformComponent):
-    """Identity extractor used when KG_NODES_KEY metadata is already
-    populated upstream and we just want `PropertyGraphIndex` to persist
-    + embed those triples without re-running the LLM.
-
-    Background: `PropertyGraphIndex._insert_nodes` pops `KG_NODES_KEY`
-    off each input node *after* running its `kg_extractors`.  That
-    pop happens regardless of who put the data there, so the worker
-    flow needs to populate the metadata first, then pass a noop
-    extractor:
-
-        1. LightRAGExtractor.acall(nodes)  → fills KG_NODES_KEY /
-           KG_RELATIONS_KEY with descriptions inline
-        2. merge_kg_extraction(nodes, llm)  → returns deduplicated
-           cross-chunk EntityNode/Relation lists (separate concern)
-        3. PropertyGraphIndex(nodes=..., kg_extractors=[NoOpKGExtractor()])
-           → pops per-chunk metadata, creates Chunk(:MENTIONS)→Entity
-             edges, embeds entities for the vector retriever
-        4. graph_store.upsert_nodes(merged_entities)
-           graph_store.upsert_relations(merged_relations)
-           → overwrites the per-chunk descriptions with cross-chunk
-             merged ones (upsert merges by name).
-    """
-
-    def __call__(self, nodes, **kwargs):  # type: ignore[override]
-        return nodes
-
-    async def acall(self, nodes, **kwargs):  # type: ignore[override]
-        return nodes
-
-
 _ENTITY_DESCRIPTION_PROP: tuple[str, str] = (
     "description",
     "A 1-2 sentence factual description of the entity drawn ONLY from "

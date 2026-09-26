@@ -45,6 +45,7 @@ from src.graph.community_leiden import (
 )
 from src.workflow.contracts import CommunityRef
 
+
 async def _read_old_reports(store: Any | None) -> dict[tuple[int, str], dict]:
     """{(level, members_hash) -> {report,title,summary,report_vec}} from the
     PRIOR build, read BEFORE prune so unchanged communities keep their
