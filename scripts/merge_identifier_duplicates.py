@@ -1,9 +1,9 @@
 """Stage 9 — periodic merge job for legacy identifier duplicates.
 
 Adapts ``enterprise-kb/scripts/merge_identifier_duplicates.py`` to
-LlamaIndex's ``Neo4jPropertyGraphStore``.  Pure helpers
+LlamaIndex's graph-store interface.  Pure helpers
 (``canonicalize_for_type``, ``group_by_canonical``) port verbatim;
-the merge-write path uses Cypher directly because LlamaIndex's
+the merge-write path issues a query directly because LlamaIndex's
 graph-store interface lacks a single-shot ``amerge_entities``
 equivalent for moving relationships.
 
@@ -12,7 +12,7 @@ Usage::
     python -m scripts.merge_identifier_duplicates                    # dry-run
     python -m scripts.merge_identifier_duplicates --no-dry-run       # apply
 
-Apply only AFTER a Neo4j backup.  Failures per group are logged and
+Apply only AFTER a Nebula backup.  Failures per group are logged and
 counted; a single bad group does not abort the whole run.
 """
 
@@ -81,7 +81,7 @@ def group_by_canonical(
     }
 
 
-# ── graph-bound bits (Neo4j via LlamaIndex store) ────────────────────
+# ── graph-bound bits (via LlamaIndex store) ──────────────────────────
 
 
 async def collect_entity_nodes(

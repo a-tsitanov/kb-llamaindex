@@ -18,7 +18,7 @@ case "${1:-up}" in
     echo "  Milvus      → localhost:19530 (gRPC), localhost:9091 (HTTP)"
     echo "  MinIO       → http://localhost:9001 (dev defaults — see your .env)"
     echo "  Postgres    → localhost:5432 (postgres / postgres)"
-    echo "  Neo4j       → http://localhost:7474 (dev defaults — see your .env)"
+    echo "  Nebula      → graphd localhost:9669, Studio http://localhost:7001 (profile: nebula)"
     echo "  Temporal    → http://localhost:8080 (UI), localhost:7233 (gRPC)"
     echo "  LiteLLM     → http://localhost:4000"
     echo

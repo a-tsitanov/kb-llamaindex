@@ -7,7 +7,8 @@ Stage 1 scope:
     by ``llama_index.vector_stores.milvus.MilvusVectorStore`` on
     first insert (Stage 3).
 
-Neo4j provisioning lands in later stages.
+Graph (Nebula) provisioning is handled separately by
+``scripts/nebula_bootstrap.py`` / lazy schema creation on first write.
 
 Usage::
 

@@ -208,18 +208,14 @@ _REFERENCE_HEADER = (
 # of truth is the inline comments / field names in src/config.py.  A coverage
 # guard test asserts EVERY iter_app_env_vars() var has an entry here.
 _ENV_DESCRIPTIONS: dict[str, str] = {
-    # ── GraphSettings (GRAPH_*) — выбор графового бэкенда ────────────
-    "GRAPH_BACKEND": "Графовый бэкенд, который строит фабрика store (strangler-шов миграции Neo4j→NebulaGraph): 'neo4j' (текущий) или 'nebula'. Дефолт 'neo4j' до прохождения бенчмарка паритета.",
     # ── AgentSettings (AGENT_*) — ручки search-эндпоинтов ────────────
     "AGENT_COMMUNITY_DYNAMIC_SELECTION": "Стратегия выбора сообществ для global/drift: lexical (по умолчанию) | semantic (kNN по report_vec) | descent (спуск по иерархии).",
     "AGENT_COMMUNITY_MAX_LEVELS": "Сколько уровней дендрограммы Leiden материализовать при build сообществ; 1 = одноуровневый, выше = иерархия (offline). Капа 1..10.",
-    "AGENT_COMMUNITY_VECTOR_BACKEND": "Где живут community-report вектора для semantic community-select: 'native' (Neo4j in-graph индекс) или 'milvus' (коллекция community_report_vec). Под GRAPH_BACKEND=nebula форсится 'milvus'. Дефолт 'native'.",
     "AGENT_CONVERSATION_HISTORY_ENABLED": "Учитывать историю диалога (мультитёрн): прежние реплики переписывают запрос в standalone-форму перед поиском. Пустая история = single-shot.",
     "AGENT_COVERAGE_CHECK_ENABLED": "Pre-submit coverage-check: перед ответом LLM судит, покрывают ли собранные данные вопрос; при пробеле делается ещё один раунд поиска.",
     "AGENT_ER_ENABLED": "Entity Resolution: дополнительный шаг между merge_kg_extraction и PropertyGraphIndex, схлопывающий семантические дубликаты в один canonical-сущность.",
     "AGENT_ER_JUDGE_BATCH_SIZE": "Сколько пар за один вызов LLM-судьи, когда ER маршрутизирует пограничных кандидатов. Капа 1..50.",
-    "AGENT_ER_USE_NATIVE_VECTOR_KNN": "Для ER нативный Neo4j vector-index kNN вместо окна на 5000 сущностей (окно теряет кросс-док совпадения по мере роста графа). По умолчанию ON, fail-safe. Для СУЩЕСТВУЮЩИХ графов прогнать backfill_er_vector.py. false → вернуть legacy-окно.",
-    "AGENT_ER_VECTOR_BACKEND": "Где живут ER-kNN вектора: 'native' (Neo4j in-graph vector index, текущий прод-путь) или 'milvus' (коллекция entity_er_vec). Под GRAPH_BACKEND=nebula форсится 'milvus'. Дефолт 'native'.",
+    "AGENT_ER_USE_NATIVE_VECTOR_KNN": "Для ER нативный in-graph vector-index kNN вместо окна на 5000 сущностей (окно теряет кросс-док совпадения по мере роста графа). По умолчанию ON, fail-safe: под NebulaGraph (нет нативного индекса) молча откатывается на legacy-окно. false → откатить явно.",
     "AGENT_ER_VECTOR_KNN_K": "Сколько соседей тянуть на новую сущность из ER vector-index, когда включён нативный kNN. Капа 1..100.",
     "AGENT_ER_VERDICT_CACHE_ENABLED": "Кэш вердиктов ER: повторяющиеся пары пропускают LLM. Опционально и fail-safe: при любой ошибке хранилища откат на чистое LLM-судейство.",
     "AGENT_ER_VERDICT_CACHE_BACKEND": "Где хранить вердикты ER: postgres (таблица er_verdict, по умолчанию) или graph (вершины в графе — историческое поведение). Вынесено из графа: 1.4 млн вершин это было 89.5% всего пространства и упирало полные проходы в потолок памяти Nebula. graph — откат без пересборки образа.",
@@ -342,15 +338,6 @@ _ENV_DESCRIPTIONS: dict[str, str] = {
     "NEBULA_SPACE": "Имя графового space в NebulaGraph.",
     "NEBULA_USER": "Пользователь NebulaGraph.",
     "NEBULA_WRITE_BATCH_SIZE": "Число строк на один INSERT VERTEX/EDGE (батчинг multi-VALUES). >= 1.",
-    # ── Neo4jSettings (NEO4J_*) — граф ───────────────────────────────
-    "NEO4J_DATABASE": "Имя базы Neo4j.",
-    "NEO4J_PASSWORD": "Пароль Neo4j. Секрет; в проде сменить дефолт 'changeme'.",
-    "NEO4J_CONNECTION_ACQUISITION_TIMEOUT_S": "Сколько секунд ждать свободное соединение из пула драйвера Neo4j, прежде чем сдаться (защита от вечного зависания под write-контеншном).",
-    "NEO4J_CONNECTION_TIMEOUT_S": "Таймаут установления TCP-соединения с Neo4j, сек.",
-    "NEO4J_MAX_CONNECTION_POOL_SIZE": "Размер пула соединений драйвера Neo4j на процесс (Track A write-tune).",
-    "NEO4J_QUERY_LOG": "true → логировать каждый Cypher из приложения одной INFO-строкой (свёрнутый запрос, имена параметров, rows, ms) — подтверждать, что поиск ходит в граф.",
-    "NEO4J_WRITE_RETRY_BASE_DELAY_S": "Базовая задержка экспоненциального ретрая write-транзакций Neo4j при deadlock/transient-ошибках, сек.",
-    "NEO4J_WRITE_RETRY_MAX_ATTEMPTS": "Максимум попыток write-транзакции Neo4j при deadlock/transient-ошибках.",
     "INGEST_QUEUE_BACKEND": "Бэкенд очереди ингеста: temporal (singleton IngestSchedulerWorkflow) | rabbitmq (брокер + ingest-consumer, допуск prefetch=K). Дефолтный путь — rabbitmq.",
     "RABBITMQ_URL": "AMQP-URL брокера RabbitMQ для очереди ингеста (amqp://user:pass@host:5672/).",
     "RABBITMQ_QUEUES": "Список очередей ингеста через запятую (RABBITMQ_QUEUES=a,b); первая — дефолтная, /ingest выбирает явным параметром queue.",
@@ -359,8 +346,6 @@ _ENV_DESCRIPTIONS: dict[str, str] = {
     "RABBITMQ_CONSUMER_TIMEOUT_MS": "x-consumer-timeout очереди, мс: сколько брокер ждёт ack по in-flight документу прежде чем закрыть канал (держать больше максимальной длительности ингеста одного документа).",
     "RABBITMQ_REQUEUE_ON_FAILURE": "true → возвращать сообщение в очередь при падении обработки (после ретраев), false → в DLQ.",
     "RABBITMQ_MAX_PRIORITY": "Максимальный приоритет сообщений очередей ингеста (x-max-priority): живой ингест публикуется с приоритетом 5, ручной reingest канала — с 0, поэтому низкоприоритетная полоса раскидывается только когда в основной нет сообщений. Смена значения требует пересоздания очереди.",
-    "NEO4J_URI": "Bolt-URI Neo4j (напр. bolt://localhost:7687).",
-    "NEO4J_USER": "Пользователь Neo4j.",
     # ── PostgresSettings (POSTGRES_*) — метаданные / ingest_metrics ──
     "POSTGRES_CONNECT_TIMEOUT_S": "Таймаут подключения к Postgres в секундах.",
     "POSTGRES_DB": "Имя базы Postgres.",
@@ -381,8 +366,7 @@ _ENV_DESCRIPTIONS: dict[str, str] = {
     # ── TemporalSettings (TEMPORAL_*) — воркер/клиент Temporal ───────
     "TEMPORAL_ACTIVITY_CONCURRENCY": "Слотов активити на основной очереди kb-ingest.",
     "TEMPORAL_ANALYTICS_MATERIALIZE_CONCURRENCY": "GDS-воркеры для офлайн-материализации аналитики (centrality/link-prediction) на очереди kb-graph-build. >= 1.",
-    "TEMPORAL_CENTRALITY_BACKEND": "Бэкенд вычисления centrality-метрик (pageRank/betweenness/eigenvector): 'gds' (легаси, in-Neo4j GDS) или 'igraph' (в воркере, память вне Neo4j; единственный вариант под GRAPH_BACKEND=nebula — форсится независимо от флага, см. analytics/materialize.py).",
-    "TEMPORAL_COMMUNITY_BACKEND": "Движок детекции сообществ: 'gds' (Leiden в Neo4j, легаси), 'leidenalg' (leidenalg/igraph в воркере, память вне Neo4j) или 'graphscope' (распределённый Leiden через GraphScope, вне Neo4j/igraph). Дефолт 'gds' до прохождения бенчмарка паритета.",
+    "TEMPORAL_COMMUNITY_BACKEND": "Движок детекции сообществ: 'leidenalg' (leidenalg/igraph в воркере, по умолчанию) или 'graphscope' (распределённый Leiden через GraphScope). Легаси-значение 'gds' маппится на 'leidenalg' (с warning).",
     "TEMPORAL_COMMUNITY_LEIDEN_GAMMA": "Resolution Leiden: >1 → больше мелких сообществ, <1 → меньше крупных. Только детекция, не query-путь. > 0.",
     "TEMPORAL_COMMUNITY_MIN_SIZE": "Сообщества мельче этого порога игнорируются (слишком мелкие для осмысленного summary — шум).",
     "TEMPORAL_COMMUNITY_SUMMARY_PARALLELISM": "Bounded-параллелизм fan-out суммаризации сообществ внутри CommunityBuildWorkflow (независимо от worker-капа активити).",
@@ -408,7 +392,7 @@ _ENV_DESCRIPTIONS: dict[str, str] = {
     "WIKI_ACTIVITY_CONCURRENCY": "Слотов активити на очереди kb-wiki (редактор статей). >= 1.",
     "WIKI_CITATIONS_TOP_K": "Сколько источников-цитат подтягивать в статью. >= 1.",
     "WIKI_DOCS_BASE_URL": "Base URL ссылок на документы-источники в секции 'Источники' (GET {docs_base_url}/documents/{doc_id}).",
-    "WIKI_ENABLED": "Включить редактор wiki-статей (Project A): генерирует per-entity MediaWiki-страницы из графа Neo4j. По умолчанию off.",
+    "WIKI_ENABLED": "Включить редактор wiki-статей (Project A): генерирует per-entity MediaWiki-страницы из графа. По умолчанию off.",
     "WIKI_MAX_RELATIONS": "Капа 1-hop связей в промпте статьи (ранжируются по mention_count соседа). Ограничивает размер промпта для hub-сущностей. >= 1.",
     "WIKI_MEDIAWIKI_API_URL": "URL MediaWiki Action API; пусто → выводится из wikibase.base_url + '/w/api.php'.",
     "WIKI_SITE_GLOBAL_ID": "Site global id MediaWiki для sitelinks; должен совпадать с реальным id вики (дефолт под dev-compose).",

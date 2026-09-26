@@ -5,8 +5,7 @@ Drops:
   * RabbitMQ   — purge every configured ingest queue + the DLQ.
   * Postgres   — TRUNCATE app tables (`documents`, `ingest_metrics`).
   * Milvus     — drop EVERY collection (chunks, community, ER, any `_bak*`).
-  * Graph      — Nebula: DROP SPACE; Neo4j: DETACH DELETE (dispatched on
-                 ``settings.graph.backend``).
+  * Graph      — Nebula: DROP SPACE.
   * MinIO      — empty the upload bucket + the workflow staging bucket.
                  Milvus's own segment bucket (`a-bucket`) is left alone.
   * MediaWiki  — delete wiki-editor article pages (except `Main Page`).
@@ -128,17 +127,13 @@ def wipe_milvus() -> None:
         client.close()
 
 
-# ── Graph (Nebula / Neo4j) ───────────────────────────────────────────
+# ── Graph (Nebula) ───────────────────────────────────────────────────
 
 
 def wipe_graph() -> None:
-    """Dispatch on the configured graph backend (mirrors
+    """Wipe the Nebula graph store (mirrors
     ``src.graph.store.build_graph_store``)."""
-    backend = settings.graph.backend
-    if backend == "nebula":
-        wipe_nebula()
-    else:
-        wipe_neo4j()
+    wipe_nebula()
 
 
 def wipe_nebula() -> None:
@@ -170,34 +165,6 @@ def wipe_nebula() -> None:
         logger.warning("nebula wipe  skipped (graphd unreachable?): {e}", e=exc)
     finally:
         pool.close()
-
-
-def wipe_neo4j() -> None:
-    from neo4j import GraphDatabase
-
-    nj = settings.neo4j
-    logger.info("neo4j wipe  uri={u}  db={d}", u=nj.uri, d=nj.database)
-    auth = (nj.user, nj.password.get_secret_value())
-    with GraphDatabase.driver(nj.uri, auth=auth) as driver:
-        with driver.session(database=nj.database) as s:
-            res = s.run("MATCH (n) DETACH DELETE n RETURN count(*) AS n")
-            row = res.single()
-            n = row["n"] if row else 0
-            logger.info("neo4j  detach-deleted nodes (sweep total: {n})", n=n)
-            try:
-                idx_res = s.run("SHOW INDEXES YIELD name")
-                names = [r["name"] for r in idx_res]
-                for name in names:
-                    if name.startswith("__org_neo4j") or name == "index_343aff4e":
-                        continue
-                    try:
-                        s.run(f"DROP INDEX `{name}`")
-                        logger.info("neo4j  dropped index {n}", n=name)
-                    except Exception as exc:
-                        logger.warning("neo4j  drop index {n} failed: {e}",
-                                       n=name, e=exc)
-            except Exception as exc:
-                logger.warning("neo4j  list indexes failed: {e}", e=exc)
 
 
 # ── MinIO (upload + staging buckets) ─────────────────────────────────
@@ -412,8 +379,6 @@ def confirm() -> bool:
     graph_line = (
         f"Nebula space `{settings.nebula.space}` @ "
         f"{settings.nebula.host}:{settings.nebula.port}"
-        if settings.graph.backend == "nebula"
-        else f"Neo4j graph @ {settings.neo4j.uri} db={settings.neo4j.database}"
     )
     print(
         "\n  Will WIPE:\n"

@@ -2,17 +2,11 @@
 graph elements so they are never mis-flagged as "new". Run BEFORE enabling
 ``EVENTS_FIRST_SEEN_ENABLED``.
 
-Backfill form chosen: plain ``MATCH … SET`` (no ``CALL IN TRANSACTIONS``).
+Backfill form chosen: plain ``MATCH … SET`` (no batched/chunked transactions).
 
-Rationale: ``Neo4jPropertyGraphStore.structured_query`` calls
-``driver.execute_query`` first (managed/explicit transaction) then falls back
-to ``session.run`` (implicit transaction) when the server rejects the query
-with a "needs implicit transaction" error.  That fallback makes
-``CALL { … } IN TRANSACTIONS`` technically runnable, but it means the first
-call always errors — noisy, non-obvious, and fragile across driver versions.
-For a one-shot admin script on a modest graph (< 1 M entities) a plain
-``MATCH … SET`` in a single managed transaction is safer, easier to audit,
-and sufficient.  If the graph is too large to fit in one TX, re-run with a
+Rationale: for a one-shot admin script on a modest graph (< 1 M entities) a
+plain ``MATCH … SET`` in a single transaction is safer, easier to audit, and
+sufficient.  If the graph is too large to fit in one TX, re-run with a
 smaller window by wrapping in a Python loop with ``SKIP/LIMIT``; that
 complexity is not needed yet.
 

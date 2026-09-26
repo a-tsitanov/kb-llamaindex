@@ -5,8 +5,8 @@ between them) into the local Wikibase via :func:`push_entities`,
 then prints the resulting QID for visual verification in the
 Wikibase UI (http://localhost:8181/wiki/Item:<QID>).
 
-Loads the base-class + property caches from Neo4j (populated by
-``scripts/setup_wikibase.py``) so the smoke exercises the real
+Loads the base-class + property caches from the graph store (populated
+by ``scripts/setup_wikibase.py``) so the smoke exercises the real
 lookup path.
 
 Usage::
@@ -14,7 +14,7 @@ Usage::
     uv run python -m scripts.smoke_wikibase_push
 
 Requires:
-  * docker compose up wikibase neo4j
+  * docker compose --profile wikibase --profile nebula up -d
   * uv run python -m scripts.setup_wikibase  (one-time)
   * ``WIKIBASE_BOT_USER`` / ``WIKIBASE_BOT_PASSWORD`` set in .env
     OR ``WIKIBASE_ADMIN_USER`` / ``WIKIBASE_ADMIN_PASS`` so we can
@@ -41,8 +41,8 @@ from src.storage.wikibase import AsyncWikibase, push_entities  # noqa: E402
 from src.utils.logging import configure_logging  # noqa: E402
 
 
-def _load_cache_from_neo4j() -> tuple[dict[str, str], dict[str, str]]:
-    """Pull cached base-class QIDs + property PIDs from Neo4j."""
+def _load_cache_from_graph() -> tuple[dict[str, str], dict[str, str]]:
+    """Pull cached base-class QIDs + property PIDs from the graph store."""
     gs = build_graph_store()
     base = gs.structured_query(
         "MATCH (b:WikibaseBaseClass) RETURN b.label AS label, b.qid AS qid",
@@ -73,7 +73,7 @@ async def main() -> int:
 
     logger.info("smoke  base_url={u}  user={n}", u=cfg.base_url, n=cfg.bot_user)
 
-    base_qids, property_pids = _load_cache_from_neo4j()
+    base_qids, property_pids = _load_cache_from_graph()
     logger.info(
         "smoke  cache  base_qids={b}  property_pids={p}",
         b=len(base_qids), p=len(property_pids),
@@ -102,7 +102,7 @@ async def main() -> int:
     )
 
     logger.info("smoke done  counts={c}", c=counts)
-    # The QID we just wrote is stamped onto the Neo4j node.
+    # The QID we just wrote is stamped onto the graph node.
     rows = gs.structured_query(
         "MATCH (n:__Entity__ {name: $name}) "
         "RETURN n.wikibase_qid AS qid",

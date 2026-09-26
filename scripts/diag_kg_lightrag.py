@@ -3,7 +3,7 @@
 Runs the live project LLM through `LightRAGExtractor` +
 `merge_kg_extraction` on the first N chunks of the medical corpus,
 printing per-chunk and post-merge counts.  Doesn't touch Postgres
-/ Milvus / Neo4j — purely a development sanity check for the
+/ Milvus / Nebula — purely a development sanity check for the
 extraction pipeline.
 
 Usage::

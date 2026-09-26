@@ -76,7 +76,7 @@ from scripts.make_env import gen_secret, is_secret
 
 
 def test_is_secret_matches_secret_keys():
-    for k in ["NEO4J_PASSWORD", "WIKIBASE_SECRET_KEY", "API_KEYS",
+    for k in ["NEBULA_PASSWORD", "WIKIBASE_SECRET_KEY", "API_KEYS",
               "MINIO_ACCESS_KEY", "LITELLM_API_KEY", "WIKIBASE_ADMIN_PASS"]:
         assert is_secret(k), k
     for k in ["API_HOST", "MILVUS_PORT", "LLM_POOL_N"]:
@@ -90,7 +90,7 @@ def test_gen_secret_wikibase_key_is_32_hex():
 
 def test_gen_secret_password_meets_min_lengths():
     assert len(gen_secret("WIKIBASE_ADMIN_PASS")) >= 12
-    assert len(gen_secret("NEO4J_PASSWORD")) >= 12
+    assert len(gen_secret("NEBULA_PASSWORD")) >= 12
 
 
 def test_gen_secret_api_key_has_sk_prefix():
@@ -173,15 +173,15 @@ def test_interactive_configure_section_sets_value():
 
 
 def test_interactive_generate_secret():
-    txt = "# ── S ──\nNEO4J_PASSWORD=changeme\n"
+    txt = "# ── S ──\nNEBULA_PASSWORD=changeme\n"
     lines = parse_example(txt)
-    values = {"NEO4J_PASSWORD": "changeme"}
+    values = {"NEBULA_PASSWORD": "changeme"}
     # configure section -> secret prompt answered with 'g' (generate)
     out = run_interactive(lines, dict(values),
                           input_fn=_scripted(["e"]),
                           getpass_fn=_scripted(["g"]))
-    assert out["NEO4J_PASSWORD"] != "changeme"
-    assert len(out["NEO4J_PASSWORD"]) >= 12
+    assert out["NEBULA_PASSWORD"] != "changeme"
+    assert len(out["NEBULA_PASSWORD"]) >= 12
 
 
 from scripts.make_env import build_values, write_env
@@ -223,8 +223,8 @@ def test_iter_app_env_vars_covers_known_fields():
     assert "WIKI_ENABLED" in envs
     assert "HF_OFFLINE" in envs          # validation_alias path (no prefix)
     by = {r.env: r for r in rows}
-    assert by["NEO4J_PASSWORD"].secret is True
-    assert by["NEO4J_PASSWORD"].default == ""   # secrets never emit a real default
+    assert by["NEBULA_PASSWORD"].secret is True
+    assert by["NEBULA_PASSWORD"].default == ""   # secrets never emit a real default
     assert "AGENT_TOP_K" not in envs     # removed dead field stays gone
     assert "API_HOST" not in envs
 
@@ -237,7 +237,7 @@ LITELLM_MODEL_SMALL=gemma4:e4b
 LITELLM_MODEL_LARGE=gpt-4o-mini
 # ── Vector ──
 MILVUS_DIM=1536
-NEO4J_PASSWORD=
+NEBULA_PASSWORD=
 """
 
 
@@ -263,7 +263,7 @@ def test_noninteractive_generates_project_secret_but_not_openai(tmp_path):
     written = out.read_text()
     assert "OPENAI_API_KEY=\n" in written        # left EMPTY, not minted
     # project secret WAS auto-generated (non-empty, not the blank example default)
-    assert "NEO4J_PASSWORD=\n" not in written
+    assert "NEBULA_PASSWORD=\n" not in written
 
 
 # --- MediaWiki password length validators ---
@@ -287,7 +287,7 @@ def test_build_reference_groups_and_marks_secrets():
     text = build_reference()
     assert "# Generated from src/config.py" in text
     assert "MILVUS_DIM=1536" in text
-    assert "NEO4J_PASSWORD=" in text
+    assert "NEBULA_PASSWORD=" in text
     assert "# secret" in text.lower()
     assert "MilvusSettings" in text
 

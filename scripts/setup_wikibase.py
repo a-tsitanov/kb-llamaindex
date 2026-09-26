@@ -9,12 +9,12 @@ Usage::
 Reads connection info from :class:`WikibaseSettings` (env-driven).
 Creates the 10 base-class Items and 27 Properties (3 common +
 24 identifier-type ``external-id``) and persists their QIDs/PIDs
-into Neo4j so the ingest hot path never has to repeat lookups.
+into the graph store so the ingest hot path never has to repeat lookups.
 
 Idempotent — re-runs check existence via ``wbsearchentities``
 before creating.  ``--dry-run`` reports planned creates without
 writing; ``--refresh-cache`` re-pulls existing QIDs/PIDs from
-Wikibase into Neo4j cache only.
+Wikibase into the graph-store cache only.
 
 Auth note:
     Items and Properties are written with admin credentials
@@ -283,7 +283,7 @@ def _ensure_property(
     return pid
 
 
-# ── neo4j cache ─────────────────────────────────────────────────────
+# ── graph-store cache ───────────────────────────────────────────────
 
 
 def _persist_cache(
@@ -318,11 +318,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--dry-run", action="store_true",
-        help="Report planned creates without writing to Wikibase or Neo4j.",
+        help="Report planned creates without writing to Wikibase or the graph store.",
     )
     parser.add_argument(
         "--refresh-cache", action="store_true",
-        help="Refresh Neo4j cache from existing Wikibase entities; "
+        help="Refresh graph-store cache from existing Wikibase entities; "
              "do not create anything new.",
     )
     args = parser.parse_args()
@@ -379,7 +379,7 @@ def main() -> int:
         if pid:
             property_pids[label] = (pid, datatype)
 
-    # 4. Persist into Neo4j cache (skip when dry-run)
+    # 4. Persist into graph-store cache (skip when dry-run)
     if not args.dry_run:
         _persist_cache(base_qids, property_pids)
 

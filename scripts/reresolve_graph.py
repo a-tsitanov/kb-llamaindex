@@ -1,7 +1,7 @@
 """Whole-graph batch consolidation for SEMANTIC entities.
 
 Re-runs Entity Resolution (Person / Organization / Concept / …) over the
-ENTIRE existing Neo4j graph to merge fragmented duplicate nodes that
+ENTIRE existing graph to merge fragmented duplicate nodes that
 accumulated across many independent ingests.  Where the per-ingest ER
 only ever compares a NEW batch against stored canonicals, this job
 sweeps every eligible entity already in the graph and consolidates the
@@ -29,7 +29,7 @@ real store via ``_cleanup_stored_losers``.
 
 PREREQUISITES (read before running ``--no-dry-run``)
 ----------------------------------------------------
-1. Take a Neo4j BACKUP first.  Merges DETACH DELETE the loser nodes.
+1. Take a Nebula backup first.  Merges DETACH DELETE the loser nodes.
 2. For ``--candidate-source native`` (the default), the ER vector index
    (``er_embedding_vec`` over ``__Entity__.er_vec``) and ``er_vec`` must
    already exist — the read-only proxy NO-OPs the ``CREATE VECTOR INDEX``
@@ -47,7 +47,7 @@ Usage::
     python -m scripts.reresolve_graph --types Person Organization --limit 500
     python -m scripts.reresolve_graph --no-dry-run --yes     # APPLY merges
 
-Apply only AFTER a Neo4j backup.  The apply step is idempotent and
+Apply only AFTER a Nebula backup.  The apply step is idempotent and
 safe-by-inaction (a missing loser is a no-op; a failed repoint leaves the
 loser intact as a recoverable duplicate).
 """
@@ -426,7 +426,7 @@ async def _amain(argv: list[str] | None = None) -> int:
 
     if not args.yes:
         prompt = (
-            f"About to apply {len(merges)} merges to Neo4j "
+            f"About to apply {len(merges)} merges to the graph store "
             f"(DETACH DELETE losers, rel-types preserved). "
             f"Did you take a backup? Type 'yes' to proceed: "
         )
