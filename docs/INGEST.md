@@ -7,7 +7,7 @@
 
 ## Кратко
 
-`POST /ingest` загружает файл в **MinIO**, записывает строку в статусе pending в **Postgres**, делает снимок имён моделей по ролям и запускает долговечный воркфлоу **`DocumentIngestWorkflow`** на очереди `kb-ingest`. Воркфлоу выполняет фиксированную последовательность активностей, передавая тяжёлое состояние (распарсенные ноды, KG-ноды, объединённые сущности) между ними как **MinIO-блобы по URI** (claim-check) — в полезной нагрузке Temporal путешествуют только небольшие контракты. **Векторная половина** (parse → embed → Milvus) и **графовая половина** (extract KG → merge/ER → Neo4j) разделены, так что медленная или упавшая сборка графа деградирует до `graph_status="vector_only"` вместо потери всего инжеста.
+`POST /ingest` загружает файл в **MinIO**, записывает строку в статусе pending в **Postgres**, делает снимок имён моделей по ролям и запускает долговечный воркфлоу **`DocumentIngestWorkflow`** на очереди `kb-ingest`. Воркфлоу выполняет фиксированную последовательность активностей, передавая тяжёлое состояние (распарсенные ноды, KG-ноды, объединённые сущности) между ними как **MinIO-блобы по URI** (claim-check) — в полезной нагрузке Temporal путешествуют только небольшие контракты. **Векторная половина** (parse → embed → Milvus) и **графовая половина** (extract KG → merge/ER → NebulaGraph) разделены, так что медленная или упавшая сборка графа деградирует до `graph_status="vector_only"` вместо потери всего инжеста.
 
 Опционально включаются два механизма (оба opt-in, по умолчанию выключены): **классификатор входных документов** (`CLASSIFIER_ENABLED`) — шаг между `fetch_source` и `parse_and_chunk`, который может коротко замкнуть воркфлоу в терминальный статус `skipped`, не запуская парсинг/индексацию/граф; и **допуск документов** (`INGEST_ADMISSION_ENABLED`) — когда включён, `/ingest` не запускает `DocumentIngestWorkflow` напрямую, а отправляет документ в синглтон-планировщик `IngestSchedulerWorkflow`, который ограничивает число одновременно обрабатываемых документов (см. [Допуск документов](#допуск-документов-admission-control)).
 
@@ -22,13 +22,13 @@ flowchart TD
     CLS -- "ingest (или fail-soft)" --> S2["2. parse_and_chunk<br/>read→split→identifier-canon→(translate)<br/>→ parsed.pkl"]
     CLS -- "skip (force обходит rules)" --> SK["mark_skipped<br/>status=skipped + причина,<br/>чистка staging, без parse/index/graph"]
     S2 --> S3["3. index_vector<br/>embed + insert → Milvus"]
-    S2 --> S4["4. inject_canonical<br/>upsert identifier entities → Neo4j"]
+    S2 --> S4["4. inject_canonical<br/>upsert identifier entities → NebulaGraph"]
     S2 --> S5["5. extract_kg<br/>LightRAG: entities+relations per chunk<br/>(queue: kb-ingest-llm) → kg.pkl"]
 
     S5 --> GBW["6. GraphBuildWorkflow (child)<br/>(queue: kb-ingest-merge)"]
     subgraph GBW_inner [" "]
       GB1["6a. merge_and_resolve<br/>LightRAG merge → phone consolidate → ER<br/>→ merged.pkl"]
-      GB2["6b. build_property_graph<br/>upsert entities/relations + indexes → Neo4j"]
+      GB2["6b. build_property_graph<br/>upsert entities/relations → NebulaGraph"]
       GB1 --> GB2
     end
     GBW --> GB1
@@ -55,7 +55,7 @@ sequenceDiagram
     participant MinIO
     participant PG as Postgres
     participant Milvus
-    participant Neo4j
+    participant Nebula as NebulaGraph
     participant LLM as LiteLLM (via LLMPool)
 
     U->>API: POST file
@@ -67,15 +67,15 @@ sequenceDiagram
     T->>T: parse_and_chunk (split + identifier-canon)
     T->>MinIO: write parsed.pkl
     T->>Milvus: index_vector (embed + insert)
-    T->>Neo4j: inject_canonical (identifier entities)
+    T->>Nebula: inject_canonical (identifier entities)
     T->>LLM: extract_kg (extraction lane) — 1 call/chunk
     T->>MinIO: write kg.pkl
     Note over T: GraphBuildWorkflow (child, kb-ingest-merge)
     T->>LLM: merge_and_resolve (judge lane: merge + ER)
     T->>MinIO: write merged.pkl
-    T->>Neo4j: build_property_graph (upsert + indexes)
-    T->>Neo4j: mark_entities_dirty (best-effort, wiki)
-    T->>Neo4j: push_wikibase (best-effort)
+    T->>Nebula: build_property_graph (upsert)
+    T->>Nebula: mark_entities_dirty (best-effort, wiki)
+    T->>Nebula: push_wikibase (best-effort)
     T->>PG: finalize (status + ingest_metrics per activity)
     T->>MinIO: delete staging prefix
 ```
@@ -88,10 +88,10 @@ sequenceDiagram
 | 1.5 | `classify_document` | kb-ingest | **Opt-in** (`CLASSIFIER_ENABLED`, по умолч. false). Два слоя: (a) детерминированные правила — расширение / размер / пустой файл (`classifier.py::apply_rules`), которые обходит флаг `force`; (b) LLM-гейт по ограниченному превью файла (`classify_with_llm`, `astructured_predict`, small-уровень). Любая ошибка → fail-soft в ingest (ложный skip дороже). При skip воркфлоу замыкается на `mark_skipped` | `Ctx` → решение ingest/skip | `activities/classify_document.py`, `ingestion/classifier.py` |
 | 2 | `parse_and_chunk` | kb-ingest | Чтение → разбиение (`chunk_size`/`overlap`) → **канонизация идентификаторов** (телефоны→E.164, ИНН/ОГРН…) → опциональный перевод; вычистка метаданных перевода; pickle нод | `Ctx` → `Parsed` (`nodes_uri`) | `activities/parse_and_chunk.py` |
 | 3 | `index_vector` | kb-ingest | Срезает метаданные сверх лимита Milvus → embed → вставка в **Milvus**; восстанавливает метаданные на нодах в памяти | `Parsed` → `Indexed` | `activities/index_vector.py` |
-| 4 | `inject_canonical` | kb-ingest | Upsert одной `:__Entity__` на каждый `(type, canonical)` идентификатор в **Neo4j** ДО LLM-экстракции (чтобы дословные упоминания от LLM всё равно дедуплицировались) | `Parsed` → `Injected` | `activities/inject_canonical.py` |
+| 4 | `inject_canonical` | kb-ingest | Upsert одной вершины `Entity` на каждый `(type, canonical)` идентификатор в **NebulaGraph** ДО LLM-экстракции (чтобы дословные упоминания от LLM всё равно дедуплицировались) | `Parsed` → `Injected` | `activities/inject_canonical.py` |
 | 5 | `extract_kg` | **kb-ingest-llm** | **Экстрактор LightRAG**: один LLM-вызов на чанк → сущности + связи (src+tgt+keywords+описание+**полярность**+**временная валидность**) в метаданных чанка; сводит статистику | `Parsed` → `KGExtracted` (`kg.pkl`) | `activities/extract_kg.py` |
 | 6a | `merge_and_resolve` | **kb-ingest-merge** | Кросс-чанковое **слияние LightRAG** → **консолидация телефонов** → **ER** (`resolve_entities`: LLM-судья + кэш вердиктов + native-vector kNN/окно) | `KGExtracted` → `Merged` (`merged.pkl`) | `activities/merge_and_resolve.py` |
-| 6b | `build_property_graph` | kb-ingest-merge | Срезает небезопасные для Neo4j метаданные → строит PG-индекс (Chunk + `MENTIONS` + сущности/связи) → upsert в **Neo4j** → гарантирует индексы | `Merged` → `GraphBuilt` | `activities/build_property_graph.py` |
+| 6b | `build_property_graph` | kb-ingest-merge | Срезает небезопасные для графа метаданные → upsert сущностей (вершины `Entity`) и связей (рёбра `RELATED`) в **NebulaGraph** (схему/индексы гарантирует `ensure_schema` при открытии сессии стора; чанки — не вершины графа, их векторы пишет `index_vector` в Milvus) | `Merged` → `GraphBuilt` | `activities/build_property_graph.py` |
 | 7 | `mark_entities_dirty` | kb-ingest | Best-effort: помечает имена объединённых сущностей для непрерывного wiki-редактора (Project A) | `MarkDirtyIn` → count | `activities/mark_dirty.py` |
 | 8 | `push_wikibase` | kb-ingest | Best-effort (только если граф `completed`): проецирует сущности/связи в локальный якорь Wikibase | `Merged` → `WikibasePushed` | `activities/push_wikibase.py` |
 | 9 | `finalize` | kb-ingest | Финальный статус в Postgres; удаление staging-префикса + локальной директории; запись `ingest_metrics` по каждой активности (длительности + теги моделей по ролям) | `FinalizeIn` → `IngestResult` | `activities/finalize.py` |
@@ -103,7 +103,7 @@ sequenceDiagram
 ## Две половины + деградация
 
 - **Векторная половина** (1–3): fetch → parse/chunk → embed → Milvus. Если падает/таймаутится → `mark_failed`, инжест проваливается.
-- **Графовая половина** (5–6): extract KG → merge/ER → Neo4j, внутри дочернего воркфлоу. Если поднимается исключение (`ActivityError`/`ChildWorkflowError`) → перехватывается → **`graph_status = "vector_only"`**: документ по-прежнему доступен для векторного поиска, граф просто пропускается. `push_wikibase` тогда тоже пропускается (он завязан на `completed`).
+- **Графовая половина** (5–6): extract KG → merge/ER → NebulaGraph, внутри дочернего воркфлоу. Если поднимается исключение (`ActivityError`/`ChildWorkflowError`) → перехватывается → **`graph_status = "vector_only"`**: документ по-прежнему доступен для векторного поиска, граф просто пропускается. `push_wikibase` тогда тоже пропускается (он завязан на `completed`).
 
 Терминальные статусы документа: **`completed`** (обе половины успешны), **`vector_only`** (граф деградировал), **`failed`** (упала векторная половина) и **`skipped`** (новый — документ отклонён классификатором на шаге `classify_document`, парсинг/индексация/граф не выполнялись).
 
@@ -144,7 +144,7 @@ sequenceDiagram
 
 ## Очереди, воркеры, конкурентность LLM
 
-Раздельные очереди не дают всплеску LLM заморить голодом работу по записи в Neo4j/слиянию (блокировка головы очереди):
+Раздельные очереди не дают всплеску LLM заморить голодом работу по записи в граф/слиянию (блокировка головы очереди):
 
 | Очередь | Конкурентность активностей | Что выполняет |
 |---|---|---|
@@ -156,7 +156,7 @@ sequenceDiagram
 
 ## Канонизация идентификаторов (детерминированная, до LLM)
 
-24 типа идентификаторов (телефоны→E.164, ИНН/ОГРН с контрольными суммами, email, URL, почтовые адреса через libpostal, даты, суммы, …) извлекаются **детерминированно** в `parse_and_chunk` (без LLM), хранятся в метаданных чанка И дописываются в текст чанка, чтобы LLM видела канонические формы в потоке. Затем `inject_canonical` делает upsert их как нод `:__Entity__` **перед** `extract_kg`, так что даже если LLM извлечёт дословную строку телефона, она дедуплицируется на каноническую ноду. (`ingestion/identifiers.py`, `ingestion/identifier_transform.py`)
+24 типа идентификаторов (телефоны→E.164, ИНН/ОГРН с контрольными суммами, email, URL, почтовые адреса через libpostal, даты, суммы, …) извлекаются **детерминированно** в `parse_and_chunk` (без LLM), хранятся в метаданных чанка И дописываются в текст чанка, чтобы LLM видела канонические формы в потоке. Затем `inject_canonical` делает upsert их как вершин `Entity` **перед** `extract_kg`, так что даже если LLM извлечёт дословную строку телефона, она дедуплицируется на каноническую ноду. (`ingestion/identifiers.py`, `ingestion/identifier_transform.py`)
 
 ## Снимки мультимодели
 

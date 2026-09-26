@@ -272,9 +272,9 @@ MCP-сервера). Сбой в одном инструменте логиру�
 | Инструмент | Бэкенд | Возвращает | Примечания |
 | --- | --- | --- | --- |
 | `vector_search` | Milvus (HNSW) | top-k чанков по сходству эмбеддингов | плотный baseline; доступен всегда |
-| `graph_search` | Neo4j нативный векторный kNN по эмбеддингам сущностей + `LLMSynonymRetriever` | найденные сущности + соседи (`depth` triplet-hops) + связанные чанки | сопоставление сущностей — это **индексированный** нативный векторный kNN (масштабируется на большой граф) плюс один вызов small-LLM для синонимов; сущности ER-канонизированы при приёме |
-| `find_entity_by_name` | Neo4j полнотекстовый индекс по `__Entity__.name` | сущности по (частичному) имени | ловит опечатки / частичные имена, которые `graph_search` может вытеснить из ранжирования |
-| `graph_walk` | Neo4j переменной длины `(e)-[*1..hops]-` | ограниченная окрестность (≤50 узлов / ≤100 рёбер) | явный N-hop обход; **с двойным засевом** (ниже) |
+| `graph_search` | засев: kNN по Milvus-коллекции `entity_er_vec` (эмбеддинги сущностей) ∪ substring-поиск по Postgres-зеркалу сущностей; затем nGQL `GET SUBGRAPH` вокруг каждой найденной сущности в NebulaGraph | найденные сущности + соседи (`depth` hops); чанки не возвращает (чанки — не вершины графа) | kNN индексированный (масштабируется на большой граф); сбой одного засева деградирует до другого; сущности ER-канонизированы при приёме |
+| `find_entity_by_name` | nGQL `LOOKUP ON Entity` по индексу `entity_name_idx`, `STARTS WITH` по каждому слову запроса | сущности по префиксу имени | «Иванов» → «Иванов Иван Иванович»; совпадение с середины имени («Ромаш» → «ООО Ромашка») НЕ находится; регистрозависимо; ошибка поиска возвращается полем `error` |
+| `graph_walk` | nGQL `GET SUBGRAPH … STEPS FROM <vid> BOTH RELATED` | ограниченная окрестность (≤50 узлов / ≤100 рёбер) | явный N-hop обход; **с двойным засевом** (ниже) |
 
 **Глубина соседей `graph_search`.** `graph_search` передаёт
 `depth = settings.agent.graph_search_path_depth`
@@ -302,20 +302,19 @@ MCP-сервера). Сбой в одном инструменте логиру�
   вносит свою окрестность, даже когда `graph_search` уже что-то вернул.
 
 Каждый засев диспетчеризует `graph_walk(start_entity, hops=graph_walk_hops)`;
-чанки обхода сливаются в накопленные источники (тот же набор `seen` по
-chunk_id). Под флагом `AGENT_GRAPH_WALK_ENABLED` (по умолчанию вкл).
+чанки обхода (если есть) сливаются в накопленные источники (тот же набор
+`seen` по chunk_id) — на NebulaGraph обход отдаёт только сущности и связи. Под флагом `AGENT_GRAPH_WALK_ENABLED` (по умолчанию вкл).
 **Fail-open на каждый засев**: сбой парсинга, отсутствующий засев или
 ошибка хранилища пропускают этот обход и возвращают остальное без
 изменений — активность никогда не бросает исключение на обходе. Поскольку
 этот парсинг недетерминирован, он живёт в АКТИВНОСТИ, а не в теле
 `@workflow.run`.
 
-`graph_walk` **жёстко ограничен** (никогда не безграничен), что
-обеспечивается и в Cypher, и в маппинге строк: `hops ≤ GRAPH_WALK_MAX_HOPS`
-(3), `≤ GRAPH_WALK_MAX_NODES` (50), `≤ GRAPH_WALK_MAX_EDGES` (100). Один
-ограниченный Cypher (`MATCH (e {name:$name})-[r*1..hops]-(m)` с серверным
-`LIMIT`, fallback без APOC) не даёт многошаговому обходу взорвать контекст
-синтеза. Он диспетчеризуемый, но НЕ входит в фиксированный `_PIPELINE`
+`graph_walk` **жёстко ограничен** (никогда не безграничен): `hops ≤
+GRAPH_WALK_MAX_HOPS` (3) зажимается до запроса, а `≤ GRAPH_WALK_MAX_NODES`
+(50) / `≤ GRAPH_WALK_MAX_EDGES` (100) — усечением в маппинге строк (у
+`GET SUBGRAPH` нет серверного `LIMIT`). Это не даёт многошаговому обходу
+взорвать контекст синтеза. Он диспетчеризуемый, но НЕ входит в фиксированный `_PIPELINE`
 (ему нужен явный `start_entity`); именно засев выше его активирует.
 
 ---
@@ -369,11 +368,11 @@ question (+ optional history)
 - **`lexical`** (`_map_communities_lexical` + чистый `rank_summaries`) —
   читает все `:Community.summary` для уровня, ранжирует по пересечению
   слов запроса, ограничивает до `limit`. Детерминирован, без LLM, без
-  векторной зависимости. Ничьи разрешаются по порядку Cypher (сначала
-  крупнейшее сообщество).
+  векторной зависимости. Ничьи разрешаются по порядку чтения (сначала
+  крупнейшее сообщество по `member_count`).
 - **`semantic`** (`select_communities_semantic`) — эмбеддит запрос, затем
-  kNN по индексу `community_report_vec` (`db.index.vector.queryNodes`),
-  ближайшие первыми, ограничено до `limit`.
+  kNN по Milvus-коллекции `community_report_vec` (шов
+  `CommunityReportVectorStore`), ближайшие первыми, ограничено до `limit`.
 - **`descent`** (`select_communities_descent`) — динамический отбор
   GraphRAG: эмбеддит запрос, начинает с **самого грубого** уровня (0),
   ранжирует фронтир по косинусу запроса против `report_vec`, спускается по
@@ -467,57 +466,52 @@ question (+ optional history)
 пока ничего не подключено).
 
 ```
-1. detect_communities_activity   (GDS Leiden over __Entity__)
+1. detect_communities_activity   (Leiden over the Entity/RELATED graph)
+     edges streamed out of NebulaGraph → leidenalg in the worker (default)
+       or graphscope (single-level only)
      max_levels == 1 → single-level (detect_communities)
-     max_levels  > 1 → full dendrogram hierarchy (detect_hierarchy)
-   → MERGE :Community {id, level, member_count} + (:__Entity__)-[:IN_COMMUNITY]->
-   → coarse→finer (:Community)-[:PARENT_OF]->(:Community) for hierarchy
-   → ensure the community_report_vec index ONCE (fail-open → degrades to lexical)
+     max_levels  > 1 → full dendrogram hierarchy (detect_hierarchy; leidenalg only)
+   → prune old layer, INSERT VERTEX Community {id, level, member_count, …}
+     + INSERT EDGE IN_COMMUNITY (Entity → Community)
+   → coarse→finer Community -[PARENT_OF]-> Community for hierarchy
 2. summarize fan-out, FINEST-level-first (bounded by community_summary_parallelism)
    per community: structured report {title, summary, findings:[{statement, importance}]}
      level 0  → from member entities/relations
      level>0  → from CHILD reports (composed bottom-up; falls back to members)
-   → embed (title + summary) → MERGE report / title / summary / report_vec on :Community
+   → report / title / summary on the Community vertex;
+     embed (title + summary) → Milvus community_report_vec (fail-open)
 ```
 
-- **Обнаружение** проецирует подграф `__Entity__` в in-memory GDS-граф и
-  запускает **GDS Leiden** (`gds.leiden.stream`). Сообщества меньше
-  `community_min_size` отбрасываются. **Fail-safe**: любая ошибка
-  GDS/Cypher (или отсутствие хранилища) → `[]`, никогда не пробрасывается
-  через активность.
+- **Обнаружение** выгружает рёбра сущностей через шов edge-export и
+  кластеризует их Leiden в воркере (`TEMPORAL_COMMUNITY_BACKEND`:
+  `leidenalg` по умолчанию, `graphscope` — только один уровень; legacy
+  `gds` отображается на `leidenalg`). Сообщества меньше
+  `community_min_size` отбрасываются. **Fail-safe на детекции**: ошибка
+  детекции (или отсутствие хранилища) → `[]`, не пробрасывается через
+  активность. **Запись НЕ fail-open**: сбой записи `Community` бросает
+  исключение, чтобы сборка ретраилась, а не молча производила пустоту.
 - **Резюме** создаются LLM **small-tier** (`build_llm("retrieve")` — никогда
   большой моделью синтеза), парсятся из JSON толерантно (`_parse_report`
   всегда выдаёт *что-то* для сохранения).
 - **Упорядочивание по уровням**: воркфлоу группирует спецификации по
   уровню и обрабатывает самые мелкие первыми (`group_specs_by_level`), так
   что дочерние отчёты грубого родителя уже существуют, когда он
-  компонует собственный (`_CHILD_REPORTS_CYPHER`). Барьер уровня означает
+  компонует собственный (`read_child_reports`). Барьер уровня означает
   «этот уровень завершён», а не «все дети присутствуют»; частичные сбои
   деградируют, а идемпотентные перезапуски залечивают.
-- **Инкрементально**: сообщество, перенесённое без изменений из прошлого
-  построения (`needs_report=False`), пропускается — его отчёт уже сохранён.
-  Перезапуск идемпотентен (MERGE по ключам `(id, level)`), обновляя
-  резюме / состав без дублирования узлов.
+- **Инкрементально** (иерархический путь `detect_hierarchy`): отчёты
+  прошлой сборки читаются ДО prune; сообщество с тем же `(level,
+  members_hash)` переносит отчёт (`needs_report=False`) и пропускается. Перезапуск идемпотентен (VID сообщества детерминирован
+  от `(id, level)`, INSERT — upsert по VID).
 
-**Схема `:Community`** (аддитивная — ни одна существующая
-метка/свойство не затрагивается):
-- Метка `:Community`; свойства `id` (Leiden communityId), `level` (0 =
+**Схема `Community`** (NebulaGraph, `src/graph/nebula_schema.py`):
+- Тег `Community`; свойства `id` (Leiden communityId), `level` (0 =
   самый грубый), `member_count`, `title`, `summary`, `report`
-  (структурированный отчёт в JSON), `report_vec` (нативный эмбеддинг,
-  может быть не задан при сбое эмбеддинга), `summarized_at`.
-- Связи `(:__Entity__)-[:IN_COMMUNITY]->(:Community)` и дендрограмма
-  coarse→finer `(:Community)-[:PARENT_OF]->(:Community)`.
-- Ограничение уникальности `community_key` на `(id, level)` обеспечивает
-  MERGE; range-индексы на `Community.level` и `Chunk.doc_id` обеспечивают
-  глобальное чтение / обход community→document (`ensure_community_indexes`).
-
-> **Заметка о GDS**: Cypher `gds.graph.project` / `gds.leiden.stream` /
-> `gds.graph.drop` нацелен на API Neo4j GDS 2.x, но **не верифицирован
-> против живой установки GDS** (в dev-песочнице нет Neo4j/GDS — тесты
-> мокают хранилище + строки GDS). Все строки GDS/Cypher изолированы как
-> константы в начале `src/graph/communities.py`, чтобы фикс версии был
-> изменением одного файла. Провалидируйте, прежде чем полагаться на это в
-> продакшене.
+  (структурированный отчёт в JSON), `summarized_at` и др. Вектор отчёта на
+  вершине не хранится — он в Milvus-коллекции `community_report_vec`.
+- Рёбра `IN_COMMUNITY` (Entity → Community) и дендрограмма coarse→finer
+  `PARENT_OF` (Community → Community).
+- Связь сообщество↔документ не материализуется (чанки — не вершины графа).
 
 ---
 

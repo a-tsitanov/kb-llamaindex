@@ -66,7 +66,7 @@
 | Хранилище | Что хранит | Подключение (по умолчанию) |
 |---|---|---|
 | **Milvus** | Векторный индекс чанков — одна запись на чанк (`id, text, embedding, metadata`). `text` — это чанк **на языке оригинала**; эмбеддинги получены из многоязычной embed-модели через LiteLLM. ANN-индекс — **HNSW** (`MILVUS_INDEX_TYPE`, `FLAT` для точного). | `MILVUS_HOST:MILVUS_PORT` (`localhost:19530`); коллекция `MILVUS_COLLECTION` |
-| **NebulaGraph** | Property-граф: вершины `Entity` (тег `:__Entity__:<Type>`) + типизированные рёбра (имена/описания **на русском** после слияния; рёбра несут осмысленный `weight` = счётчик co-occurrence + дискретные `tags` + логическую полярность `polarity` (`affirmed`/`negated`/`uncertain`) + окно валидности `valid_from`/`valid_to`), вершины `Chunk`, связанные через `MENTIONS`, плюс иерархия `Community`. Nebula **не имеет** in-graph векторного индекса, поэтому эмбеддинги сущностей (`graph_search` kNN), ER-kNN-вектора (`er_vec`) и `community_report_vec` живут в **Milvus** (отдельные коллекции — см. `src/graph/entity_vector_store_milvus.py` / `community_vector_store_milvus.py`); по имени сущности (`find_entity_by_name`) — префиксный LOOKUP по нативному Nebula-индексу `entity_name_idx`, не full-text. | `NEBULA_HOST:NEBULA_PORT` (`localhost:9669`), space `NEBULA_SPACE` (`kb`) |
+| **NebulaGraph** | Property-граф: вершины с тегом `Entity` (тип сущности — свойство `label`) + типизированные рёбра (имена/описания **на русском** после слияния; рёбра несут осмысленный `weight` = счётчик co-occurrence + дискретные `tags` + логическую полярность `polarity` (`affirmed`/`negated`/`uncertain`) + окно валидности `valid_from`/`valid_to`), плюс иерархия `Community` (чанки — не вершины графа: тексты в Postgres, векторы в Milvus). Nebula **не имеет** in-graph векторного индекса, поэтому эмбеддинги сущностей (`graph_search` kNN), ER-kNN-вектора (`er_vec`) и `community_report_vec` живут в **Milvus** (отдельные коллекции — см. `src/graph/entity_vector_store_milvus.py` / `community_vector_store_milvus.py`); по имени сущности (`find_entity_by_name`) — префиксный LOOKUP по нативному Nebula-индексу `entity_name_idx`, не full-text. | `NEBULA_HOST:NEBULA_PORT` (`localhost:9669`), space `NEBULA_SPACE` (`kb`) |
 | **Postgres** | Таблица заданий/статусов `documents` (doc_id → статус → метаданные) и `ingest_metrics` (длительности по каждой активности + теги моделей по ролям для аналитики). | `POSTGRES_*` |
 | **MinIO** | Загруженные исходные файлы (отдаются обратно через `GET /documents/{id}`) **и** staging-блобы по схеме claim-check — тяжёлое состояние приёма (распарсенные узлы, KG, слитые сущности), сериализованное через pickle и передаваемое между активностями по URI. | `MINIO_*` (консоль `:9001`, S3 API `:9000`) |
 | **Wikibase / MediaWiki** | Курируемый **канонический якорь**: self-hosted Wikibase Item на каждую сущность (`push_wikibase`, opt-in) + страницы статей MediaWiki на каждую сущность, создаваемые непрерывным редактором wiki. WDQS предоставляет SPARQL-эндпоинт. | контейнеры `wikibase` / `wdqs` |
@@ -153,9 +153,10 @@ Best-effort хвосты: `mark_entities_dirty` (помечает сущност
 
 Отдельно от поиска живёт **аналитика по графу** — `POST /api/v1/analyze`
 (`AnalyticalQueryWorkflow`, та же search-очередь): LLM-планировщик выбирает
-до `ANALYTICS_MAX_STEPS` детерминированных Cypher-примитивов из каталога 42
-(`src/analytics/`), синтез собирает ответ, а `provenance` несёт точный Cypher
-и сырые строки каждого шага. Центральность/link-prediction/risk предвычисляет
+до `ANALYTICS_MAX_STEPS` детерминированных примитивов из каталога 42
+(`src/analytics/`; nGQL-запросы к NebulaGraph или вычисления в воркере),
+синтез собирает ответ, а `provenance` несёт запрос/метку операции (поле
+`cypher`) и сырые строки каждого шага. Центральность/risk (link-prediction на NebulaGraph — no-op) предвычисляет
 `AnalyticsMaterializeWorkflow` (`POST /admin/graph/materialize`, очередь
 graph-build). Подробности → [`runbook/graph-analytics.md`](runbook/graph-analytics.md).
 
@@ -189,7 +190,9 @@ graph-build). Подробности → [`runbook/graph-analytics.md`](runbook/
 
 **Анализ графа (admin):** набор read-only эндпоинтов
 `/admin/graph/{stats,pagerank,personalized-pagerank,components,shortest-path}`
-(`src/graph/analysis.py`), опирающихся на GDS, даёт сводную статистику,
+(`src/graph/analysis.py`; алгоритмы считаются в воркере на igraph по
+экспорту взвешенных рёбер, глобальный PageRank читает материализованное
+свойство `pagerank`) даёт сводную статистику,
 PageRank (глобальный и **персонализированный/seed-смещённый**), компоненты
 связности и кратчайшие пути по графу знаний — вне горячего пути запроса. Те
 же функции продублированы как инструменты MCP-2 (`graph_pagerank`,
@@ -214,7 +217,7 @@ PageRank (глобальный и **персонализированный/seed-
 | `kb-ingest-merge` | `GraphBuildWorkflow` + merge/build (дорожка merge) | 14 |
 | `kb-search-small` | воркфлоу поиска + активности plan/retrieve/coverage/rerank/route/map | 4 |
 | `kb-search-large` | только `synthesize_answer` (финальный синтез на large-tier) | 2 |
-| `kb-graph-build` | `CommunityBuildWorkflow` (офлайн-сообщества GDS-Leiden) | 2 |
+| `kb-graph-build` | `CommunityBuildWorkflow` (офлайн-сообщества Leiden — leidenalg в воркере) | 2 |
 | `kb-wiki` | `WikiSweepWorkflow` (непрерывный редактор MediaWiki по сущностям) | 4 |
 | `kb-monitor` | монитор-свип Arc-2 (opt-in `MONITOR_ENABLED`; новые связи / рост risk / burst событий / доставка алертов) | 2 |
 

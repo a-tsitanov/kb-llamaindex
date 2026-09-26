@@ -1,7 +1,7 @@
 # kb-llamaindex
 
 GraphRAG knowledge-base service built on **LlamaIndex 0.13+**.  Durable
-Temporal ingest turns heterogeneous documents into a Neo4j property
+Temporal ingest turns heterogeneous documents into a NebulaGraph property
 graph + Milvus vectors (MinIO claim-check, Postgres statuses, RabbitMQ
 backlog); retrieval comes as four search modes
 (`/api/v1/search/{local,global,drift,auto}`), a graph-analytics layer
@@ -18,8 +18,8 @@ surface is `/api/v1/search/{local,global,drift,auto}` (legacy
 `/search`, `/agent`, `/selfrag` removed).  Now in the
 production-hardening phase.  Recent additions: RabbitMQ ingest backlog
 (default backend) + multi-queue, per-process **LLMPool** (K+N
-concurrency model), `leidenalg` community backend (Leiden off the
-Neo4j JVM), the **analytics layer** (Waves 0–3: primitive catalog,
+concurrency model), `leidenalg` community backend (Leiden computed in the
+worker), NebulaGraph as the only graph backend, the **analytics layer** (Waves 0–3: primitive catalog,
 offline materialization, Arc-2 monitoring — see
 [`docs/runbook/graph-analytics.md`](docs/runbook/graph-analytics.md)),
 the continuous wiki editor, and the `tg_ingest` backfill harness.
@@ -29,7 +29,7 @@ Full history: `CHANGELOG.md`; per-sprint map: «Недавно выпущенн�
 
 ## Prerequisites
 
-- Docker Compose stack (etcd / minio / milvus / neo4j / postgres /
+- Docker Compose stack (etcd / minio / milvus / nebula-{metad,storaged,graphd} / postgres /
   temporal / rabbitmq / redis / litellm + Prometheus / Grafana /
   Temporal UI).
 - **LLM access:** canonical profile is **OpenAI** (`text-embedding-3-small`
@@ -80,10 +80,11 @@ curl -X POST localhost:8000/api/v1/analyze \
   -H "X-API-Key: dev-local-key" -H "Content-Type: application/json" \
   -d '{"query": "Сколько сущностей каждого типа?"}'
 
-# Graph admin (GDS-backed, POST, X-API-Key):
+# Graph admin (in-worker igraph over NebulaGraph, POST, X-API-Key):
 #   /admin/graph/stats | /pagerank | /personalized-pagerank | /components
 #   | /shortest-path | /materialize   <- run materialize after bulk ingest
-#   (precomputes centrality / link-prediction / risk for /analyze)
+#   (precomputes centrality / risk for /analyze; link-prediction is a
+#   no-op on NebulaGraph)
 
 # Backfill Telegram channels into the ingest queue (see scripts/tg_ingest.py):
 #   TG_API_ID=… TG_API_HASH=… uv run python -m scripts.tg_ingest \
@@ -143,10 +144,10 @@ docker compose -f docker-compose.prod.yml up -d
 | [`docs/runbook/search-usage.md`](docs/runbook/search-usage.md) | Operator search usage — request shapes, conversation history, source download, wiki rebuild |
 | [`docs/runbook/multimodel.md`](docs/runbook/multimodel.md) | Per-role LLM (extraction/judge/search) + child workflow + per-activity model in `ingest_metrics`.  Detailed reading guide with code excerpts. |
 | [`docs/runbook/analytics.md`](docs/runbook/analytics.md) | Grafana / Prometheus / `ingest_metrics` schema + version_tag mechanics |
-| [`docs/runbook/graph-analytics.md`](docs/runbook/graph-analytics.md) | **Graph analytics** — `POST /api/v1/analyze` (plan→compute→synthesize over a 42-primitive catalog), the provenance-is-ground-truth rule, offline materialization (`/admin/graph/materialize`), Arc-2 monitoring (`MONITOR_*`), MCP surface (`kb_analyze` + GDS tools) |
+| [`docs/runbook/graph-analytics.md`](docs/runbook/graph-analytics.md) | **Graph analytics** — `POST /api/v1/analyze` (plan→compute→synthesize over a 42-primitive catalog), the provenance-is-ground-truth rule, offline materialization (`/admin/graph/materialize`), Arc-2 monitoring (`MONITOR_*`), MCP surface (`kb_analyze` + graph-analysis tools) |
 | [`docs/ANALYTICS-GUIDE.md`](docs/ANALYTICS-GUIDE.md) | **Analyst's theory guide** — the network science behind every analytics tool (centralities, Leiden/modularity + resolution limit, link prediction, burst detection, composite risk as MCDA), with live examples from the current graph and an interpretation-pitfalls checklist |
 | [`docs/runbook/wikibase.md`](docs/runbook/wikibase.md) | Wikibase population + SPARQL examples |
-| [`docs/runbook/wiki-editor.md`](docs/runbook/wiki-editor.md) | Continuous per-entity MediaWiki article editor from the Neo4j graph (dirty-mark + scheduled sweep, bot-section rewrite, anti-drift, citations) |
+| [`docs/runbook/wiki-editor.md`](docs/runbook/wiki-editor.md) | Continuous per-entity MediaWiki article editor from the knowledge graph (dirty-mark + scheduled sweep, bot-section rewrite, anti-drift, citations) |
 | [`docs/MODELS.md`](docs/MODELS.md) | Per-role model guidance + escalation table |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | **Top-level system map** — components, data stores, ingest vs search paths, durable execution, degradation, observability (links out to the deep docs) |
 | [`docs/diagrams/system_architecture.svg`](docs/diagrams/system_architecture.svg) | Rendered container-view diagram (source `docs/diagrams/system_architecture.d2`) |
@@ -170,12 +171,12 @@ kb-llamaindex/
 │   ├── ingestion/               # IngestionPipeline + identifier canon
 │   ├── ingest_queue/            # RabbitMQ backlog: publisher + consumer
 │   ├── retrieval/               # vector index, atomic tools, LLMPool
-│   ├── graph/                   # PropertyGraphIndex, retriever, communities
+│   ├── graph/                   # NebulaGraph store, retriever, communities
 │   ├── analytics/               # 42-primitive catalog, planner, materialize,
 │   │                            #   risk, events, provenance
 │   ├── workflow/                # Temporal: ingest, search, analytics,
 │   │                            #   wiki, monitor + worker launcher
-│   ├── mcp/                     # MCP-1 (search/analyze) + MCP-2 (atomic+GDS)
+│   ├── mcp/                     # MCP-1 (search/analyze) + MCP-2 (atomic+graph)
 │   │                            #   + MCP-3 (exact stats, no LLM)
 │   ├── observability/           # metrics, role map, litellm model validator
 │   ├── models/                  # Pydantic request/response shapes

@@ -45,12 +45,12 @@ flowchart TD
 
     subgraph RET ["retrieve_subquestion — deterministic tool pipeline"]
       direction LR
-      T1["vector_search<br/>(Milvus chunks)"] --> T2["graph_search<br/>(entity vector kNN + LLM synonyms)"] --> T3["find_entity_by_name<br/>(fulltext)"] --> T4["graph_walk<br/>(bounded N-hop, DUAL-SEED:<br/>graph_search + fulltext entity)"]
+      T1["vector_search<br/>(Milvus chunks)"] --> T2["graph_search<br/>(Milvus entity kNN + entity table)"] --> T3["find_entity_by_name<br/>(name-prefix LOOKUP)"] --> T4["graph_walk<br/>(bounded N-hop, DUAL-SEED:<br/>graph_search + name-lookup entity)"]
     end
     P2 -. each sub-Q runs .-> RET
 ```
 
-Конвейер извлечения **детерминирован** (это не LLM-цикл ReAct): каждый подвопрос выполняет одну и ту же фиксированную последовательность инструментов, результаты сливаются и дедуплицируются по chunk_id, затем один раз reranked и синтезируются. Сопоставление сущностей в `graph_search` — это **индексированный** нативный векторный kNN Neo4j по эмбеддингам сущностей (масштабируется) плюс шаг LLM-синонимов; `graph_walk` ограничен (≤50 узлов / ≤100 рёбер).
+Конвейер извлечения **детерминирован** (это не LLM-цикл ReAct): каждый подвопрос выполняет одну и ту же фиксированную последовательность инструментов, результаты сливаются и дедуплицируются по chunk_id, затем один раз reranked и синтезируются. Сопоставление сущностей в `graph_search` — это **индексированный** векторный kNN по эмбеддингам сущностей в Milvus (`entity_er_vec`, масштабируется) плюс substring-поиск по Postgres-зеркалу сущностей; `graph_walk` ограничен (≤50 узлов / ≤100 рёбер).
 
 ## Global — GraphRAG map-reduce (`GlobalSearchWorkflow`)
 
@@ -98,9 +98,9 @@ Drift контекстуализирует follow-up **один раз** и пе
 | Инструмент | Бэкенд | Что возвращает | Примечания |
 |---|---|---|---|
 | `vector_search` | Milvus (HNSW) | top-k чанков по сходству эмбеддингов | плотный baseline |
-| `graph_search` | Neo4j нативный векторный индекс по эмбеддингам сущностей + `LLMSynonymRetriever` | найденные сущности + их соседи + связанные чанки | индексированный kNN (масштабируется); один вызов small-LLM для синонимов |
-| `find_entity_by_name` | Neo4j полнотекстовый индекс по `__Entity__.name` | сущности по (частичному) имени | ловит опечатки / частичные имена |
-| `graph_walk` | Neo4j переменной длины `(e)-[*1..hops]-` | ограниченная окрестность (≤50 узлов/≤100 рёбер) | **с двойным засевом** из топовой сущности graph_search И полнотекста |
+| `graph_search` | Milvus kNN по `entity_er_vec` ∪ substring-поиск по Postgres-зеркалу сущностей → nGQL `GET SUBGRAPH` в NebulaGraph | найденные сущности + их соседи (без чанков) | индексированный kNN (масштабируется); без LLM-вызова |
+| `find_entity_by_name` | nGQL `LOOKUP ON Entity` (`entity_name_idx`, `STARTS WITH` по словам) | сущности по префиксу имени | ловит частичные имена-префиксы; середину имени не находит |
+| `graph_walk` | nGQL `GET SUBGRAPH` (≤`GRAPH_WALK_MAX_HOPS` шагов) | ограниченная окрестность (≤50 узлов/≤100 рёбер) | **с двойным засевом** из топовой сущности graph_search И поиска по имени |
 
 ## Новые функции в потоке
 

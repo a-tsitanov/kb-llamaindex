@@ -186,6 +186,16 @@ TEMPORAL_UI_CSRF_COOKIE_INSECURE=true   # только при HTTP; оставь
 > --check` проходит.  Полный build образа в dev **не** прогонялся (тянет
 > PyPI) — прогоните его в вашем окружении перед первым деплоем.
 
+> **Деплой-заметка: дефолт `TEMPORAL_COMMUNITY_BACKEND` сменился.**  Раньше
+> деплой без этой переменной получал `"gds"`, который на NebulaGraph
+> fail-safe'ился в **ноль сообществ**.  Теперь дефолт — `"leidenalg"`
+> (Leiden в воркере), так что после обновления `CommunityBuildWorkflow`
+> начнёт реально строить сообщества (и суммаризировать их LLM small-tier).
+> Явное legacy-значение `gds` в `.env` отображается на `leidenalg` с
+> предупреждением в логе (`TEMPORAL_COMMUNITY_BACKEND=gds is no longer
+> supported; using leidenalg`).  Допустимые значения: `leidenalg` |
+> `graphscope`.
+
 ---
 
 ## 1. Предварительные требования
