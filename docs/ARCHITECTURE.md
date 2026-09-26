@@ -66,7 +66,7 @@
 | Хранилище | Что хранит | Подключение (по умолчанию) |
 |---|---|---|
 | **Milvus** | Векторный индекс чанков — одна запись на чанк (`id, text, embedding, metadata`). `text` — это чанк **на языке оригинала**; эмбеддинги получены из многоязычной embed-модели через LiteLLM. ANN-индекс — **HNSW** (`MILVUS_INDEX_TYPE`, `FLAT` для точного). | `MILVUS_HOST:MILVUS_PORT` (`localhost:19530`); коллекция `MILVUS_COLLECTION` |
-| **Neo4j** | Property-граф **и** два нативных индекса в одном хранилище: узлы `:__Entity__:<Type>` + типизированные связи (имена/описания **на русском** после слияния; связи несут осмысленный `weight` = счётчик co-occurrence + дискретные `tags` + логическую полярность `polarity` (`affirmed`/`negated`/`uncertain`) + окно валидности `valid_from`/`valid_to`), узлы `:Chunk`, связанные через `(:Chunk)-[:MENTIONS]->(:__Entity__)`, **нативный векторный индекс** по эмбеддингам сущностей (`graph_search` kNN; плюс `er_vec` для ER на нативных векторах), **полнотекстовый индекс** по `__Entity__.name` (`find_entity_by_name`), а также иерархия `:Community` + отчёты (`community_report_vec`) для глобального поиска. | `NEO4J_URI` (`bolt://localhost:7687`) |
+| **NebulaGraph** | Property-граф: вершины `Entity` (тег `:__Entity__:<Type>`) + типизированные рёбра (имена/описания **на русском** после слияния; рёбра несут осмысленный `weight` = счётчик co-occurrence + дискретные `tags` + логическую полярность `polarity` (`affirmed`/`negated`/`uncertain`) + окно валидности `valid_from`/`valid_to`), вершины `Chunk`, связанные через `MENTIONS`, плюс иерархия `Community`. Nebula **не имеет** in-graph векторного индекса, поэтому эмбеддинги сущностей (`graph_search` kNN), ER-kNN-вектора (`er_vec`) и `community_report_vec` живут в **Milvus** (отдельные коллекции — см. `src/graph/entity_vector_store_milvus.py` / `community_vector_store_milvus.py`); по имени сущности (`find_entity_by_name`) — префиксный LOOKUP по нативному Nebula-индексу `entity_name_idx`, не full-text. | `NEBULA_HOST:NEBULA_PORT` (`localhost:9669`), space `NEBULA_SPACE` (`kb`) |
 | **Postgres** | Таблица заданий/статусов `documents` (doc_id → статус → метаданные) и `ingest_metrics` (длительности по каждой активности + теги моделей по ролям для аналитики). | `POSTGRES_*` |
 | **MinIO** | Загруженные исходные файлы (отдаются обратно через `GET /documents/{id}`) **и** staging-блобы по схеме claim-check — тяжёлое состояние приёма (распарсенные узлы, KG, слитые сущности), сериализованное через pickle и передаваемое между активностями по URI. | `MINIO_*` (консоль `:9001`, S3 API `:9000`) |
 | **Wikibase / MediaWiki** | Курируемый **канонический якорь**: self-hosted Wikibase Item на каждую сущность (`push_wikibase`, opt-in) + страницы статей MediaWiki на каждую сущность, создаваемые непрерывным редактором wiki. WDQS предоставляет SPARQL-эндпоинт. | контейнеры `wikibase` / `wdqs` |
@@ -109,11 +109,11 @@ payload-ам Temporal едут только небольшие контракт�
   идентификаторов → опциональный перевод на русский) → `index_vector`
   (эмбеддинг → Milvus). Если это падает, приём падает (`mark_failed`).
 - **Графовая половина** — `inject_canonical` (сущности-идентификаторы в
-  Neo4j) → `extract_kg` (LightRAG, один LLM-вызов на чанк, очередь
+  граф) → `extract_kg` (LightRAG, один LLM-вызов на чанк, очередь
   `kb-ingest-llm`) → дочерний **`GraphBuildWorkflow`** (очередь
   `kb-ingest-merge`): `merge_and_resolve` (межчанковое слияние →
   консолидация телефонов → разрешение сущностей) → `build_property_graph`
-  (upsert в Neo4j).
+  (upsert в граф).
 
 **Деградация:** если графовая половина бросает исключение / истекает по
 таймауту, родитель ловит это и выставляет `graph_status = "vector_only"` —
@@ -163,12 +163,12 @@ graph-build). Подробности → [`runbook/graph-analytics.md`](runbook/
 
 - **Детерминированное извлечение, а не цикл ReAct.** Каждый подвопрос
   выполняет фиксированную последовательность инструментов — `vector_search`
-  (Milvus) → `graph_search` (Neo4j нативный векторный kNN по сущностям +
-  LLM-синонимы) → `find_entity_by_name` (Neo4j полнотекст) → `graph_walk`
-  (ограниченный N-hop обход, засеянный из двух источников — топ
-  graph_search и полнотекстовой сущности). Результаты сливаются и
-  дедуплицируются по `chunk_id`. (Старый путь Self-RAG / ReAct был
-  **удалён** при переходе на R7b.)
+  (Milvus) → `graph_search` (Milvus kNN по эмбеддингам сущностей +
+  LLM-синонимы) → `find_entity_by_name` (префиксный LOOKUP по нативному
+  Nebula-индексу `entity_name_idx`) → `graph_walk` (ограниченный N-hop
+  обход, засеянный из двух источников — топ graph_search и найденной по
+  имени сущности). Результаты сливаются и дедуплицируются по `chunk_id`.
+  (Старый путь Self-RAG / ReAct был **удалён** при переходе на R7b.)
 - **История диалога** — когда присутствует `history`, активность
   `contextualize_query` один раз в начале воркфлоу переписывает
   follow-up в самостоятельный вопрос.
@@ -270,11 +270,11 @@ LLM-вызовов реально выполняется конкурентно 
 ## 8. Конфигурация
 
 Все настройки проходят через `src/config.py` (pydantic-settings, читает
-`.env`), с пространствами имён по подсистемам: `API_`, `MILVUS_`, `NEO4J_`,
+`.env`), с пространствами имён по подсистемам: `API_`, `MILVUS_`, `NEBULA_`,
 `POSTGRES_`, `MINIO_`, `LITELLM_`, `TEMPORAL_`, `INGESTION_`, `AGENT_`,
 `LLM_POOL_`, `WIKIBASE_` / `WIKI_`, `METRICS_`. Тумблеры новых функций
-(ER на нативных векторах, история диалога, dual walk-seed, иерархические
-сообщества, тип индекса Milvus) перечислены в
+(история диалога, dual walk-seed, иерархические сообщества, тип индекса
+Milvus) перечислены в
 [`FEATURES.md`](FEATURES.md#config-quick-reference-new-feature-env-vars);
 процедура замены модели — в [`MODELS.md`](MODELS.md).
 

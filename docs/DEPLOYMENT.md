@@ -47,8 +47,9 @@ task queue, чтобы делать работу.  Топологию очере
 | `mcp-tools` | `:9002` | MCP-сервер инструментов |
 
 …плюс все backend'ы в том же compose: `postgres`, `temporal` + `temporal-ui`,
-`etcd`, `minio`, `milvus`, `neo4j` (apoc + gds), `prometheus`, `grafana` и
-`redis` (LLM-кеш; используется, как только смержится `feature/redis-llm-cache`).
+`etcd`, `minio`, `milvus`, `nebula-metad`/`nebula-storaged`/`nebula-graphd`,
+`prometheus`, `grafana` и `redis` (LLM-кеш; используется, как только
+смержится `feature/redis-llm-cache`).
 
 Ключевые отличия от dev-`docker-compose.yml`:
 
@@ -108,15 +109,11 @@ API_PORT=8000
 API_ENV=production
 
 # ── Секреты / credentials (РОТИРУЙТЕ) ──
-NEO4J_PASSWORD=change-me
+NEBULA_PASSWORD=change-me
 POSTGRES_PASSWORD=change-me
 MINIO_ACCESS_KEY=change-me
 MINIO_SECRET_KEY=change-me
 GRAFANA_ADMIN_PASSWORD=change-me
-
-# ── Память Neo4j (под хост; Leiden на большом KG прожорлив до heap) ──
-NEO4J_HEAP_MAX=4G
-NEO4J_PAGECACHE=2G
 
 # ── Temporal (512 = прод-пол; НЕИЗМЕНЯЕМ после первого init) ──
 TEMPORAL_NUM_HISTORY_SHARDS=512
@@ -307,7 +304,8 @@ docker compose --profile init up init   # если схемы ещё не ини
 | `etcd` | — | Метаданные Milvus | `etcdctl endpoint health` |
 | `minio` | 9000, 9001 (console) | Object-store Milvus + пользовательские загрузки (bucket `kb-uploads`) | `/minio/health/live` |
 | `milvus` | 19530, 9091 | Векторный индекс (HNSW по умолчанию) | `:9091/healthz` |
-| `neo4j` | 7474 (web), 7687 (bolt) | Property graph (+ APOC + GDS) | `:7474` spider-проба |
+| `nebula-graphd` + `nebula-metad`/`nebula-storaged` | 9669 (graphd) | Property graph (профиль `nebula` — нужен `COMPOSE_PROFILES=nebula` в `.env`) | `/status` на каждом |
+| `nebula-studio` | 7001 | Web-консоль NebulaGraph (аналог Neo4j Browser) | — |
 | `postgres` | 5432 | Таблица статусов задач + метрики ingest; также бэкит Temporal (отдельные DB) | `pg_isready` |
 | `temporal` | 7233 | Движок workflow'ов (образ `auto-setup`) | — (зависит от postgres) |
 | `temporal-ui` | 8080 | Temporal Web UI | — |
@@ -380,8 +378,9 @@ uv run python -m scripts.setup_db
 * Обеспечивает существование upload-bucket'а MinIO (`MINIO_BUCKET`, default `kb-uploads`).
 * Регистрирует кастомные Search Attributes Temporal, используемые слоем аналитики
   (no-op / предупреждение, если Postgres visibility-store их не поддерживает).
-* Neo4j не нужна схема — лейблы и индексы эмитятся в момент insert'а
-  через `PropertyGraphIndex`.
+* Графу (NebulaGraph) не нужна отдельная миграция — space/tags/edges/индексы
+  создаются лениво (`IF NOT EXISTS`) через `nebula_schema.ensure_schema` при
+  первой записи.
 
 ### 5b. (Опционально) Бутстрап Wikibase + wiki-расписания
 
@@ -412,11 +411,11 @@ docker compose --profile wikibase exec wikibase \
 # Только схема через Wikibase API (контейнер-совместимый):
 uv run python -m scripts.setup_wikibase
 #   --dry-run        report planned creates without writing
-#   --refresh-cache  re-pull existing QIDs/PIDs into the Neo4j cache only
+#   --refresh-cache  re-pull existing QIDs/PIDs into the graph-store cache only
 ```
 
 > `setup_wikibase.py` теперь отвечает **только за схему** (базовые Items +
-> Properties) и кеш QID/PID в Neo4j — он **не создаёт** bot-аккаунт.
+> Properties) и кеш QID/PID в графовом хранилище — он **не создаёт** bot-аккаунт.
 > Bot создаётся исключительно через `createAndPromote` (шаг 1 выше).
 
 **Шаг 3 — Temporal Schedule для wiki-редактора:**
@@ -583,7 +582,7 @@ model-bound (доминирует tier большого синтеза).  Энд
 uv run pytest -q
 ```
 
-Тестовый набор оффлайн (stub-LLM, stub-Milvus / Neo4j) — безопасно гонять
+Тестовый набор оффлайн (stub-LLM, stub-Milvus / stub-графа) — безопасно гонять
 в CI без каких-либо backing-сервисов.
 
 Для детерминированного eval'а качества ответов (тоже оффлайн):
@@ -618,12 +617,13 @@ uv run python -m scripts.wipe_db --yes
   очищенными хранилищами.  *(Best-effort; fail-open, если сервер лежит.)*
 * **Postgres** — `TRUNCATE documents`.
 * **Milvus** — дропает сконфигурированную коллекцию.
-* **Neo4j** — `MATCH (n) DETACH DELETE n` + дропает не-системные индексы.
+* **Nebula** — `DROP SPACE IF EXISTS`; пересоздаётся лениво (`ensure_schema`,
+  всё `IF NOT EXISTS`) на первой следующей записи в граф.
 * **MediaWiki** — удаляет статьи wiki-редактора (каждую
   страницу основного namespace кроме `Main Page`).  *(Best-effort; логирует предупреждение
   и продолжает, если wiki-стек лежит или admin-логин падает.  НЕ
   трогает Wikibase Items/Properties — они принадлежат `setup_wikibase`; 
-  пер-сущностные QID уже были удалены с очисткой Neo4j.)*
+  пер-сущностные QID уже были удалены с очисткой графа.)*
 * **Файловая система** — чистит `API_UPLOAD_DIR` и `INGESTION_CACHE_DIR`.
 * Перезапускает `setup_db`, чтобы пересоздать схемы.
 
@@ -674,13 +674,13 @@ uv run python -m scripts.wipe_db --yes --keep-files --keep-temporal --keep-wiki
 |---|---|
 | **Auth** | Ротируйте `API_KEYS` на каждое окружение. Добавьте реальный master_key + базу данных для LiteLLM (см. комментарии в `docker/litellm_config.yaml`). |
 | **Харденинг Temporal** | Образ `auto-setup` пере-гоняет настройку схемы на каждом бутстрапе — переключитесь на `temporalio/server` + мигрируйте схему один раз через `temporal-sql-tool`. Дайте Temporal СОБСТВЕННЫЙ Postgres (он тяжёл по записи истории). Никогда не бампайте образ Temporal на месте на кластере с живыми данными. См. комментарии в `docker-compose.yml`. |
-| **Персистентность** | Монтируйте Docker-тома на долговечное хранилище. Запланируйте бэкапы Postgres + Neo4j. У Milvus собственный snapshot-инструментарий. |
+| **Персистентность** | Монтируйте Docker-тома на долговечное хранилище. Запланируйте бэкапы Postgres + Nebula. У Milvus собственный snapshot-инструментарий. |
 | **Логирование** | `API_LOG_JSON=true` для структурированных логов. Агрегируйте через loki / cloudwatch. |
 | **Супервизор процессов** | Замените `uv run uvicorn` на `gunicorn -k uvicorn.workers.UvicornWorker` (4+ worker'а). Гоняйте Temporal-worker под `supervisord` / `systemd` с политикой рестарта. |
 | **Масштабирование** | Гоняйте больше процессов worker'ов (они делят одни task queue — Temporal балансирует нагрузку). Для GPU-сплита гоняйте отдельные процессы worker'ов, прибитые к LLM-полосам. Пер-очередная конкурентность: `docs/QUEUES.md`. API-worker'ы stateless за балансировщиком нагрузки. |
 | **LLM-конкурентность** | Реальной LLM-конкурентностью владеет пер-процессный `LLMPool` (`LLM_POOL_*`), а не Temporal-лимиты очередей — сайзьте `LLM_POOL_TIER_SMALL_TOTAL` / `LLM_POOL_TIER_LARGE_TOTAL` под ваш GPU + upstream-бюджет. Держите Temporal-лимиты `*_ACTIVITY_CONCURRENCY` ≥ соответствующего потолка полосы пула. |
 | **Health-пробы** | `/health` — путь liveness. Для readiness дополнительно пробьте известный закешированный search-запрос. |
-| **Сетевая изоляция** | Postgres, Neo4j, Milvus, Temporal, LiteLLM все биндятся на публичные порты по умолчанию в `docker-compose.yml` — ограничьте до VPC / приватной сети в продакшене. |
+| **Сетевая изоляция** | Postgres, Nebula, Milvus, Temporal, LiteLLM все биндятся на публичные порты по умолчанию в `docker-compose.yml` — ограничьте до VPC / приватной сети в продакшене. |
 | **Дисциплина переингеста** | Смена `INGESTION_CHUNK_SIZE`, embedding-модели или `MILVUS_DIM` инвалидирует корпус — очистите и переингестите. |
 | **Стоимость перевода** | На тяжёлом мультиязычном корпусе задайте `INGESTION_TRANSLATE_TO_RUSSIAN=false`. Граф остаётся на исходном языке; межъязыковая дедупликация сущностей деградирует. |
 
@@ -711,5 +711,5 @@ uv run python -m scripts.wipe_db --yes --keep-files --keep-temporal --keep-wiki
 | Инспектировать workflow'ы / ретраи | Temporal Web UI на `http://localhost:8080` |
 | Диагностировать KG-извлечение | `scripts/diag_kg.py`, `scripts/diag_kg_medical.py` |
 | Инспектировать состояние ingest-пайплайна | `docker exec kb-llamaindex-postgres-1 psql -U postgres -d kb_llamaindex -c "SELECT id, status, error FROM documents ORDER BY created_at DESC LIMIT 10;"` |
-| Инспектировать сущности Neo4j | Neo4j Browser на `http://localhost:7474` (bolt `:7687`) |
+| Инспектировать сущности графа | NebulaGraph Studio на `http://localhost:7001` (graphd `:9669`, space `kb`, root/nebula) |
 | Инспектировать чанки Milvus | `pymilvus` REPL: `MilvusClient('http://localhost:19530').query(collection_name='kb_llamaindex', filter='doc_id=="..."', output_fields=["*"])` |

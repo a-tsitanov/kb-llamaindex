@@ -18,9 +18,12 @@ docs {
   # POST /api/v1/admin/communities/rebuild
 
   Starts the **offline** `CommunityBuildWorkflow` on the dedicated
-  `kb-graph-build` queue: GDS Leiden community detection over the
-  `__Entity__` graph + a small-tier summary per community, persisted on
-  `:Community` nodes. Fully decoupled from the query hot path.
+  `kb-graph-build` queue: in-worker Leiden community detection
+  (`leidenalg`/`python-igraph`, or `graphscope` for a distributed run)
+  over the `__Entity__` graph + a small-tier summary per community,
+  persisted on `:Community` nodes. Fully decoupled from the query hot
+  path — detection memory lives in the worker process, not the graph
+  store.
 
   **Prerequisite for `/search/global` and `/search/drift`** — they
   map-reduce over the summaries this builds.
@@ -36,9 +39,9 @@ docs {
   ```
 
   ## Requires
-  - Neo4j Enterprise with the GDS plugin + `gds.*` allow-listed.
-  - Enough Neo4j heap (Leiden is memory-hungry — see
-    `NEO4J_HEAP_MAX` in docker-compose; default 4G).
+  - Enough worker process memory (Leiden is memory-hungry — sized
+    independently of the graph store; use `graphscope` for a
+    distributed run on a very large graph).
 
   ## Errors
   - `401` — auth. `500` — failed to start (body carries the message).

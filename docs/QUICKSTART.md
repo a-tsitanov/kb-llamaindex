@@ -40,7 +40,7 @@ cp .env.example .env
 | `LITELLM_MODEL_SMALL` / `LITELLM_MODEL_LARGE` | Модели для tier'ов small/large | По умолчанию `gpt-4o-mini` |
 | `LITELLM_EMBEDDING_MODEL` / `LITELLM_EMBEDDING_DIM` | Embed-модель и её размерность | **`LITELLM_EMBEDDING_DIM` обязан совпадать с `MILVUS_DIM`** |
 | `MILVUS_DIM` | Размерность вектора в Milvus | Должна равняться `LITELLM_EMBEDDING_DIM` (напр. 1536) |
-| `POSTGRES_PASSWORD`, `NEO4J_PASSWORD`, `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY` | Доступ к хранилищам | Дефолты compose подходят для локалки |
+| `POSTGRES_PASSWORD`, `NEBULA_PASSWORD`, `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY` | Доступ к хранилищам | Дефолты compose подходят для локалки |
 
 > ⚠️ Самая частая ошибка старта — рассинхрон `MILVUS_DIM` ≠ `LITELLM_EMBEDDING_DIM`: ингест упадёт на вставке в Milvus.
 
@@ -52,7 +52,8 @@ cp .env.example .env
 make up                     # compose up + schema init (Postgres + MinIO + Temporal attrs) — одна команда
 # или, если нужен полный контроль:
 # docker compose up -d
-# docker compose ps           # дождись healthy у neo4j / milvus / postgres / minio / temporal / litellm
+# docker compose ps           # дождись healthy у nebula-graphd / milvus / postgres / minio / temporal / litellm
+#                              # (Nebula поднимается через COMPOSE_PROFILES=nebula в .env, см. .env.example)
 # make init                   # отдельно инициализировать схемы
 ```
 
@@ -63,7 +64,7 @@ make up                     # compose up + schema init (Postgres + MinIO + Tempo
 | FastAPI (запустим в §5) | `:8000` | HTTP API |
 | Temporal UI | `:8080` | История воркфлоу, replay, дебаг |
 | LiteLLM | `:4000` | Шлюз к моделям |
-| Neo4j | `:7474` (HTTP) / `:7687` (Bolt) | Граф |
+| Nebula | `:9669` (graphd) / `:7001` (Studio) | Граф |
 | Milvus | `:19530` | Векторы чанков |
 | Postgres | `:5432` | Статусы заданий + `ingest_metrics` |
 | MinIO | `:9000` (S3) / `:9001` (консоль) | Исходники + claim-check staging |
@@ -119,7 +120,7 @@ curl -X POST http://localhost:8000/api/v1/search/local \
 
 | Что включить | Переменные | Дефолт | Примечание |
 |---|---|---|---|
-| **Native-vector ER** (kNN по всему графу вместо окна 5000) | `AGENT_ER_USE_NATIVE_VECTOR_KNN=true` (+ `AGENT_ER_VECTOR_KNN_K=20`) | `false` | На **существующем** графе сперва прогнать backfill: `uv run python -m scripts.backfill_er_vector --no-dry-run`, и только потом флаг. На пустом графе можно сразу `true` (`er_vec` пишется при ингесте). |
+| **Native-vector ER** (kNN по всему графу вместо окна 5000) | `AGENT_ER_USE_NATIVE_VECTOR_KNN` | `true`, но **fail-safe мёртво** под NebulaGraph (нет нативного vector-индекса) — тихо откатывается на legacy-окно | Не трогать: под текущим бэкендом переключатель не имеет эффекта. |
 | **Иерархические сообщества + умный отбор** | `AGENT_COMMUNITY_MAX_LEVELS=3`, `AGENT_COMMUNITY_DYNAMIC_SELECTION=semantic` | `1`, `lexical` | `>1` уровень → многоуровневый Leiden; `semantic`/`descent` вместо `lexical` |
 | **Редактор wiki** (статьи MediaWiki по сущностям) | `WIKI_ENABLED=true` | `false` | `WIKI_DOCS_BASE_URL` уже верный для ссылок «Источники». Для sitelink'ов: `WIKIBASE_ENABLED=true` + `uv run python -m scripts.setup_wikibase`, и `WIKI_SITE_GLOBAL_ID` под реальный id вики |
 | **Мониторинг графа Arc-2** (свип: новые связи, рост risk, burst событий, алерты) | `MONITOR_ENABLED=true` (+ `MONITOR_SWEEP_INTERVAL_MINUTES`, `MONITOR_BURST_ENABLED`, `MONITOR_WEBHOOK_URL`) | `false` | Свип в пуле `monitor` воркера; алерты читаются через `/analyze` (примитивы `alerts`/`review_queue`). В прод-компоузе `MONITOR_*` нужно добавить в anchor `x-app-env`. Подробно — [`runbook/graph-analytics.md`](runbook/graph-analytics.md) |
@@ -136,7 +137,7 @@ curl -X POST http://localhost:8000/api/v1/search/local \
 uv run python -m scripts.wipe_db --yes
 ```
 
-Терминирует воркфлоу Temporal + чистит Postgres / Milvus / Neo4j / MediaWiki-страницы / локальные файлы и пересоздаёт схемы. Флаги: `--keep-temporal`, `--keep-wiki`, `--keep-files`, `--no-setup`.
+Терминирует воркфлоу Temporal + чистит Postgres / Milvus / Nebula / MediaWiki-страницы / локальные файлы и пересоздаёт схемы. Флаги: `--keep-temporal`, `--keep-wiki`, `--keep-files`, `--no-setup`.
 
 ---
 

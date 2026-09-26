@@ -215,7 +215,7 @@ async def vector_search(query: str, top_k: int = 10) -> dict:
     return {"sources": json.loads(r.observation)}
 ```
 
-`_r()` — ленивая DI bootstrap первого вызова: строит Milvus retriever, BGE embed model, Neo4j-graph retriever (optional), Postgres ChunkRepository, BoundedLLM-обёрнутую search-role LLM. Кэширует на module level — последующие вызовы reuse'ят.
+`_r()` — ленивая DI bootstrap первого вызова: строит Milvus retriever, BGE embed model, graph retriever (Nebula, optional), Postgres ChunkRepository, BoundedLLM-обёрнутую search-role LLM. Кэширует на module level — последующие вызовы reuse'ят.
 
 ### 4.3 Concurrency защита
 
@@ -232,9 +232,9 @@ LLM-используют `graph_search` (через LLMSynonymRetriever норм
 
 В отличие от §4.1, эти два tool'а — не wrapper'ы над `atomic_tools.py`, а тонкие обёртки над analytics-каталожными примитивами `topic_trend` / `polarity_evolution` из [`src/analytics/primitives/dynamics.py`](../../src/analytics/primitives/dynamics.py) (используют тот же `_deps["graph_store"]`, что и GDS-tools из §4.1, не Milvus/`atomic_tools.py`). Оба примитива **зарегистрированы** в analytics `CATALOG` ([`dynamics.py:176`](../../src/analytics/primitives/dynamics.py) — `topic_trend`, [`dynamics.py:184`](../../src/analytics/primitives/dynamics.py) — `polarity_evolution`) и потому достижимы двумя путями: напрямую через MCP-2 (tools ниже) и через planner-путь `kb_analyze` → `POST /api/v1/analyze`.
 
-**⚠️ `topic_trend` не работает на nebula — а nebula это прод-дефолт (`GRAPH_BACKEND`).** Примитив вызывает `run_rows(store, cypher, {"topic": ...})`, а `NebulaGraphStore.structured_query` бросает `NotImplementedError` на непустом `param_map` ([`nebula_store.py:268-272`](../../src/graph/nebula_store.py)); `run_rows` fail-soft'ит любое исключение в `[]` ([`store_query.py:23-25`](../../src/analytics/store_query.py)). Раньше это давало `rows: []` для ЛЮБОЙ темы — неотличимо от «про это никогда не писали». `polarity_evolution` этим НЕ затронут: он идёт через `build_dynamics_graph_ops`, чья nebula-реализация подставляет литералы в nGQL и `param_map` не передаёт.
+**⚠️ `topic_trend` не работает на nebula — единственном графовом бэкенде.** Примитив вызывает `run_rows(store, cypher, {"topic": ...})`, а `NebulaGraphStore.structured_query` бросает `NotImplementedError` на непустом `param_map` ([`nebula_store.py:268-272`](../../src/graph/nebula_store.py)); `run_rows` fail-soft'ит любое исключение в `[]` ([`store_query.py:23-25`](../../src/analytics/store_query.py)). Это даёт `rows: []` для ЛЮБОЙ темы — неотличимо от «про это никогда не писали». `polarity_evolution` этим НЕ затронут: он идёт через `build_dynamics_graph_ops`, чья nebula-реализация подставляет литералы в nGQL и `param_map` не передаёт.
 
-**Guard закрывает только MCP-2, не CATALOG-путь.** `_TOPIC_TREND_UNSUPPORTED_BACKENDS` ([`tools_server.py:502`](../../src/mcp/tools_server.py)) проверяется внутри `_topic_trend()` ([`tools_server.py:525`](../../src/mcp/tools_server.py)) — это код самого MCP-2 tool'а `topic_trend`, и на nebula он возвращает `{"error": ...}` с явным упоминанием бэкенда вместо тихого нуля. Но `kb_analyze` (и, соответственно, `POST /api/v1/analyze`) идёт через CATALOG и зовёт примитив `topic_trend` из `dynamics.py` напрямую — этот guard там не стоит. На nebula такой вызов молча получает `rows: []` от `run_rows`. **Вывод для оператора:** пустой результат `topic_trend` от `kb_analyze` на nebula означает «бэкенд не может ответить», а не «тему никогда не упоминали» — тот же вопрос через MCP-2 `topic_trend` покажет это явной ошибкой. Снять ограничение целиком = научить nebula биндить nGQL-параметры, после чего guard-константа и обе ветки этого абзаца отмирают.
+**Guard закрывает только MCP-2, не CATALOG-путь.** `_TOPIC_TREND_UNSUPPORTED_BACKENDS` ([`tools_server.py:502`](../../src/mcp/tools_server.py)) проверяется внутри `_topic_trend()` ([`tools_server.py:525`](../../src/mcp/tools_server.py)) — это код самого MCP-2 tool'а `topic_trend`, и на nebula он возвращает `{"error": ...}` с явным упоминанием бэкенда вместо тихого нуля. Но `kb_analyze` (и, соответственно, `POST /api/v1/analyze`) идёт через CATALOG и зовёт примитив `topic_trend` из `dynamics.py` напрямую — этот guard там не стоит. На nebula такой вызов молча получает `rows: []` от `run_rows`. **Вывод для оператора:** пустой результат `topic_trend` от `kb_analyze` означает «бэкенд не может ответить», а не «тему никогда не упоминали» — тот же вопрос через MCP-2 `topic_trend` покажет это явной ошибкой. Снять ограничение целиком = научить nebula биндить nGQL-параметры, после чего guard-константа и обе ветки этого абзаца отмирают.
 
 **Фильтр `since`/`until`.** Примитив не принимает границы дат — окно применяется к уже полученным бакетам, по **пересечению границ бакета с окном**, а не сравнением строк. Для каждого ключа периода `_period_bounds(period, granularity)` даёт первый и последний день бакета, и бакет остаётся, если он с окном пересекается (`end >= since` и `start <= until`). Два следствия, оба намеренные:
 
@@ -320,8 +320,8 @@ uv run python -m src.mcp.tools_server --transport http --port 9002
 ## 8. Live smoke
 
 ```bash
-# 1. Pre-flight: основной стек (Temporal, Milvus, Neo4j, Postgres, MinIO)
-docker compose -p kb-llamaindex up -d
+# 1. Pre-flight: основной стек (Temporal, Milvus, Nebula, Postgres, MinIO)
+docker compose -p kb-llamaindex up -d   # нужен COMPOSE_PROFILES=nebula в .env
 uv run python -m scripts.setup_db
 uv run python -m src.workflow.worker &       # включает kb-search-llm queue
 
@@ -377,7 +377,7 @@ uv run pytest tests/test_workflow/test_search_workflow.py -v
 |---|---|---|
 | MCP server падает на старте с `API_KEYS env is empty` | Strict auth (default) + нет ключей | Set `API_KEYS=dev-local-key` или `KB_MCP_REQUIRE_AUTH=false` |
 | `kb_search` зависает > 30 минут | Temporal SearchWorkflow застрял (extract_kg upstream падает?) | Temporal UI → `mcp-search-<id>` → посмотреть failed activity. Cancel руками если нужно: `temporal workflow cancel -w mcp-search-...` |
-| `graph_search` возвращает empty | Neo4j unreachable, fallback на `None` | Лог `MCP-2: graph_retriever disabled (Neo4j down?)`. `docker compose ps neo4j` — проверить статус |
+| `graph_search` возвращает empty | Nebula unreachable, fallback на `None` | Лог `MCP-2: graph_retriever disabled (Nebula down?)`. `docker compose ps nebula-graphd` — проверить статус |
 | MCP-2 LLM-tool отвечает медленно (10+ сек на простой запрос) | LLM-семафор занят — много параллельных вызовов или ingest конкурирует | Grafana `kb-llamaindex/01-ingest-overview` дашборд — увидеть peak. Поднять `AGENT_LLM_MAX_CONCURRENT` если GPU справляется |
 | `kb_search` возвращает пустой answer для нормального query | `simple` mode и vector retriever пустой (нет docs) или semafor пустой | Sanity: `curl /api/v1/search` напрямую с тем же query — должен дать тот же результат |
 | OpenWebUI не видит MCP server в Settings | URL не правильный или transport mismatch | OpenWebUI ждёт `/sse` endpoint. `http://host:9001/sse` (не `http://host:9001` голый) |
@@ -385,7 +385,7 @@ uv run pytest tests/test_workflow/test_search_workflow.py -v
 | `stat_indicators_search` без аргументов возвращает пустой каталог | В `stat_indicator`/`stat_observation` ещё ничего не загружено | Данные заливаются только через `POST /api/v1/statistics/load` ([`src/api/routes/stats_data.py`](../../src/api/routes/stats_data.py)) — отдельного загрузчика/скрапера в проекте нет. Проверить: `SELECT count(*) FROM stat_indicator` |
 | `stat_align` возвращает `low_overlap:*` в `warnings` | Меньше `STATS_MIN_OVERLAP` (default 8) общих периодов после ресемплинга | Ожидаемо для коротких/редких рядов — корреляция намеренно не считается, не баг |
 | `stat_series` возвращает `multiple_dims_cuts` в `warnings` | У индикатора есть разрезы (`dims`), а запрос их не сузил — на один период приходится несколько строк | Это НЕ ряд: передав такое в `stat_align`, вы получите среднее по разрезам, поданное как точное число. Сузить: `dims={"region": "Москва"}`, либо `dims={}` — строго безразмерные строки |
-| `topic_trend` отвечает `{"error": "... nebula ..."}` | Ожидаемо: на nebula (прод-дефолт) tool не работает вовсе — см. §4.4 | Не «нет данных». Либо `GRAPH_BACKEND=neo4j`, либо канальную сторону сравнения брать иначе. Пустой `rows` тут был бы хуже ошибки |
+| `topic_trend` отвечает `{"error": "... nebula ..."}` | Ожидаемо: nebula — единственный графовый бэкенд, и tool на нём не работает вовсе — см. §4.4 | Не «нет данных». Канальную сторону сравнения брать иначе (нет обходного бэкенда). Пустой `rows` тут был бы хуже ошибки |
 | `kb_analyze` (`POST /api/v1/analyze`) молча даёт `topic_trend: rows: []` на nebula, без ошибки | CATALOG-путь зовёт примитив `topic_trend` напрямую, минуя MCP-2 guard `_TOPIC_TREND_UNSUPPORTED_BACKENDS` — см. §4.4 | Не «тему не упоминали» — «бэкенд не может ответить». Перепроверить тот же запрос через MCP-2 `topic_trend`, там это видно как явная ошибка |
 
 ---

@@ -16,8 +16,8 @@
 1. **Plan** — LLM-планировщик получает каталог примитивов
    (`src/analytics/planner.py`, `render_catalog_for_planner`) и раскладывает
    вопрос на ≤ `ANALYTICS_MAX_STEPS` вызовов примитивов с параметрами.
-2. **Compute** — каждый примитив это детерминированный Cypher по Neo4j
-   (`src/analytics/primitives/*`), никакого LLM.
+2. **Compute** — каждый примитив это детерминированный запрос к графовому
+   хранилищу (NebulaGraph; `src/analytics/primitives/*`), никакого LLM.
 3. **Synthesize** — LLM собирает человекочитаемый ответ из строк примитивов.
 
 Исполняется как Temporal `AnalyticalQueryWorkflow` на очереди **search**-пула
@@ -164,9 +164,9 @@ curl -X POST -H "X-API-Key: $API_KEY" http://localhost:8000/admin/graph/material
 ```
 
 Fire-and-forget: `AnalyticsMaterializeWorkflow` на очереди **graph_build**
-считает GDS pagerank/betweenness/eigenvector (weighted) + link-prediction +
-risk и пишет обратно в Neo4j (`src/analytics/materialize.py`). Параллелизм —
-`TEMPORAL_ANALYTICS_MATERIALIZE_CONCURRENCY`.
+считает pagerank/betweenness/eigenvector (weighted, igraph в воркере) +
+link-prediction + risk и пишет обратно в граф (`src/analytics/materialize.py`).
+Параллелизм — `TEMPORAL_ANALYTICS_MATERIALIZE_CONCURRENCY`.
 
 **Когда запускать:** после каждого bulk-ингеста (например, tg_ingest) и после
 `reresolve_graph`; без прогона центральность/прогнозы отражают старый граф.
@@ -234,6 +234,6 @@ curl -s http://localhost:8000/api/v1/analyze \
 | `answer` противоречит цифрам | Слабая модель синтеза (e2b) | Верить `provenance.steps[].rows`; поднять tier до e4b |
 | `top_central_entities` / `link_prediction` пусто или устарело | Материализация не гонялась | §5 `POST /admin/graph/materialize` |
 | 500 `Analyze failed` | Search-пул воркера не поднят / Temporal недоступен | `docker logs kb-llamaindex-worker-1`, пул `search` в `WORKER_GROUPS` |
-| Всё по нулям при живом графе | Приложение смотрит не в тот Neo4j (env) | Сверить `NEO4J_URI` контейнера с ожидаемым |
+| Всё по нулям при живом графе | Приложение смотрит не в тот граф (env) | Сверить `NEBULA_HOST`/`NEBULA_PORT`/`NEBULA_SPACE` контейнера с ожидаемым |
 | `kb_analyze` не виден в MCP-клиенте | Старый образ mcp-search / клиент не переподключился | Пересобрать, `/mcp` reconnect |
 | Алертов нет при включённом мониторе | `MONITOR_ENABLED` не дошёл до воркера (env только в `.env`, не в compose-anchor) | Проверить `docker exec worker env \| grep MONITOR_`; пересоздать worker |
