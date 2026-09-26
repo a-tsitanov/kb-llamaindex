@@ -300,3 +300,14 @@ async def test_note_may_cite_raw_view_from_same_input():
     note = st.notes[0]
     assert note.text == "См. [[raw:c-raw]]."
     assert note.cites == ["raw:c-raw"]
+
+
+async def test_planner_is_told_which_keys_landed_on_canvas():
+    agent, store, _ = build(
+        [call_reply(), ChatReply(text="Готово.")], [SPEC],
+        [ToolResult(payload={"results": [{"qid": "Q1", "name": "Росатом"}]})])
+    ws = await store.create_workspace("t")
+    await agent.submit(ws.id, "Росатом", [])
+    await agent.drain()
+    tool_msg = agent.planner.llm.chat_calls[1]["messages"][-1]["content"]
+    assert "[[kb:Q1]]" in tool_msg

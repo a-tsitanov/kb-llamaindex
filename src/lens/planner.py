@@ -6,7 +6,7 @@ import json
 import time
 import uuid
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from src.lens.llm import LLMClient
@@ -43,6 +43,9 @@ class PlannerStatus:
 class ToolCalled:
     record: ToolCallRecord
     tool: ToolInfo
+    # Filled by the consumer (Agent) before the planner resumes: canvas keys this call
+    # produced, so the LLM can cite them as [[key]] in its answer.
+    canvas_keys: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -118,7 +121,11 @@ class Planner:
                 else:
                     yield PlannerStatus(info.server, info.name, "done")
                     content = sample_json(res.payload, self.sample_chars)
-                yield ToolCalled(rec, info)
+                called = ToolCalled(rec, info)
+                yield called
+                if called.canvas_keys:
+                    content += "\n\nAdded to canvas (cite as written): " + ", ".join(
+                        f"[[{k}]]" for k in called.canvas_keys[:40])
                 messages.append({"role": "tool", "tool_call_id": c.id, "content": content})
 
         messages.append({"role": "user",

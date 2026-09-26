@@ -361,6 +361,9 @@ class Agent:
                     )
                     known_keys[result.raw.key] = None
                 await self._append(workspace_id, input_id, ops)
+                if m is not None:
+                    ev.canvas_keys.extend(
+                        [o.key for o in m.objects] + [a.key for a in m.aggregates])
             elif isinstance(ev, PlannerFinal) and ev.text.strip():
                 body, cites = resolve_citations(ev.text, known_keys)
                 note = NoteEl(
