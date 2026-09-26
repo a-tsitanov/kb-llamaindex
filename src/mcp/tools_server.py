@@ -475,15 +475,13 @@ def _period_in_window(
     return not (until and start > date.fromisoformat(until))
 
 
-# `topic_trend` cannot be served on the nebula graph AT ALL.  The primitive
-# calls `run_rows(store, cypher, {"topic": topic})`; nebula's
-# `structured_query` raises NotImplementedError on a non-empty `param_map`
-# (src/graph/nebula_store.py) and `run_rows` fail-softs every exception to
-# `[]` (src/analytics/store_query.py).  The tool would therefore answer
-# "0 mentions, ever" for every topic — indistinguishable from a real zero.
-# A missing answer is honest; a silent zero is not.
+# `topic_trend` cannot be served on the nebula graph AT ALL: it counts
+# (:Chunk)-[:MENTIONS]-> mentions, and chunks are not nebula vertices.  The
+# catalog primitive raises NotImplementedError without querying
+# (src/analytics/primitives/dynamics.py).  Answering "0 mentions, ever" would
+# be indistinguishable from a real zero — a missing answer is honest.
 #
-# Once NebulaGraphStore binds nGQL parameters, re-add the primitive call
+# Once a nebula port exists, re-add the primitive call
 # and shape its rows with `_period_in_window` / `_period_bounds` (kept
 # above for exactly that): drop buckets outside [since, until] and add
 # `period_start` (ISO first day) + `value` (= mentions) for `stat_align`.

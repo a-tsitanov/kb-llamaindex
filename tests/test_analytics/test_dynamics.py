@@ -5,13 +5,14 @@ from tests.test_analytics.conftest import _FakeStore
 
 
 @pytest.mark.asyncio
-async def test_topic_trend_buckets_epoch_days_in_python():
-    # two chunks: 2024-03-15 (19797) and 2024-03-20 (19802) → same month bucket
-    store = _FakeStore(rows=[{"epoch": 19797, "n": 2}, {"epoch": 19802, "n": 1}])
-    res = await dyn.topic_trend(store, topic="Поставки", granularity="month")
-    periods = {r["period"]: r["mentions"] for r in res.rows}
-    assert periods == {"2024-03": 3}
-    assert "doc_date_epoch" in res.cypher
+async def test_topic_trend_raises_unsupported_without_querying_store():
+    # Before: Cypher sent with param_map={"topic": ...} -> NebulaGraphStore
+    # raised NotImplementedError -> run_rows re-raised it.  Now the same
+    # exception is raised without any store query.
+    store = _FakeStore(rows=[{"epoch": 19797, "n": 2}])
+    with pytest.raises(NotImplementedError, match="NebulaGraph"):
+        await dyn.topic_trend(store, topic="Поставки", granularity="month")
+    assert store.calls == []
 
 
 @pytest.mark.asyncio
@@ -38,11 +39,27 @@ async def test_failsoft():
 
 
 @pytest.mark.asyncio
-async def test_entity_activity_delegates_and_params_consistent():
+async def test_entity_activity_delegates_to_unsupported_topic_trend():
     store = _FakeStore(rows=[{"epoch": 19797, "n": 1}])
-    res = await dyn.entity_activity(store, name="Ромашка")
-    assert res.rows == [{"period": "2024-03", "mentions": 1}]
-    assert "topic" in res.params   # cypher uses $topic
+    with pytest.raises(NotImplementedError) as ei:
+        await dyn.entity_activity(store, name="Ромашка")
+    assert str(ei.value) == dyn.TOPIC_TREND_UNSUPPORTED
+    assert store.calls == []
+
+
+@pytest.mark.asyncio
+async def test_topic_trend_no_store_returns_empty_result_shape():
+    res = await dyn.topic_trend(None, topic="x", granularity="quarter")
+    assert res.rows == [] and res.params == {"topic": "x"}
+    res = await dyn.entity_activity(None, name="x")
+    assert res.rows == [] and res.params == {"topic": "x"}
+
+
+def test_topic_trend_stays_registered_in_catalog():
+    from src.analytics.catalog import CATALOG
+
+    assert CATALOG["topic_trend"].fn is dyn.topic_trend
+    assert CATALOG["entity_activity"].fn is dyn.entity_activity
 
 
 # ── whats_changed: fallback-ось created_at (first_seen) ──────────────

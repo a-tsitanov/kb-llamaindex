@@ -2,8 +2,8 @@
 read-only, fail-soft): relationship_timeline / polarity_evolution / whats_changed.
 
 topic_trend / entity_activity are NOT here — they traverse (:Chunk), which isn't a
-nebula graph node, so they degrade to [] via run_rows fail-soft (no nebula-specific
-logic to add).
+nebula graph node; the primitives raise NotImplementedError without querying
+(src/analytics/primitives/dynamics.py), reported by execute_step as unsupported.
 
 ``NebulaDynamicsGraphOps`` implements the reads in nGQL now that RELATED.valid_from/valid_to are STRING (see nebula_schema): near-
 verbatim MATCH with ``substr``, ``r.rel_type`` (the original relation type,

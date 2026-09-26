@@ -195,6 +195,18 @@ link-prediction + risk и пишет обратно в граф (`src/analytics/
 > ловушки, что инцидент с `TEMPORAL_COMMUNITY_BACKEND` 2026-06-30). Перед
 > включением мониторинга в прод-компоузе добавьте нужные переменные в anchor.
 
+> ⚠️ **Известные пробелы на NebulaGraph.**
+> - **Webhook-доставка не работает.** Если задан `MONITOR_WEBHOOK_URL`,
+>   активность `deliver_alerts` (`src/workflow/monitor/activities.py`) шлёт
+>   Cypher (`MATCH (a:Alert) … LIMIT $cap`) с `param_map`, который
+>   `NebulaGraphStore.structured_query` отвергает (`NotImplementedError`) —
+>   активность ловит исключение и **всегда** возвращает `DeliverResult` с
+>   `error`, ничего не доставлено и `pushed_at` не проставлен. Алерты при этом
+>   пишутся в граф и читаются примитивом `alerts`. Порт на nGQL — в бэклоге.
+> - **Burst-детектор в свипе пропускается**: `_read_burst` возвращает `[]` без
+>   запроса (watched-only burst не портирован), так что
+>   `MONITOR_BURST_ENABLED=true` алертов burst не даёт.
+
 Ручное управление (без ожидания расписания):
 
 ```bash

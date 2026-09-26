@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
 from src.analytics.catalog import Primitive, PrimitiveResult, register
-from src.analytics.ids import clamp_top_n, epoch_days_to_period
-from src.analytics.store_query import run_rows
+from src.analytics.ids import clamp_top_n
 from src.graph.dynamics_graph_ops import build_dynamics_graph_ops
 
 
@@ -110,21 +108,30 @@ class TopicTrendParams(_Params):
     granularity: str = "month"
 
 
+TOPIC_TREND_UNSUPPORTED = (
+    "topic_trend is not supported on the NebulaGraph backend: it counts "
+    "(:Chunk)-[:MENTIONS]-> mentions by chunk date, and chunks are not graph "
+    "vertices on NebulaGraph (no nGQL port yet)"
+)
+
+
 async def topic_trend(
     store: Any | None, *, topic: str, granularity: str = "month"
 ) -> PrimitiveResult:
-    cypher = (
-        "MATCH (t:__Entity__ {name:$topic})<-[:MENTIONS]-(c:Chunk) "
-        "WHERE c.doc_date_epoch IS NOT NULL "
-        "RETURN c.doc_date_epoch AS epoch, count(DISTINCT c) AS n"
-    )
+    """Unsupported on NebulaGraph — raises without querying the store.
+
+    The former Cypher (``MATCH (t:__Entity__ {name:$topic})<-[:MENTIONS]-
+    (c:Chunk) ...``) was sent with a non-empty ``param_map``, which
+    ``NebulaGraphStore.structured_query`` refuses with ``NotImplementedError``;
+    ``run_rows`` re-raises that (it only fail-softs transient errors), so
+    ``execute_step`` reported "not supported by the current graph backend".
+    Raising the same exception type here keeps that result identical without
+    sending Cypher.  No store → empty rows, as ``run_rows`` returned before.
+    """
     params = {"topic": topic}
-    raw = await run_rows(store, cypher, params)
-    buckets: dict[str, int] = defaultdict(int)
-    for r in raw:
-        buckets[epoch_days_to_period(r["epoch"], granularity)] += int(r["n"])
-    rows = [{"period": p, "mentions": buckets[p]} for p in sorted(buckets)]
-    return PrimitiveResult(cypher=cypher, params=params, rows=rows)
+    if store is None:
+        return PrimitiveResult(cypher="", params=params, rows=[])
+    raise NotImplementedError(TOPIC_TREND_UNSUPPORTED)
 
 
 class PolarityEvolutionParams(_Params):

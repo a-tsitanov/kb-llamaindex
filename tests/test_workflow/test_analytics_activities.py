@@ -153,8 +153,8 @@ async def test_execute_step_error_is_short_and_jargon_free(monkeypatch):
     assert sr.error != ""
     for jargon in ("nGQL", "param_map", "Phase 2", "NotImplementedError"):
         assert jargon not in sr.error
-    assert "Phase 2" in sr.error_detail
-    assert "param_map" in sr.error_detail
+    # Raw exception text goes to error_detail (operator-only).
+    assert sr.error_detail == dynamics.TOPIC_TREND_UNSUPPORTED
 
 
 @pytest.mark.asyncio
