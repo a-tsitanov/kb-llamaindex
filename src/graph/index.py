@@ -5,8 +5,7 @@ Layers:
     looser `SimpleLLMPathExtractor` (fallback).  Schema mode emits
     typed entities + a `description` property per entity — the
     foundation of LightRAG-style rich semantic graphs.
-  * **Store** — Neo4j in production, `SimplePropertyGraphStore` in
-    unit tests.
+  * **Store** — the graph store handed in by the caller.
   * **Index** — composes both; attached to the ingestion pipeline
     alongside the vector index.
 
@@ -17,7 +16,6 @@ default, which reliably emits structured output for schema mode).
 
 from __future__ import annotations
 
-import functools
 from typing import Literal
 
 from llama_index.core import PropertyGraphIndex
@@ -32,7 +30,6 @@ from llama_index.core.indices.property_graph.utils import (
 )
 from llama_index.core.llms import LLM
 from llama_index.core.schema import TransformComponent
-from loguru import logger
 
 from src.graph.schema import (
     DEFAULT_VALIDATION_SCHEMA,
@@ -40,229 +37,6 @@ from src.graph.schema import (
     RelationType,
 )
 from src.retrieval._common import strip_thinking
-
-
-def _skip_under_nebula(fn):
-    """Short-circuit a legacy neo4j ``ensure_*_index`` helper: always report
-    success without issuing any DDL.
-
-    These helpers carry neo4j ``CREATE [FULLTEXT|VECTOR] INDEX`` DDL that
-    nebula 3.8 rejects (``SyntaxError near 'INDEX'`` — it uses ``CREATE TAG
-    INDEX``, created separately by ``nebula_schema.ensure_schema``).  Nebula
-    is the only graph backend, so the DDL is never sent.
-    """
-
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        return True
-
-    return wrapper
-
-
-# Full-text index over entity names — backs partial-name lookup
-# (``GraphRetriever.afind_entities_by_name``).  Idempotent DDL, safe to
-# run repeatedly / concurrently.
-ENTITY_FULLTEXT_INDEX_CYPHER = (
-    "CREATE FULLTEXT INDEX entity_name_fulltext IF NOT EXISTS FOR (e:__Entity__) ON EACH [e.name]"
-)
-
-
-@_skip_under_nebula
-def ensure_entity_fulltext_index(store) -> bool:
-    """Idempotently create the entity-name full-text index.
-
-    Returns True on success, False (logged) on any error — never raises,
-    so callers on the ingest / retriever-bootstrap paths stay fail-open
-    (a store without full-text support just keeps the old behaviour)."""
-    try:
-        store.structured_query(ENTITY_FULLTEXT_INDEX_CYPHER)
-        return True
-    except Exception as exc:  # broad by design — fail-open
-        logger.warning("ensure_entity_fulltext_index failed: {e}", e=exc)
-        return False
-
-
-# Range index on `__Entity__.name`.  The llama-index Neo4j store creates a
-# UNIQUE constraint on `.id` (the node identity), but the project's own
-# Cypher matches entities by the separate `.name` property
-# (``GraphRetriever.awalk`` seed lookup, ER stored-loser cleanup).  Without
-# this index those are full label scans — O(N) at 250k+ entities.
-ENTITY_NAME_INDEX_CYPHER = "CREATE INDEX entity_name IF NOT EXISTS FOR (e:__Entity__) ON (e.name)"
-
-# Range index on `__Entity__.mention_count`.  Backs the incremental-ER
-# window's ``ORDER BY n.mention_count DESC`` so the planner can return the
-# most-mentioned canonicals without sorting the whole label.
-ENTITY_MENTION_COUNT_INDEX_CYPHER = (
-    "CREATE INDEX entity_mention_count IF NOT EXISTS FOR (e:__Entity__) ON (e.mention_count)"
-)
-
-
-@_skip_under_nebula
-def ensure_entity_lookup_indexes(store) -> bool:
-    """Idempotently create the range indexes that keep entity lookups and
-    the incremental-ER window scalable at 250k+ entities.
-
-    Fail-open like ``ensure_entity_fulltext_index``: any error is logged
-    and swallowed (a store/version without these indexes just keeps the
-    old full-scan behaviour).  Returns True only if both succeeded."""
-    ok = True
-    for cypher in (ENTITY_NAME_INDEX_CYPHER, ENTITY_MENTION_COUNT_INDEX_CYPHER):
-        try:
-            store.structured_query(cypher)
-        except Exception as exc:  # broad by design — fail-open
-            logger.warning("ensure_entity_lookup_indexes failed: {e}", e=exc)
-            ok = False
-    return ok
-
-
-# Native vector index over `__Entity__.er_vec` — backs the opt-in
-# entity-resolution kNN (`ERConfig.use_native_vector_knn`) that replaces
-# the bounded 5000-entity window with a per-entity nearest-neighbour
-# lookup across the whole graph.  Cosine to match the ER embeddings.
-ER_VECTOR_INDEX_CYPHER = (
-    "CREATE VECTOR INDEX er_embedding_vec IF NOT EXISTS "
-    "FOR (e:__Entity__) ON e.er_vec "
-    "OPTIONS {indexConfig: {`vector.dimensions`: $dim, "
-    "`vector.similarity_function`: 'cosine'}}"
-)
-
-
-@_skip_under_nebula
-def ensure_er_vector_index(store, dim: int) -> bool:
-    """Idempotently create the ER vector index on ``__Entity__.er_vec``.
-
-    Fail-open: logs and returns False on any error (e.g. a Neo4j version
-    without vector indexes), so the ER path can fall back to the window.
-    """
-    try:
-        store.structured_query(ER_VECTOR_INDEX_CYPHER, param_map={"dim": int(dim)})
-        return True
-    except Exception as exc:  # broad by design — fail-open
-        logger.warning("ensure_er_vector_index failed: {e}", e=exc)
-        return False
-
-
-# Native vector index over `Community.report_vec` — backs the structured
-# community-report retrieval (Phase 2a of the hierarchical-communities
-# track).  Reports are embedded from `title + summary`; cosine to match
-# the project embedding model (mirrors `er_embedding_vec` on entities).
-COMMUNITY_REPORT_VECTOR_INDEX_CYPHER = (
-    "CREATE VECTOR INDEX community_report_vec IF NOT EXISTS "
-    "FOR (c:Community) ON c.report_vec "
-    "OPTIONS {indexConfig: {`vector.dimensions`: $dim, "
-    "`vector.similarity_function`: 'cosine'}}"
-)
-
-
-@_skip_under_nebula
-def ensure_community_report_vector_index(store, dim: int) -> bool:
-    """Idempotently create the community-report vector index on
-    ``Community.report_vec``.
-
-    Fail-open: logs and returns False on any error (e.g. a Neo4j version
-    without vector indexes), so the report-build path can persist reports
-    without the native index and fall back to lexical/summary search.
-    """
-    try:
-        store.structured_query(COMMUNITY_REPORT_VECTOR_INDEX_CYPHER, param_map={"dim": int(dim)})
-        return True
-    except Exception as exc:  # broad by design — fail-open
-        logger.warning("ensure_community_report_vector_index failed: {e}", e=exc)
-        return False
-
-
-# Range indexes for the community / global read paths.
-#   * community_level — backs `MATCH (c:Community {level: $level})`
-#     (global_search summary read).  NOT redundant with the
-#     `community_key` UNIQUE constraint on `(c.id, c.level)`: a composite
-#     index is only usable when its LEADING column (id) is bound, so it
-#     can't serve a level-only lookup — this standalone index is required.
-#   * chunk_doc_id — backs the `(:Chunk)-[:MENTIONS]->…->(:Community)`
-#     traversal returning `c.doc_id` (verified live: Chunk nodes carry
-#     `doc_id`).
-COMMUNITY_LEVEL_INDEX_CYPHER = (
-    "CREATE INDEX community_level IF NOT EXISTS FOR (c:Community) ON (c.level)"
-)
-CHUNK_DOC_ID_INDEX_CYPHER = "CREATE INDEX chunk_doc_id IF NOT EXISTS FOR (c:Chunk) ON (c.doc_id)"
-
-
-@_skip_under_nebula
-def ensure_community_indexes(store) -> bool:
-    """Idempotent range indexes for the community/global read paths
-    (Community.level filter, Chunk.doc_id traversal).  Fail-open."""
-    ok = True
-    for cypher in (COMMUNITY_LEVEL_INDEX_CYPHER, CHUNK_DOC_ID_INDEX_CYPHER):
-        try:
-            store.structured_query(cypher)
-        except Exception as exc:  # broad by design — fail-open
-            logger.warning("ensure_community_indexes failed: {e}", e=exc)
-            ok = False
-    return ok
-
-
-# Range indexes on the per-chunk date epochs (search date-filter feature).
-# Chunks carry ``doc_date_epoch`` / ``inserted_at_epoch`` (stamped in
-# parse_and_chunk); the graph post-filter reads them off retrieved chunks,
-# and these indexes keep any future chunk-level date predicate scalable.
-CHUNK_DOC_DATE_INDEX_CYPHER = (
-    "CREATE INDEX chunk_doc_date_epoch IF NOT EXISTS FOR (c:Chunk) ON (c.doc_date_epoch)"
-)
-CHUNK_INSERTED_AT_INDEX_CYPHER = (
-    "CREATE INDEX chunk_inserted_at_epoch IF NOT EXISTS FOR (c:Chunk) ON (c.inserted_at_epoch)"
-)
-
-
-@_skip_under_nebula
-def ensure_chunk_date_indexes(store) -> bool:
-    """Idempotent range indexes on ``:Chunk(doc_date_epoch)`` and
-    ``:Chunk(inserted_at_epoch)`` for date-filtered search.  Fail-open
-    like the other ensure-index helpers."""
-    ok = True
-    for cypher in (CHUNK_DOC_DATE_INDEX_CYPHER, CHUNK_INSERTED_AT_INDEX_CYPHER):
-        try:
-            store.structured_query(cypher)
-        except Exception as exc:  # broad by design — fail-open
-            logger.warning("ensure_chunk_date_indexes failed: {e}", e=exc)
-            ok = False
-    return ok
-
-
-# Range index on ``__Entity__.created_at`` — E1 (Wave 0 first-seen feature).
-# Backs the "what's new" query path that filters entities by epoch-day.
-ENTITY_CREATED_AT_INDEX_CYPHER = (
-    "CREATE INDEX entity_created_at IF NOT EXISTS FOR (e:__Entity__) ON (e.created_at)"
-)
-
-# Relationship temporal indexes. Neo4j rel-property indexes are PER-TYPE
-# (``FOR ()-[r:TYPE]-()``), so we cover the dominant extractor type only:
-# RELATED carries the majority of edges. They serve TYPED query paths
-# (relationship_timeline with rel_type, future typed dynamics); the untyped
-# ``-[r]-`` scan in whats_changed can NOT use them — acceptable while the
-# graph is ~10^4 edges, revisit (enumerate top types) beyond that.
-REL_TEMPORAL_INDEX_CYPHERS = (
-    "CREATE INDEX rel_related_created_at IF NOT EXISTS "
-    "FOR ()-[r:RELATED]-() ON (r.created_at)",
-    "CREATE INDEX rel_related_valid_from IF NOT EXISTS "
-    "FOR ()-[r:RELATED]-() ON (r.valid_from)",
-)
-
-
-@_skip_under_nebula
-def ensure_first_seen_indexes(store) -> bool:
-    """Idempotently create the E1 temporal indexes: ``created_at`` on
-    entities + per-type temporal indexes on RELATED relationships.
-
-    Fail-open like the other ensure-index helpers: any error is logged
-    and swallowed.  Returns True only if all DDL succeeded.
-    """
-    ok = True
-    for cypher in (ENTITY_CREATED_AT_INDEX_CYPHER, *REL_TEMPORAL_INDEX_CYPHERS):
-        try:
-            store.structured_query(cypher)
-        except Exception as exc:  # broad by design — fail-open
-            logger.warning("ensure_first_seen_indexes failed: {e}", e=exc)
-            ok = False
-    return ok
 
 
 def _parse_triplets_strip_thinking(response: str, **kwargs):

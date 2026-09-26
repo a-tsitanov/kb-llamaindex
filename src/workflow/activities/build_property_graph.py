@@ -76,13 +76,6 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
         }
     )
 
-    from src.graph.index import (
-        ensure_chunk_date_indexes,
-        ensure_entity_fulltext_index,
-        ensure_entity_lookup_indexes,
-        ensure_first_seen_indexes,
-    )
-
     # Pulse on a timer throughout the blocking graph-write region: store
     # construction (driver I/O + schema refresh, behind a process-global
     # lock), the entity/relation upserts, the gated first_seen stamp, and the lookup-index
@@ -187,11 +180,6 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
                 logger.warning("first_seen stamping skipped (non-fatal): {e}", e=exc)
             activity.heartbeat({"stage": "first_seen_stamped"})
 
-        await asyncio.to_thread(ensure_entity_fulltext_index, graph_store)
-        await asyncio.to_thread(ensure_entity_lookup_indexes, graph_store)
-        await asyncio.to_thread(ensure_chunk_date_indexes, graph_store)
-        await asyncio.to_thread(ensure_first_seen_indexes, graph_store)
-        activity.heartbeat({"stage": "indexes_ensured"})
 
     logger.info(
         "build_property_graph done  doc={d}  e={e}  r={r}",

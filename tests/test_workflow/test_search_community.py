@@ -519,7 +519,6 @@ async def test_detect_activity_strips_members_from_result(monkeypatch):
     members) even though detect_communities yields full CommunityRefs —
     membership stays in Neo4j, only counts cross the activity boundary."""
     import src.graph.communities as communities_mod
-    import src.graph.index as index_mod
     from src.workflow.contracts import CommunityRef, DetectCommunitiesParams
     from src.workflow.search.activities.community import detect_communities_activity
 
@@ -529,10 +528,6 @@ async def test_detect_activity_strips_members_from_result(monkeypatch):
 
     monkeypatch.setattr(community_mod, "_get_store", lambda: object())
     monkeypatch.setattr(communities_mod, "detect_communities", fake_single)
-    monkeypatch.setattr(
-        index_mod, "ensure_community_report_vector_index",
-        lambda store, dim: True,
-    )
 
     out = await detect_communities_activity(DetectCommunitiesParams(min_size=1))
 
@@ -693,59 +688,27 @@ def test_parse_report_tolerates_bad_finding_shapes():
 
 
 @pytest.mark.asyncio
-async def test_detect_activity_hierarchy_branch_and_one_shot_index(monkeypatch):
-    """max_levels>1 routes to detect_hierarchy and ensures the report vector
-    index exactly ONCE (one-shot), not per community."""
+async def test_detect_activity_hierarchy_branch(monkeypatch):
+    """max_levels>1 routes to detect_hierarchy, not detect_communities."""
     import src.graph.communities as communities_mod
-    import src.graph.index as index_mod
     from src.workflow.contracts import CommunityRef, DetectCommunitiesParams
     from src.workflow.search.activities.community import detect_communities_activity
 
-    calls = {"hierarchy": 0, "single": 0, "ensure": 0}
+    calls = {"hierarchy": 0, "single": 0}
 
-    async def fake_hierarchy(store, *, max_levels, min_size, gamma=1.0,
-                             concurrency=4):
+    async def fake_hierarchy(store, *, max_levels, min_size, gamma=1.0, concurrency=4):
         calls["hierarchy"] += 1
         return [CommunityRef(community_id="1", level=0, members=["a", "b"])]
 
-    async def fake_single(store, *, min_size, level=0, gamma=1.0,
-                          concurrency=4):
+    async def fake_single(store, *, min_size, level=0, gamma=1.0, concurrency=4):
         calls["single"] += 1
         return []
-
-    def fake_ensure(store, dim):
-        calls["ensure"] += 1
-        return True
 
     monkeypatch.setattr(community_mod, "_get_store", lambda: object())
     monkeypatch.setattr(communities_mod, "detect_hierarchy", fake_hierarchy)
     monkeypatch.setattr(communities_mod, "detect_communities", fake_single)
-    monkeypatch.setattr(index_mod, "ensure_community_report_vector_index", fake_ensure)
 
     out = await detect_communities_activity(
         DetectCommunitiesParams(min_size=1, max_levels=3))
-    assert calls == {"hierarchy": 1, "single": 0, "ensure": 1}
+    assert calls == {"hierarchy": 1, "single": 0}
     assert [c.community_id for c in out.communities] == ["1"]
-
-
-@pytest.mark.asyncio
-async def test_detect_activity_index_ensure_failopen(monkeypatch):
-    """A raising one-shot index ensure must NOT crash the detect activity."""
-    import src.graph.communities as communities_mod
-    import src.graph.index as index_mod
-    from src.workflow.contracts import DetectCommunitiesParams
-    from src.workflow.search.activities.community import detect_communities_activity
-
-    async def fake_single(store, *, min_size, level=0, gamma=1.0,
-                          concurrency=4):
-        return []
-
-    def boom_ensure(store, dim):
-        raise RuntimeError("no vector index support")
-
-    monkeypatch.setattr(community_mod, "_get_store", lambda: object())
-    monkeypatch.setattr(communities_mod, "detect_communities", fake_single)
-    monkeypatch.setattr(index_mod, "ensure_community_report_vector_index", boom_ensure)
-
-    out = await detect_communities_activity(DetectCommunitiesParams(min_size=1))
-    assert out.communities == []  # fail-open, single-level branch (max_levels=1)

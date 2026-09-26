@@ -301,10 +301,7 @@ async def detect_communities_activity(
 
     ``max_levels == 1`` (default) → single-level/back-compat
     (``detect_communities``); ``max_levels > 1`` → the full dendrogram
-    HIERARCHY (``detect_hierarchy``).  After detection (either path) the
-    native report vector index is ensured ONCE here — detect runs before
-    any ``summarize_community_activity`` on the same ``kb-graph-build``
-    queue, so the per-community ensure is redundant (fail-open)."""
+    HIERARCHY (``detect_hierarchy``)."""
     activity.heartbeat({
         "stage": "detect",
         "min_size": params.min_size,
@@ -328,32 +325,6 @@ async def detect_communities_activity(
             communities = await detect_communities(
                 store, min_size=params.min_size, level=params.level,
                 gamma=params.gamma, concurrency=params.concurrency,
-            )
-
-    # Ensure the report vector index ONCE (one-shot, before the summarize
-    # fan-out reads/writes report_vec).  Fail-open — a missing index only
-    # disables report-vector search (degrades to lexical), never the build.
-    # This is now the SOLE ensure (the per-community net was removed), so a
-    # failure here leaves the whole rebuild's vectors unindexed until the
-    # next full build — log at ERROR so it's visible, not buried.
-    if store is not None:
-        try:
-            from src.config import settings
-            from src.graph.index import ensure_community_report_vector_index
-
-            ok = await asyncio.to_thread(
-                ensure_community_report_vector_index, store, settings.milvus.dim,
-            )
-            if not ok:
-                activity.logger.error(
-                    "detect_communities_activity  report vector index NOT "
-                    "ensured — report-vector search will be DEGRADED to lexical "
-                    "until the index is created on a later build",
-                )
-        except Exception as exc:
-            activity.logger.error(
-                "detect_communities_activity  report index ensure raised "
-                "(search degraded) err=%s", exc,
             )
 
     activity.logger.info(

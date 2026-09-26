@@ -32,7 +32,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from loguru import logger
 
 from src.config import settings
-from src.graph.index import ensure_first_seen_indexes
 from src.graph.store import build_graph_store
 from src.utils.logging import configure_logging
 
@@ -73,8 +72,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         logger.info("DRY-RUN — no writes.  Re-run without --dry-run to apply.")
         return 0
-
-    ensure_first_seen_indexes(store)
 
     if ent_pending:
         store.structured_query(_SET_ENT_CYPHER, param_map={"sentinel": sentinel})

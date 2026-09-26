@@ -15,17 +15,9 @@ from llama_index.core.indices.property_graph import (
 )
 from llama_index.core.llms import MockLLM
 
-from src.config import settings
 from src.graph.index import (
     _ENTITY_DESCRIPTION_PROP,
     build_kg_extractor,
-    ensure_chunk_date_indexes,
-    ensure_community_indexes,
-    ensure_community_report_vector_index,
-    ensure_entity_fulltext_index,
-    ensure_entity_lookup_indexes,
-    ensure_er_vector_index,
-    ensure_first_seen_indexes,
 )
 from src.graph.schema import (
     DEFAULT_VALIDATION_SCHEMA,
@@ -148,26 +140,23 @@ def test_build_property_graph_index_threads_llm(monkeypatch):
     assert captured["llm"] is sentinel
 
 
-def test_ensure_indexes_skip_under_nebula(monkeypatch):
-    # neo4j `CREATE INDEX` DDL raises `SyntaxError near INDEX` under nebula
-    # (nebula uses TAG INDEX, created by nebula_schema.ensure_schema). The
-    # ensure_* helpers must early-return under nebula, NOT fire neo4j DDL —
-    # else every search/ingest bootstrap spams fail-open warnings.
+def test_neo4j_ddl_helpers_removed():
+    # Nebula's indexes are created by nebula_schema.ensure_schema; the legacy
+    # neo4j `CREATE [FULLTEXT|VECTOR] INDEX` helpers (and the decorator that
+    # no-op'd them) are gone rather than kept as dead no-ops.
+    import src.graph.index as idx
 
-    class _CountingStore:
-        def __init__(self):
-            self.calls = 0
-
-        def structured_query(self, *a, **k):
-            self.calls += 1
-            return []
-
-    store = _CountingStore()
-    assert ensure_entity_fulltext_index(store) is True
-    assert ensure_entity_lookup_indexes(store) is True
-    assert ensure_chunk_date_indexes(store) is True
-    assert ensure_first_seen_indexes(store) is True
-    assert ensure_community_indexes(store) is True
-    assert ensure_er_vector_index(store, 768) is True
-    assert ensure_community_report_vector_index(store, 768) is True
-    assert store.calls == 0  # no neo4j DDL sent to nebula
+    for name in (
+        "_skip_under_nebula",
+        "ensure_entity_fulltext_index",
+        "ensure_entity_lookup_indexes",
+        "ensure_er_vector_index",
+        "ensure_community_report_vector_index",
+        "ensure_community_indexes",
+        "ensure_chunk_date_indexes",
+        "ensure_first_seen_indexes",
+        "ENTITY_FULLTEXT_INDEX_CYPHER",
+        "ER_VECTOR_INDEX_CYPHER",
+        "COMMUNITY_REPORT_VECTOR_INDEX_CYPHER",
+    ):
+        assert not hasattr(idx, name), name

@@ -1,6 +1,6 @@
 """Guard: build_property_graph must heartbeat DURING its blocking graph
 writes (index build + entity/relation upsert), not only at the discrete
-init/loaded/.../indexes_ensured checkpoints.
+init/loaded/.../relations_upserted checkpoints.
 
 The upserts (`graph_store.upsert_nodes/upsert_relations` in
 asyncio.to_thread) get slow under hub-node lock
@@ -27,7 +27,6 @@ from src.workflow.contracts import Ctx, KGExtracted, Merged, Parsed
 # is the re-exported function, which shadows the submodule) so monkeypatch
 # targets the module globals the activity reads.
 bpg = importlib.import_module("src.workflow.activities.build_property_graph")
-gi = importlib.import_module("src.graph.index")
 
 
 @pytest.mark.asyncio
@@ -53,10 +52,6 @@ async def test_pulses_during_graph_upsert(monkeypatch):
         upsert_nodes=slow_write, upsert_relations=slow_write,
     )
     monkeypatch.setattr(bpg, "build_graph_store", lambda: graph_store)
-    # index DDL is imported from src.graph.index at call time → patch there.
-    monkeypatch.setattr(gi, "ensure_entity_fulltext_index", lambda _s: None)
-    monkeypatch.setattr(gi, "ensure_entity_lookup_indexes", lambda _s: None)
-    monkeypatch.setattr(gi, "ensure_chunk_date_indexes", lambda _s: None)
 
     beats: list[tuple] = []
     env = ActivityEnvironment()

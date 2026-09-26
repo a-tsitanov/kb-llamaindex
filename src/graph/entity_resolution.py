@@ -1187,14 +1187,6 @@ async def _load_candidates_native(
     """
     if graph_store is None:
         return []
-    # Idempotently ensure the index exists (no-op once built).
-    try:
-        from src.graph.index import ensure_er_vector_index
-
-        await asyncio.to_thread(ensure_er_vector_index, graph_store, dim)
-    except Exception as exc:
-        logger.warning("ensure ER vector index failed: {e}", e=exc)
-
     seen: dict[str, _Item] = {}
     for it in new_items:
         if not it.embedding:
