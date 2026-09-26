@@ -22,8 +22,7 @@ x-app-env: &app-env
   MINIO_ENDPOINT: minio:9000
   MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
   MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
-  # ── Graph: NebulaGraph (sole backend post-cutover; GRAPH_BACKEND default) ──
-  GRAPH_BACKEND: ${GRAPH_BACKEND:-nebula}
+  # ── Graph: NebulaGraph (sole backend) ──
   NEBULA_HOST: nebula-graphd
   NEBULA_PORT: "9669"
   NEBULA_USER: ${NEBULA_USER:-root}
@@ -65,9 +64,10 @@ x-app-env: &app-env
   AGENT_ER_USE_NATIVE_VECTOR_KNN: ${AGENT_ER_USE_NATIVE_VECTOR_KNN:-false}
   AGENT_COMMUNITY_MAX_LEVELS: ${AGENT_COMMUNITY_MAX_LEVELS:-1}
   AGENT_COMMUNITY_DYNAMIC_SELECTION: ${AGENT_COMMUNITY_DYNAMIC_SELECTION:-lexical}
-  # Community-detection backend: "gds" (in-Neo4j GDS) | "leidenalg" (in-worker
-  # leidenalg/igraph — keeps Leiden memory off the Neo4j JVM heap).
-  TEMPORAL_COMMUNITY_BACKEND: ${TEMPORAL_COMMUNITY_BACKEND:-gds}
+  # Community-detection backend: "leidenalg" (in-worker leidenalg/igraph,
+  # default) | "graphscope" (distributed Leiden). Legacy "gds" maps to
+  # "leidenalg".
+  TEMPORAL_COMMUNITY_BACKEND: ${TEMPORAL_COMMUNITY_BACKEND:-leidenalg}
   # E1 first-seen stamping (created_at/first_doc_id on new graph elements) —
   # powers volatility / burst / new-connections. Run
   # scripts/backfill_first_seen ONCE before enabling on an existing graph.

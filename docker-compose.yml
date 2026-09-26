@@ -97,12 +97,7 @@ services:
       start_period: 30s
     restart: unless-stopped
 
-  # ── Graph DB: Neo4j — DECOMMISSIONED (migration cutover 2026-07-11) ──
-  # NebulaGraph is now the sole graph backend (GRAPH_BACKEND default = nebula).
-  # The neo4j service was removed here; its impl code is retained (inert) for
-  # rollback until a production re-ingest validates nebula end-to-end.
-
-  # ── Graph DB: NebulaGraph dev cluster (migration Phase 1) ───────────
+  # ── Graph DB: NebulaGraph dev cluster (sole graph backend) ──────────
   # Single-replica dev topology: metad + storaged + graphd. After first
   # boot, the storage host must be registered once via
   # `python scripts/nebula_bootstrap.py` (ADD HOSTS) before data can be
