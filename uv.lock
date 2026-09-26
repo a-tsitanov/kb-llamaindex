@@ -1498,7 +1498,6 @@ dependencies = [
     { name = "leidenalg" },
     { name = "llama-index-core" },
     { name = "llama-index-embeddings-openai-like" },
-    { name = "llama-index-graph-stores-neo4j" },
     { name = "llama-index-llms-openai-like" },
     { name = "llama-index-postprocessor-sbert-rerank" },
     { name = "llama-index-readers-file" },
@@ -1507,7 +1506,6 @@ dependencies = [
     { name = "loguru" },
     { name = "minio" },
     { name = "nebula3-python" },
-    { name = "neo4j" },
     { name = "phonenumbers" },
     { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pydantic" },
@@ -1561,7 +1559,6 @@ requires-dist = [
     { name = "leidenalg", specifier = ">=0.10,<0.11" },
     { name = "llama-index-core", specifier = ">=0.13,<0.14" },
     { name = "llama-index-embeddings-openai-like", specifier = ">=0.1" },
-    { name = "llama-index-graph-stores-neo4j", specifier = ">=0.5" },
     { name = "llama-index-llms-openai-like", specifier = ">=0.4" },
     { name = "llama-index-postprocessor-sbert-rerank", specifier = ">=0.4" },
     { name = "llama-index-readers-file", specifier = ">=0.4" },
@@ -1570,7 +1567,6 @@ requires-dist = [
     { name = "loguru", specifier = ">=0.7,<1" },
     { name = "minio", specifier = ">=7.2,<8" },
     { name = "nebula3-python", specifier = ">=3.8,<3.9" },
-    { name = "neo4j", specifier = ">=5.27,<7" },
     { name = "phonenumbers", specifier = ">=9,<10" },
     { name = "postal", marker = "extra == 'postal'", specifier = ">=1.1,<2" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2,<4" },
@@ -1691,19 +1687,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b2/df/79e4748196213b55931d5f8377141fff41135f5988d5501860824cc95390/llama_index_embeddings_openai_like-0.3.1.tar.gz", hash = "sha256:cef7af4bce284e8e6730532dbd0aa325e77398a5d5524edb2d2e3acb122fb5b6", size = 3854, upload-time = "2026-03-13T16:15:20.647Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/01/8e/b9ea889f88318f2faa20b615989e12a15a133c9273630f9266fcf69f35a6/llama_index_embeddings_openai_like-0.3.1-py3-none-any.whl", hash = "sha256:167c7e462cde7d53ea907ceaffbbf10a750676c7c9f7bcc9bc9686a41921387a", size = 3631, upload-time = "2026-03-13T16:15:19.58Z" },
-]
-
-[[package]]
-name = "llama-index-graph-stores-neo4j"
-version = "0.7.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "llama-index-core" },
-    { name = "neo4j" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/46/f0/68b6ac9c5171d4dd80e44a04ad3971fb1a5458f03c8b73d36bfb076748a7/llama_index_graph_stores_neo4j-0.7.0.tar.gz", hash = "sha256:abe4bb348c652005d1ef970dec8512dae6582c50d83bbaf59ce2d53031e66120", size = 17386, upload-time = "2026-03-12T20:22:37.44Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/89/2f/336ac7b3a680a2dfe8ea370ec25b9bb3384627cd3bbec6e7a827eba031e8/llama_index_graph_stores_neo4j-0.7.0-py3-none-any.whl", hash = "sha256:ab250e8825f6f883751fb21fecdd26652cd27faccfabe6c17894a2cb7b2896b8", size = 18591, upload-time = "2026-03-12T20:22:38.396Z" },
 ]
 
 [[package]]
@@ -2153,18 +2136,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/7d/5b/418091182ec585762497f087f04d6e8dcd8c5f7de416b01d6c901c1e8055/nebula3_python-3.8.3.tar.gz", hash = "sha256:da4693171079e9d5efb01a579f7fb62ef7655f6169cc2ff2cbb7b7d902e2cf3d", size = 3228870, upload-time = "2024-10-22T03:55:47.774Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e7/51/fdcc871d1b04d4e2a0293e27ae7d33fe33eea9077323401fb5016f19dcef/nebula3_python-3.8.3-py3-none-any.whl", hash = "sha256:ef583d15c012751cce05bcf8b3869881dbbc3286c6e3fa8b5c65b7c5bb808c38", size = 331255, upload-time = "2024-10-22T03:55:45.887Z" },
-]
-
-[[package]]
-name = "neo4j"
-version = "5.28.4"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pytz" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/62/aa/83baca8f9e5e5ba1a00722067a4bf3c088c5c02019a7b485e94c8cf05d39/neo4j-5.28.4.tar.gz", hash = "sha256:4a2d8d6eb8c2da0bc87a30e96e2c179fbc0045665626482901ca3dcc9c2b1811", size = 232608, upload-time = "2026-05-04T08:00:55.426Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d9/fd/d46f29f4089a00a7d4894f5e1739288c2a42622b72ea7161a226b73ff4fa/neo4j-5.28.4-py3-none-any.whl", hash = "sha256:ba87c423fd2a1fbe6a116c47ac96cfbe7d8c419d24d2f5611e5674283dddf7b9", size = 313927, upload-time = "2026-05-04T08:00:52.005Z" },
 ]
 
 [[package]]

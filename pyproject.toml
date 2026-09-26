@@ -12,7 +12,6 @@ dependencies = [
     # compatible with core 0.13.
     "llama-index-core>=0.13,<0.14",
     "llama-index-vector-stores-milvus>=0.7",
-    "llama-index-graph-stores-neo4j>=0.5",
     "llama-index-readers-file>=0.4",
     "llama-index-embeddings-openai-like>=0.1",
     "llama-index-llms-openai-like>=0.4",
@@ -34,7 +33,6 @@ dependencies = [
     # Storage clients
     "psycopg[binary,pool]>=3.2,<4",
     "pymilvus>=2.4,<3",
-    "neo4j>=5.27,<7",
     "python-igraph>=0.11,<0.12",
     "leidenalg>=0.10,<0.11",
     "minio>=7.2,<8",
