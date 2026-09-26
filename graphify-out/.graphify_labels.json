@@ -574,7 +574,6 @@
   "572": "test_nebula_only_branches.py",
   "573": "knowledge-base Hermes skill (routes to kb-llamaindex retrieval tools)",
   "574": "test_nullable_settings_params_carry_a_schema_description",
-  "575": "test_value_kind_families_partition_the_enumeration",
   "576": "Dedicated kb-ingest-merge queue",
   "577": "R7b legacy search cutover (BREAKING)",
   "578": "R1 two-tier model architecture",
