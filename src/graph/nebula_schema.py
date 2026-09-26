@@ -1,10 +1,9 @@
 """NebulaGraph schema for the KB graph (nGQL DDL).
 
-Mirrors the Neo4j model: `:__Entity__` -> tag `Entity`; typed rels ->
-same-named edge types.  Vectors (`er_vec`/`report_vec`) are intentionally
+Entities are tag `Entity` (type in its `label` property); entity-entity
+relations are edge `RELATED` (type in `rel_type`).  Vectors (`er_vec`/`report_vec`) are intentionally
 absent — they live in Milvus after Phase 3.  All statements are
-IF NOT EXISTS so `ensure_schema` is safe to re-run on every boot (matches
-the fail-open `ensure_*` DDL helpers in `src/graph/index.py`).
+IF NOT EXISTS so `ensure_schema` is safe to re-run on every boot.
 
 nGQL scoping note: tag/edge/index DDL is scoped to the currently selected
 graph space — a session must issue `USE <space>` before any `CREATE TAG` /
@@ -35,7 +34,7 @@ SPACE_DDL = (
 # succeeded on the session. Do NOT add CREATE SPACE or USE here.
 SCHEMA_DDL: list[str] = [
     # `label string DEFAULT ''` is intentional: the Phase-1 write adapter
-    # uses it to store the entity type (mirrors Neo4j's node label).
+    # uses it to store the entity type.
     # wiki_dirty/wiki_dirty_at/wiki_hash/wiki_synced_at/wiki_page_title/
     # wikibase_qid back the wiki-editor graph ops (nebula-wiki-ops design,
     # Design.1): dirty-flag bookkeeping (mark/select/clear) + article
@@ -67,8 +66,8 @@ SCHEMA_DDL: list[str] = [
     # for the risk-rise delta (written by the risk materialize before it
     # overwrites risk_score).
     "watched bool DEFAULT false, risk_score_prev double DEFAULT 0.0);",
-    # valid_from/valid_to are OPAQUE ISO date strings (or '') — matching the
-    # neo4j representation and what src/graph/merge.py emits. They were
+    # valid_from/valid_to are OPAQUE ISO date strings (or '') — what
+    # src/graph/merge.py emits. They were
     # originally (mistakenly) declared int, which crashed the write path on the
     # first relation carrying a real validity window (int('2026-01-15')); an
     # existing space is migrated int→string in ensure_schema.
@@ -113,13 +112,11 @@ SCHEMA_DDL: list[str] = [
     "CREATE TAG IF NOT EXISTS `ERVerdict` ("
     "er_key string, same bool DEFAULT false, updated int DEFAULT 0);",
     # NO index on `er_key`. Nothing ever read it: the Nebula path fetches
-    # by VID (`FETCH PROP ON ERVerdict "<vid>"`), and the `MATCH … WHERE
-    # v.key IN $keys` that needs one belongs to the Neo4j path, which
-    # uses its own constraint. It was maintained on every write for no
+    # by VID (`FETCH PROP ON ERVerdict "<vid>"`). It was maintained on every write for no
     # reader. Do not add it back without a query that uses it — and note
     # that re-adding it here is what silently undid the first attempt to
     # DROP it, because `ensure_schema` runs on every `build_graph_store`.
-    # Arc-2 monitor findings (mirrors the neo4j `:Alert {key,...}` node). VID =
+    # Arc-2 monitor findings (`Alert {alert_key,...}`). VID =
     # alert_vid(key). score/updated_at are 0 for unscored (new_connection) alerts.
     "CREATE TAG IF NOT EXISTS `Alert` ("
     "alert_key string, kind string DEFAULT '', entity string DEFAULT '', "

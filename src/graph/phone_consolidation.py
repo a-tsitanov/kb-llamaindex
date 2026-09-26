@@ -39,7 +39,7 @@ def consolidate_phone_entities(
         emits its own PhoneNumber entities ("Телефон +7 (495)...",
         "Горячая линия 8-800-...").
 
-    Both end up as separate Neo4j nodes because they have different
+    Both end up as separate graph vertices because they have different
     names.  This helper parses digits via libphonenumber, builds a
     canonical E.164, and merges every PhoneNumber entity whose
     digits resolve to the same canonical into one.
@@ -172,7 +172,7 @@ def consolidate_phone_entities(
 
     # Build name_map (old → canonical) so the caller can rewrite
     # chunk-level KG_NODES_KEY metadata.  Without this rewrite,
-    # PropertyGraphIndex creates Neo4j nodes from the chunks'
+    # the graph write creates vertices from the chunks'
     # original names (e.g. "Телефон +7 (495)...") parallel to the
     # canonical ones we just upserted — producing duplicates again.
     phone_name_map: dict[str, str] = {

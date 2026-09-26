@@ -43,8 +43,8 @@ class CommunityWriteback(Protocol):
 
 class NebulaCommunityWriteback:
     """nGQL community BUILD write-back. INSERT is upsert-by-VID; both call
-    sites prune before merge, so INSERT-overwrite == neo4j MERGE+FOREACH on a
-    fresh node (no divergence). `report_vec` is never written to the vertex
+    sites prune before merge, so INSERT-overwrite always lands on a fresh
+    vertex. `report_vec` is never written to the vertex
     (it lives in Milvus). Values are inline-quoted (nebula binds no params)."""
 
     def __init__(self, store: Any):
@@ -79,8 +79,7 @@ class NebulaCommunityWriteback:
         # No stale-clear needed: both call sites prune (prune_level/prune_all
         # via DELETE VERTEX ... WITH EDGE) BEFORE merge, so the community vertex
         # is fresh with no incoming IN_COMMUNITY edges — the design's central
-        # prune-before-merge invariant. (neo4j's MERGE clears stale inline;
-        # prune-first makes that redundant on nebula, and avoids a fragile
+        # prune-before-merge invariant. (Prune-first avoids a fragile
         # GO|DELETE pipe on the main write path.)
         if not members:
             return

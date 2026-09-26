@@ -350,9 +350,7 @@ async def detect_hierarchy(
 
     if settings.temporal.community_backend == "graphscope":
         # graphscope is single-level only; hierarchical detection has no
-        # graphscope implementation.  Previously this fell through to the
-        # (Neo4j-only) GDS path, which failed and yielded [] — kept as an
-        # explicit fail-safe no-op.
+        # graphscope implementation — an explicit fail-safe no-op.
         logger.error(
             "communities: hierarchy detection is unavailable on the graphscope "
             "backend (single-level only)",

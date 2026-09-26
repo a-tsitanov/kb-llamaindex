@@ -21,7 +21,7 @@ from loguru import logger
 
 from src.analytics.ids import ID_TYPES
 
-# defensive cap on var-len path enumeration under nebula (neo4j has none; a
+# defensive cap on var-len path enumeration under nebula (a
 # circular-ownership red flag is rare, so this only guards pathological graphs).
 _CYCLE_SCAN_CAP = 10000
 

@@ -70,7 +70,7 @@ async def refresh_nebula_stats(store: Any | None) -> dict:
     raising, like the rest of this module.
     """
     if store is None:
-        return {"submitted": False, "reason": "not a nebula store"}
+        return {"submitted": False, "reason": "no store"}
     try:
         rows = await asyncio.to_thread(store.structured_query, "SUBMIT JOB STATS")
     except Exception as exc:

@@ -4,7 +4,7 @@ Produces the SAME ``rows`` shape as the GDS path
 (``[{name, communityId, ids}]``, ``ids`` finest->coarsest) so
 ``communities._coarsest_from_rows`` / ``_group_by_levels`` and all
 :Community persistence are reused unchanged.  Memory lives in the worker
-process, not Neo4j's JVM heap.
+process, not in the graph database.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ def extract_entity_edges(
     edges = exp.stream_edges(batch_size=batch_size, names=names)
 
     logger.info(
-        "community_leiden: streamed {e} edges / {n} entities from Neo4j",
+        "community_leiden: streamed {e} edges / {n} entities from the graph store",
         e=len(edges), n=len(names),
     )
     return edges, names

@@ -14,8 +14,8 @@ to feed our universal `EntityType` taxonomy into `{entity_types}`:
     one relation) and returns one coherent summary.
 
 Why an algorithmic port instead of a dependency: we keep our
-multi-label LlamaIndex / PropertyGraphIndex Neo4j schema (typed
-entity labels + semantic relation types) instead of LightRAG's
+typed graph schema (entity type in the ``label`` property + semantic
+relation type in ``RELATED.rel_type``) instead of LightRAG's
 single-label `:base` + `:DIRECTED` model.  See
 `docs/ARCHITECTURE.md` for the trade-off and the data-model
 mismatch that drove this decision.

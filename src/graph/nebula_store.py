@@ -197,8 +197,7 @@ class NebulaGraphStore:
             )
 
     def upsert_relations(self, relations: list[Any]) -> None:
-        # Neo4j allows dynamic relationship types; Nebula needs declared
-        # edge types. Entity-entity relations all become `RELATED`, with
+        # Nebula needs declared edge types. Entity-entity relations all become `RELATED`, with
         # the original type stored in the `rel_type` PROPERTY (a value,
         # so no edge-identifier injection). See ADR / Phase-2 spec.
         for chunk in _chunks(relations, settings.nebula.write_batch_size):

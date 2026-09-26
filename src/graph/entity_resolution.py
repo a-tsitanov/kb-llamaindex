@@ -15,7 +15,8 @@ Algorithm — embedding-blocked, LLM-confirmed:
 
   1. Filter eligible labels (drop deterministic identifiers —
      Phone/Email/INN/etc. already canonicalised).
-  2. (incremental) Load canonical entities + embeddings from Neo4j.
+  2. (incremental) Load stored canonical entities + embeddings (Milvus
+     EntityVectorStore kNN on the ingest path).
   3. Compute embeddings for new entities (single batched call).
   4. Deterministic pre-pass — initialism regex, exact-normalised
      after stripping diacritics / punctuation.
@@ -69,7 +70,7 @@ from src.retrieval._common import strip_thinking
 
 
 # These types already have a deterministic canonical form produced
-# by `src/ingestion/identifiers.py` and injected into Neo4j by
+# by `src/ingestion/identifiers.py` and injected into the graph by
 # `inject_canonical_entities`.  Re-running ER on them risks
 # collapsing two genuinely different identifiers that happen to
 # embed close (e.g. two different phone numbers in the same area).
@@ -176,15 +177,17 @@ class ERConfig:
 
     use_native_vector_knn: bool = False
     """Opt-in: replace the bounded ``incremental_window`` load + Python
-    brute-force candidate gen with a native Neo4j vector-index kNN per
-    new entity (``er_vec`` list property + ``er_embedding_vec`` index).
+    brute-force candidate gen with a whole-graph vector kNN per new
+    entity.  With a ``vector_store`` passed to ``resolve_entities`` (the
+    ingest path always passes the Milvus ``EntityVectorStore``) the kNN
+    runs there; without one it falls back to ``_load_candidates_native``,
+    whose Cypher vector-index query the Nebula store does not execute
+    (it degrades to ``[]`` → within-batch ER only).
     Removes the window ceiling entirely — measured on a synthetic 200k
     graph the mention_count window reaches only ~2 % of true nearest
     canonicals, native kNN ~96 % at ~6 ms/query (see
-    ``tests/eval/scale/bench_er_native``).  Requires the backfill
-    (``scripts/backfill_er_vector.py``) to have populated ``er_vec`` on
-    existing entities and built the index.  Default off — flip only after
-    backfill."""
+    ``tests/eval/scale/bench_er_native``).  Default off here; the ingest
+    activities set it from ``settings.agent.er_use_native_vector_knn``."""
 
     vector_knn_k: int = 20
     """Neighbours fetched per new entity from the ER vector index when
@@ -192,11 +195,12 @@ class ERConfig:
 
     verdict_cache_enabled: bool = True
     """When True AND an `er_store` is passed to `resolve_entities`,
-    borderline LLM-judge verdicts are cached in Neo4j (label
-    `:ERVerdict`, keyed on the order-insensitive
-    `(label:norm)|(label:norm)` pair) so recurring name-pairs across
+    borderline LLM-judge verdicts are cached via ``build_er_graph_ops``
+    (Nebula tag `ERVerdict`, or Postgres when
+    ``er_verdict_cache_backend='postgres'``), keyed on the order-insensitive
+    `(label:norm)|(label:norm)` pair, so recurring name-pairs across
     re-ingests / hub-heavy docs skip the LLM.  The cache is OPTIONAL
-    and FAIL-SAFE: with no store (or any Neo4j error) ER falls back
+    and FAIL-SAFE: with no store (or any store error) ER falls back
     to pure LLM judging with byte-for-byte identical behaviour."""
 
 
@@ -782,9 +786,10 @@ def _parse_judge_response(raw: str, expected: int) -> list[bool]:
 # Borderline pairs are judged by an LLM every run; the same
 # `(name, label)` pairs recur across re-ingests and within hub-heavy
 # documents.  Caching `(norm_a, label_a, norm_b, label_b) -> SAME/
-# DIFFERENT` in Neo4j (`:ERVerdict {key, same}`) lets ER skip
+# DIFFERENT` via `build_er_graph_ops` (Nebula `ERVerdict {key, same}`
+# tag, or Postgres per `er_verdict_cache_backend`) lets ER skip
 # already-judged pairs.  Everything here is OPTIONAL and FAIL-SAFE:
-# with `store is None` (or any Neo4j error) the functions degrade to
+# with `store is None` (or any store error) the functions degrade to
 # no-ops and ER behaves exactly as pure LLM judging.
 
 
@@ -820,7 +825,7 @@ def _partition_cached(pairs, cache):
 
 
 def _load_verdict_cache(store, keys) -> dict[str, bool]:
-    """Fetch cached verdicts for `keys` from Neo4j.
+    """Fetch cached verdicts for `keys` from the graph store.
 
     Returns `{key -> same}`.  Empty (no-op) when `store is None`,
     `keys` is empty, or any query error — ER then judges everything.
@@ -835,7 +840,7 @@ def _load_verdict_cache(store, keys) -> dict[str, bool]:
 
 
 def _store_verdicts(store, entries: dict[str, bool]) -> None:
-    """Persist freshly-judged verdicts to Neo4j (`MERGE` by key).
+    """Persist freshly-judged verdicts to the graph store (upsert by key).
 
     No-op when `store is None` or `entries` is empty.  Any query
     error is logged and swallowed — caching is best-effort and must
@@ -856,11 +861,11 @@ def _pick_canonical(cluster_items: list[_Item], cfg: ERConfig) -> _Item:
     """Pick the canonical entity for a cluster.
 
     Priority order:
-      1. `source == "stored"` — entities already in Neo4j from
+      1. `source == "stored"` — entities already in the graph from
          previous ingests ALWAYS win.  This prevents orphan nodes:
          if a new entity has higher mention_count than the stored
          one, picking it as canonical would create a brand-new
-         Neo4j node and leave the old one as a dangling alias.
+         graph node and leave the old one as a dangling alias.
       2. Within the same source class: max mention_count.
       3. Tiebreak: longest name (more specific).
       4. Tiebreak: Cyrillic surface form preferred when language=Russian.
@@ -966,8 +971,8 @@ def _apply_name_map(
     # (Relation.source_id / target_id) reference entities by NAME.
     # PropertyGraphIndex MERGEs entities by id (= name) and resolves
     # relations the same way — if a per-chunk Relation still points
-    # at a pre-canonical name, Neo4j creates a phantom :Chunk node
-    # with that name as id.  Rewrite both so the chunk-level KG state
+    # at a pre-canonical name, the graph write creates a phantom
+    # node with that name as id.  Rewrite both so the chunk-level KG state
     # is consistent with the merged-relations output.
     for node in nodes:
         meta = node.metadata or {}
@@ -1008,8 +1013,8 @@ def _apply_name_map(
         # Rewrite endpoints to canonical names BEFORE dedup-key
         # construction.  Without this the merged-relations list that
         # gets `graph_store.upsert_relations`'d still points at the
-        # pre-canonical names, which makes Neo4j create phantom
-        # :Chunk nodes for those missing entity ids.
+        # pre-canonical names, which creates phantom nodes for
+        # those missing entity ids.
         src_norm = _normalize_entity_name(str(rel.source_id))
         tgt_norm = _normalize_entity_name(str(rel.target_id))
         src_can = name_map.get(src_norm)
@@ -1107,22 +1112,23 @@ async def _load_existing_canonicals(
     *,
     limit: int = 5000,
 ) -> list[_Item]:
-    """Read Neo4j entities with `er_canonical_name` and their stored
+    """Read stored entities with `er_canonical_name` and their stored
     embedding.  Returns empty when graph_store is None or any error
     occurs (incremental ER is best-effort — without it we still do
     within-batch ER).
 
     The result is ordered by ``mention_count DESC`` so that, when the
     graph has more canonicals than ``limit``, the window always contains
-    the most-mentioned (hub) entities rather than an arbitrary Neo4j
+    the most-mentioned (hub) entities rather than an arbitrary
     slice — the difference between a new mention reliably matching a
     frequent entity and silently fragmenting into a duplicate.
     """
     if graph_store is None:
         return []
     try:
-        # `structured_query` is a generic Cypher entry on the
-        # PropertyGraphStore base.  Available on Neo4jPGStore.
+        # `structured_query` is the generic query entry on the
+        # PropertyGraphStore base.  The Nebula store rejects param_map
+        # (NotImplementedError) → caught below → [] (within-batch ER).
         rows = await asyncio.to_thread(
             graph_store.structured_query,
             """
@@ -1183,7 +1189,9 @@ async def _load_candidates_native(
     nearest stored canonicals — across the WHOLE graph, no window — and
     returns the deduplicated union as stored ``_Item``s.  Best-effort:
     returns ``[]`` (→ within-batch ER only) when the store is missing or
-    every query errors (e.g. index not built yet — run the backfill).
+    every query errors — which is always the case on the Nebula store
+    (it rejects ``param_map`` and has no such index); ingest routes kNN
+    through ``_load_candidates_via_store`` (Milvus) instead.
     """
     if graph_store is None:
         return []
@@ -1289,8 +1297,8 @@ async def resolve_entities(
         carries the consolidated description plus `aliases`,
         `er_canonical_name`, `er_embedding` properties.
       * `resolved_relations`: relations with self-loops dropped;
-        endpoint identities remain UUIDs (Neo4j merges by name
-        downstream via the rewritten chunk metadata).
+        endpoint identities remain UUIDs (the graph write merges by
+        name downstream via the rewritten chunk metadata).
       * `name_map`: `{old_normalised_name → canonical_name}` for
         each entity that got merged into another canonical.
 
@@ -1306,8 +1314,8 @@ async def resolve_entities(
       * `vector_store`: optional `EntityVectorStore` (see
         `src.graph.entity_vector_store`).  When `cfg.use_native_vector_knn`
         is on AND a `vector_store` is given, candidate kNN is routed
-        through it (`_load_candidates_via_store`) instead of the native
-        Neo4j index, and resolved canonicals are upserted back into it.
+        through it (`_load_candidates_via_store`) instead of the legacy
+        graph-index query, and resolved canonicals are upserted back into it.
         `vector_store=None` (the default) preserves today's behaviour
         exactly — native-index kNN via `_load_candidates_native`, or the
         bounded-window `_load_existing_canonicals` when native kNN is off.
@@ -1427,7 +1435,7 @@ async def resolve_entities(
         cache: dict[str, bool] = {}
         if cfg.verdict_cache_enabled and er_store is not None:
             keys = [_verdict_key(a, b) for a, b in judge_input]
-            # sync Neo4j read — off the loop.
+            # sync graph-store read — off the loop.
             cache = await asyncio.to_thread(_load_verdict_cache, er_store, keys)
         cached, uncached = _partition_cached(judge_input, cache)
         fresh = await _llm_judge_pairs(uncached, llm, cfg)
@@ -1436,7 +1444,7 @@ async def resolve_entities(
             vmap[id(p)] = v
         verdicts = [vmap[id(p)] for p in judge_input]
         if cfg.verdict_cache_enabled and er_store is not None:
-            # sync Neo4j write — off the loop.
+            # sync graph-store write — off the loop.
             await asyncio.to_thread(
                 _store_verdicts,
                 er_store,
@@ -1621,7 +1629,7 @@ async def resolve_entities(
     # doc2 stored 'АО «СтройИнвест', doc3 EN 'Stroyinvest Jsc' lands
     # and the LLM agrees all three are the same), the canonical
     # upsert only refreshes the surviving canonical node — the
-    # non-canonical stored node remains in Neo4j as an orphan with
+    # non-canonical stored node remains in the graph as an orphan with
     # its historical relations.  Repoint those edges onto the
     # canonical node and detach-delete the loser.
     if graph_store is not None and name_map:

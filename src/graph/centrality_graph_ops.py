@@ -48,8 +48,8 @@ class NebulaCentralityGraphOps:
 
         if metric not in _METRICS:  # guard the inlined column name
             return []
-        # nebula default is 0 (unset) — treat > 0 as materialised (neo4j uses
-        # IS NOT NULL; a 0-centrality entity never ranks in the top anyway).
+        # nebula default is 0 (unset) — treat > 0 as materialised (a
+        # 0-centrality entity never ranks in the top anyway).
         where = f"e.`Entity`.{metric} > 0"
         if type:
             where += f" AND e.`Entity`.label == {_q(type)}"

@@ -2,9 +2,8 @@
 """Milvus-backed CommunityReportVectorStore (collection `community_report_vec`).
 
 Direct pymilvus.MilvusClient (mirrors src/graph/entity_vector_store_milvus.py),
-separate from the entity/chunk collections. Used when NebulaGraph has no
-in-graph vector index for community reports, or opted into on Neo4j via
-settings.agent.community_vector_backend == "milvus".
+separate from the entity/chunk collections. NebulaGraph has no in-graph
+vector index, so community-report vectors always live here.
 """
 
 from __future__ import annotations

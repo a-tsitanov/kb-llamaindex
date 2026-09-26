@@ -1,13 +1,9 @@
-"""`PropertyGraphIndex` factory and KG extractor wiring.
+"""KG extractor wiring for the ingestion pipeline.
 
-Layers:
   * **Extractor** — typed `SchemaLLMPathExtractor` (default) or the
     looser `SimpleLLMPathExtractor` (fallback).  Schema mode emits
     typed entities + a `description` property per entity — the
     foundation of LightRAG-style rich semantic graphs.
-  * **Store** — the graph store handed in by the caller.
-  * **Index** — composes both; attached to the ingestion pipeline
-    alongside the vector index.
 
 Both extractors run an LLM internally — unit tests stub or mock.
 Live runs use the project LLM via LiteLLM proxy (qwen3:8b by
@@ -18,9 +14,6 @@ from __future__ import annotations
 
 from typing import Literal
 
-from llama_index.core import PropertyGraphIndex
-from llama_index.core.embeddings import BaseEmbedding
-from llama_index.core.graph_stores.types import PropertyGraphStore
 from llama_index.core.indices.property_graph import (
     SchemaLLMPathExtractor,
     SimpleLLMPathExtractor,
@@ -242,40 +235,3 @@ _MULTILINGUAL_TRIPLET_EXTRACT_PROMPT = (
     "Text: {text}\n"
     "Triplets:\n"
 )
-
-
-def build_property_graph_index(
-    *,
-    graph_store: PropertyGraphStore,
-    embed_model: BaseEmbedding,
-    extractor: SchemaLLMPathExtractor,
-    nodes: list | None = None,
-    llm: LLM | None = None,
-) -> PropertyGraphIndex:
-    """Compose a PropertyGraphIndex from store + embed + extractor.
-
-    Pass ``nodes`` to build from chunks (used in Stage 8 worker);
-    omit to attach to an existing populated store.
-
-    ``llm`` is threaded onto the index so the default retriever's
-    ``LLMSynonymRetriever`` uses the project (LiteLLM) model.  Without it
-    the index's ``llm`` is unset and ``as_retriever()`` falls back to
-    LlamaIndex's global ``Settings.llm`` (OpenAI), which crashes a
-    local-only deploy that has no ``OPENAI_API_KEY``.  Omit for the ingest
-    path (NoOp extractor, no retrieval) — only the retrieval paths need it.
-    """
-    if nodes is None:
-        return PropertyGraphIndex.from_existing(
-            property_graph_store=graph_store,
-            embed_model=embed_model,
-            kg_extractors=[extractor],
-            llm=llm,
-        )
-    return PropertyGraphIndex(
-        nodes=nodes,
-        property_graph_store=graph_store,
-        embed_model=embed_model,
-        kg_extractors=[extractor],
-        llm=llm,
-        show_progress=False,
-    )

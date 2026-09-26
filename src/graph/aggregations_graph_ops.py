@@ -84,8 +84,8 @@ def _list_literal(items: list[str]) -> str:
 
 class NebulaAggregationsGraphOps:
     """nGQL aggregations graph ops: plain ``MATCH``+aggregation (nebula
-    3.8's openCypher subset supports aggregation directly in ``MATCH``, so
-    these port near-verbatim from the neo4j Cypher — see the rules doc).
+    3.8's openCypher subset supports aggregation directly in ``MATCH`` —
+    see the rules doc).
     Values are inline-quoted (nebula binds no params — ``_q`` from
     ``nebula_store``). Every method is fail-soft via ``_nebula_fail_soft``."""
 
@@ -204,7 +204,7 @@ class NebulaAggregationsGraphOps:
 
         # nebula rejects a WHERE inside OPTIONAL MATCH ("Where clause in optional
         # match is not supported"), so use a plain MATCH with the non-negated
-        # filter. Divergence from neo4j's OPTIONAL MATCH: entities with zero
+        # filter. Consequence: entities with zero
         # non-negated edges are dropped — immaterial for top-N-by-degree (a
         # zero-degree entity never ranks).
         clauses = []

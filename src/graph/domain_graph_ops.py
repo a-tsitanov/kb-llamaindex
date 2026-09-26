@@ -4,9 +4,9 @@ communication intensity, read-only, fail-soft).
 ``NebulaDomainGraphOps`` implements the reads in nGQL per ``docs/superpowers/nebula-analytics-ngql-rules-2026-07-11.md``:
 - ``communication_stats``: near-verbatim MATCH (rel_type IN [...], undirected
   ``a.name < b.name`` dedup, count(*) per (a,b,rel) — cluster-verified).
-- ``issue_resolution_stats``: the neo4j query is a two-level aggregation
+- ``issue_resolution_stats``: the natural query is a two-level aggregation
   (``count(r)`` per issue, then ``count/sum`` over issues) with a WHERE inside
-  OPTIONAL MATCH — neither ports directly, so it runs two simple MATCH queries
+  OPTIONAL MATCH — nebula supports neither, so it runs two simple MATCH queries
   (all Issues; Issues with a non-negated RESOLVED_BY→Resolution) and computes
   total/unresolved in Python.
 Every method is fail-soft.
@@ -47,9 +47,9 @@ class NebulaDomainGraphOps:
 
     @_nebula_fail_soft
     def issue_resolution_stats(self) -> list[dict]:
-        # Two-level aggregation + WHERE-in-OPTIONAL don't port; run two simple
-        # queries and compute total/unresolved in Python (row shape matches the
-        # neo4j RETURN: [{total, unresolved}]).
+        # Two-level aggregation + WHERE-in-OPTIONAL are unsupported; run two
+        # simple queries and compute total/unresolved in Python (row shape:
+        # [{total, unresolved}]).
         total_rows = self._exec(
             "MATCH (i:`Entity`) WHERE i.`Entity`.label == 'Issue' RETURN count(*) AS total;"
         )

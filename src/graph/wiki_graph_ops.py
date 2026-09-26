@@ -56,10 +56,10 @@ class NebulaWikiGraphOps:
         for name in names:
             vid = entity_vid(name)
             # Per-name resilience: nebula UPDATE VERTEX RAISES on a missing
-            # vertex (neo4j MATCH...SET no-ops), and mark_dirty is called with
+            # vertex, and mark_dirty is called with
             # relation endpoints that may reference an ER-merged-away entity
             # with no live vertex. Catch per-name so one missing name doesn't
-            # abort the rest of the batch (matches neo4j's batch no-op-on-missing).
+            # abort the rest of the batch (missing names are a no-op).
             try:
                 self._store.structured_query(
                     f"UPDATE VERTEX ON `Entity` {_q(vid)} SET "

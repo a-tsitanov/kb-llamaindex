@@ -6,8 +6,8 @@ nebula graph node, so they degrade to [] via run_rows fail-soft (no nebula-speci
 logic to add).
 
 ``NebulaDynamicsGraphOps`` implements the reads in nGQL now that RELATED.valid_from/valid_to are STRING (see nebula_schema): near-
-verbatim MATCH with ``substr`` (neo4j ``substring``), ``r.rel_type`` (neo4j
-``type(r)``), and string range compares on the ISO validity window.
+verbatim MATCH with ``substr``, ``r.rel_type`` (the original relation type,
+stored as a property), and string range compares on the ISO validity window.
 
 Divergence (documented): whats_changed's third match branch — edges with NO
 validity window, surfaced by the E1 first-seen ``created_at`` fallback — cannot

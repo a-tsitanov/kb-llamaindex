@@ -10,9 +10,8 @@ event columns now carried on EventOrAction entities (see nebula_schema): FETCH b
 VID for the core, GO for actors, GO OVER PARTICIPATED_IN + Python window/sort for
 the timeline.
 
-Divergence: neo4j event_core RETURNs ``e.polarity``; entities carry no polarity
-column (it is an edge property), so nebula returns ``polarity=None`` — identical
-to neo4j, where a non-event-bearing entity has no such property.
+Note: event_core's ``polarity`` is always ``None`` — entities carry no polarity
+column (it is an edge property).
 """
 from __future__ import annotations
 
@@ -158,7 +157,7 @@ class NebulaEventsLlmGraphOps:
         for row in events.values():
             start = int(row.get("event_start_epoch") or 0)
             # coalesce(event_start_epoch, created_at*86400): a 0/untimed event is
-            # kept (neo4j's null passes the >= filter, sorted untimed-last too);
+            # kept (sorted untimed-last);
             # a timed event before the window is dropped.
             if since_secs is not None and start and start < since_secs:
                 continue
@@ -170,8 +169,7 @@ class NebulaEventsLlmGraphOps:
                 "event_end_epoch": row.get("event_end_epoch"),
                 "event_ts_precision": row.get("event_ts_precision"),
             })
-        # untimed (start 0) last, then event_start_epoch desc — mirrors the neo4j
-        # `ORDER BY event_start_epoch IS NULL, event_start_epoch DESC`.
+        # untimed (start 0) last, then event_start_epoch desc.
         out.sort(key=lambda r: (int(r["event_start_epoch"] or 0) == 0,
                                 -int(r["event_start_epoch"] or 0)))
         return out[:top_n]

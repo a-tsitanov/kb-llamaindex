@@ -322,9 +322,8 @@ class NebulaAnalyticsGraphOps:
         # priority than the per-entity reads above). No dedicated `label`
         # index exists on `Entity` (only `name`/`wiki_dirty` are indexed);
         # LOOKUP falls back to a full `Entity` tag-scan filtered
-        # server-side by the WHERE predicate — the same O(entities)
-        # asymptotic cost as neo4j's own graph-wide
-        # ``MATCH (id:__Entity__) WHERE any(labels...)`` scan. GO/FETCH
+        # server-side by the WHERE predicate — O(entities), i.e. a
+        # graph-wide scan. GO/FETCH
         # calls are chunked (``_SHARED_ID_BATCH``) to bound round-trips.
         from src.graph.nebula_store import _chunks, _q
 

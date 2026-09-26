@@ -13,7 +13,7 @@ and rejects a WHERE inside OPTIONAL MATCH). Every method is fail-soft.
 Divergences under nebula (documented, minor):
 - ``contradictions``: ``RELATED`` has no ``source_chunks`` column, so
   ``affirmed_chunks``/``negated_chunks`` come back empty (detection still
-  works); neo4j ``valid_from IS NULL`` (open window) maps to ``== 0`` since
+  works); an open window (no ``valid_from``) is the empty/zero default since
   nebula edge props are non-nullable; the ``id(r1)<id(r2)`` ordering guard is
   dropped (the affirmed/negated polarity asymmetry already prevents the
   self/duplicate pairing).

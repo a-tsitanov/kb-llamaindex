@@ -4,10 +4,9 @@ relations) AND the entity's source-document id set — so a NEW source
 document also regenerates the article — but NOT the QID, page title, or
 citation text, so the article is regenerated exactly when those change.
 
-Reads route through the backend-dispatched ``WikiGraphOps`` seam
-(``src/graph/wiki_graph_ops.py``) so the same call works under both neo4j
-(byte-for-byte unchanged Cypher) and nebula (nGQL; citations/source-docs
-are chunk-dependent and return ``[]`` under nebula)."""
+Reads route through the ``WikiGraphOps`` seam
+(``src/graph/wiki_graph_ops.py``) in nGQL; citations/source-docs are
+chunk-dependent and return ``[]`` on the Nebula graph."""
 from __future__ import annotations
 
 import hashlib

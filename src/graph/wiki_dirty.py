@@ -1,8 +1,7 @@
-"""Dirty-flag bookkeeping for the wiki editor (Neo4j __Entity__ props).
+"""Dirty-flag bookkeeping for the wiki editor (Nebula ``Entity`` props).
 
-Routes through the backend-dispatched ``WikiGraphOps`` seam
-(``src/graph/wiki_graph_ops.py``) so the same call works under both neo4j
-(byte-for-byte unchanged Cypher) and nebula (nGQL)."""
+Routes through the ``WikiGraphOps`` seam (``src/graph/wiki_graph_ops.py``),
+which issues nGQL against the Nebula store."""
 from __future__ import annotations
 
 from src.graph.wiki_graph_ops import build_wiki_graph_ops

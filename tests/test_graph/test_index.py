@@ -116,30 +116,6 @@ def test_simple_mode_custom_extract_prompt_overrides_default() -> None:
     assert "EXTRACT:" in extractor.extract_prompt.get_template()
 
 
-def test_build_property_graph_index_threads_llm(monkeypatch):
-    # The index's llm must be the project (LiteLLM) model so the default
-    # retriever's LLMSynonymRetriever doesn't fall back to Settings.llm
-    # (OpenAI) — which crashes a local-only deploy with no OPENAI_API_KEY.
-    import src.graph.index as idx
-
-    captured: dict = {}
-
-    class _FakePGI:
-        @classmethod
-        def from_existing(cls, **kw):
-            captured.update(kw)
-            return "idx"
-
-    monkeypatch.setattr(idx, "PropertyGraphIndex", _FakePGI)
-    sentinel = object()
-    out = idx.build_property_graph_index(
-        graph_store=object(), embed_model=object(),
-        extractor=object(), nodes=None, llm=sentinel,
-    )
-    assert out == "idx"
-    assert captured["llm"] is sentinel
-
-
 def test_neo4j_ddl_helpers_removed():
     # Nebula's indexes are created by nebula_schema.ensure_schema; the legacy
     # neo4j `CREATE [FULLTEXT|VECTOR] INDEX` helpers (and the decorator that
@@ -158,5 +134,8 @@ def test_neo4j_ddl_helpers_removed():
         "ENTITY_FULLTEXT_INDEX_CYPHER",
         "ER_VECTOR_INDEX_CYPHER",
         "COMMUNITY_REPORT_VECTOR_INDEX_CYPHER",
+        # Uncalled PropertyGraphIndex factory (ingest writes via the
+        # Nebula store directly; retrieval builds its own retrievers).
+        "build_property_graph_index",
     ):
         assert not hasattr(idx, name), name

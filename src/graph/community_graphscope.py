@@ -1,7 +1,7 @@
 """GraphScope community-detection backend (single-level Leiden, distributed).
 
 Mirrors community_leiden.py's single-level entry, but runs on GraphScope so
-detection scales off single-machine igraph / off Neo4j's GDS heap. The ONLY
+detection scales off single-machine igraph. The ONLY
 GraphScope-touching code is `_run_graphscope_community`; everything else is
 pure and unit-testable by mocking it. Selected via community_backend='graphscope'.
 """
