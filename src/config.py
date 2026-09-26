@@ -109,58 +109,9 @@ class MilvusSettings(BaseSettings):
         return f"http://{self.host}:{self.port}"
 
 
-class Neo4jSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="NEO4J_", env_file=".env", extra="ignore")
-
-    uri: str = "bolt://localhost:7687"
-    user: str = "neo4j"
-    password: SecretStr = SecretStr("changeme")
-    database: str = "neo4j"
-
-    # Bolt-driver connection pool (src/graph/store.py, Track A2).  The
-    # store is now cached once per process, so this is the pool shared by
-    # every activity in that process — size it to the worker's activity
-    # concurrency, not 1-per-call.  acquisition timeout bounds the wait
-    # for a free pooled connection; connection timeout bounds the TCP
-    # connect.  Both seconds.
-    max_connection_pool_size: int = Field(default=16, ge=1)
-    connection_acquisition_timeout_s: float = 60.0
-    connection_timeout_s: float = 30.0
-
-    # Bounded retry for transient write errors (src/graph/write_retry.py,
-    # Track A3): concurrent MERGE into shared hub nodes throws a retryable
-    # Neo.TransientError (deadlock / lock-acquisition timeout); re-run the
-    # write a few times with backoff instead of failing the document.
-    write_retry_max_attempts: int = Field(default=5, ge=1)
-    write_retry_base_delay_s: float = 0.05
-
-    # Debug toggle: log EVERY Cypher this process sends to Neo4j — one INFO
-    # line per query (collapsed/truncated Cypher, param KEYS only, row
-    # count, elapsed ms).  Off by default; flip on (NEO4J_QUERY_LOG=true) to
-    # confirm/inspect the graph queries the search path issues without
-    # touching Neo4j's own query.log.  Wrapper in src/graph/store.py.
-    query_log: bool = False
-
-
-class GraphSettings(BaseSettings):
-    """Which graph backend the store factory builds.
-
-    Strangler seam for the Neo4j -> NebulaGraph migration: every graph
-    caller goes through ``src.graph.store.build_graph_store()`` which
-    dispatches on this.  Default stays "neo4j" until per-workload parity
-    benchmarks pass (project policy: benchmark before adopting — mirrors
-    ``community_backend``)."""
-
-    model_config = SettingsConfigDict(env_prefix="GRAPH_", env_file=".env", extra="ignore")
-
-    backend: Literal["neo4j", "nebula"] = "nebula"
-
-
 class NebulaSettings(BaseSettings):
-    """Connection to the NebulaGraph cluster (Phase 1+ write path).
-
-    Mirrors ``Neo4jSettings``'s shape — same fields, NebulaGraph's own
-    defaults (graphd port 9669, root/nebula, single space "kb")."""
+    """Connection to the NebulaGraph cluster — the only graph backend
+    (graphd port 9669, root/nebula, single space "kb")."""
 
     model_config = SettingsConfigDict(env_prefix="NEBULA_", env_file=".env", extra="ignore")
 
@@ -1277,14 +1228,6 @@ class Settings(BaseSettings):
         return MilvusSettings()
 
     @cached_property
-    def neo4j(self) -> Neo4jSettings:
-        return Neo4jSettings()
-
-    @cached_property
-    def graph(self) -> GraphSettings:
-        return GraphSettings()
-
-    @cached_property
     def nebula(self) -> NebulaSettings:
         return NebulaSettings()
 
@@ -1385,7 +1328,6 @@ class Settings(BaseSettings):
                     "API_KEYS contains a placeholder/default key; set real key(s) in production."
                 )
             checks = {
-                "NEO4J_PASSWORD": s.neo4j.password.get_secret_value(),
                 "POSTGRES_PASSWORD": s.postgres.password.get_secret_value(),
                 "MINIO_ACCESS_KEY": s.minio.access_key.get_secret_value(),
                 "MINIO_SECRET_KEY": s.minio.secret_key.get_secret_value(),
@@ -1436,7 +1378,6 @@ __all__ = [
     "MilvusSettings",
     "MinioSettings",
     "MonitorSettings",
-    "Neo4jSettings",
     "PostgresSettings",
     "Settings",
     "SignalsSettings",

@@ -1,4 +1,4 @@
-"""`inject_canonical` — write canonical identifier entities to Neo4j."""
+"""`inject_canonical` — write canonical identifier entities to the graph."""
 
 from __future__ import annotations
 
@@ -8,13 +8,12 @@ from loguru import logger
 from temporalio import activity
 
 from src.graph.store import build_graph_store
-from src.graph.write_retry import write_with_retry
 from src.ingestion.identifier_transform import inject_canonical_entities
 from src.workflow.contracts import Injected, Parsed
 from src.workflow.heartbeat import heartbeat_every
 from src.workflow.staging import build_staging_store
 
-# Pulse interval for the blocking Neo4j upsert. Must stay well under the
+# Pulse interval for the blocking graph upsert. Must stay well under the
 # activity's heartbeat_timeout (2m in document_ingest.py).
 _HEARTBEAT_INTERVAL_S = 60.0
 
@@ -40,10 +39,7 @@ async def inject_canonical(parsed: Parsed) -> Injected:
         _HEARTBEAT_INTERVAL_S, {"stage": "injecting", "chunks": len(nodes)}
     ):
         graph_store = await asyncio.to_thread(build_graph_store)
-        # Retry transient hub-node lock/deadlock errors (see write_retry).
-        await asyncio.to_thread(
-            write_with_retry, inject_canonical_entities, graph_store, nodes
-        )
+        await asyncio.to_thread(inject_canonical_entities, graph_store, nodes)
     activity.heartbeat({"stage": "injected", "chunks": len(nodes)})
 
     logger.info(

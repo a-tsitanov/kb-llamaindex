@@ -41,7 +41,6 @@ async def test_trust_conflicts_are_resolved_and_logged_when_policy_configured(
 
     monkeypatch.setattr(settings.signals, "source_trust", {"news": 0.2})
     monkeypatch.setattr(settings.signals, "source_trust_default", 0.5)
-    monkeypatch.setattr(settings.graph, "backend", "nebula")
 
     n = MagicMock(node_id="a")
     n.metadata = {}
@@ -93,3 +92,56 @@ async def test_trust_conflicts_are_resolved_and_logged_when_policy_configured(
     assert recorded[0][0]["winner"] == "stored"
     assert recorded[0][0]["new_polarity"] == "negated"
     assert recorded[0][0]["new_doc_id"] == "doc-new"
+
+
+def test_build_property_graph_writes_without_retry_wrapper():
+    # importlib, not ``import ... as``: the package re-exports the activity
+    # FUNCTION under the same name, so ``import a.b.c as m`` binds the function.
+    import importlib
+
+    bpg = importlib.import_module("src.workflow.activities.build_property_graph")
+    assert not hasattr(bpg, "write_with_retry")
+
+
+@pytest.mark.asyncio
+async def test_build_property_graph_upserts_entities_and_relations(monkeypatch):
+    """R8: the nebula store receives exactly the staged entities/relations and
+    the activity reports their counts."""
+    from types import SimpleNamespace
+
+    from src.config import settings
+
+    monkeypatch.setattr(settings.signals, "source_trust", {})
+    monkeypatch.setattr(settings.events, "first_seen_enabled", False)
+
+    e1 = SimpleNamespace(id="id-a", name="Иванов")
+    e2 = SimpleNamespace(id="id-b", name="ООО Ромашка")
+    rel = SimpleNamespace(
+        source_id="id-a", target_id="id-b", label="WORKS_AT", properties={},
+    )
+    n = MagicMock(node_id="c1")
+    n.metadata = {}
+    staging = MagicMock()
+    staging.read_pickle.return_value = ([e1, e2], [rel], [n])
+    graph_store = MagicMock()
+
+    ctx = Ctx(doc_id="d1", local_path="/x", cleanup_dir=None, workflow_run_id="r")
+    parsed = Parsed(ctx=ctx, nodes_uri="s3://kb-staging/r/parsed.pkl", chunk_count=1)
+    kg = KGExtracted(parsed=parsed, nodes_with_kg_uri="s3://kb-staging/r/kg.pkl")
+    merged = Merged(kg=kg, merged_entities_uri="s3://kb-staging/r/merged.pkl")
+
+    with patch(
+        "src.workflow.activities.build_property_graph.build_staging_store",
+        return_value=staging,
+    ), patch(
+        "src.workflow.activities.build_property_graph.build_graph_store",
+        return_value=graph_store,
+    ), patch(
+        "src.workflow.activities.build_property_graph.activity"
+    ):
+        out = await build_property_graph(merged)
+
+    graph_store.upsert_nodes.assert_called_once_with([e1, e2])
+    graph_store.upsert_relations.assert_called_once_with([rel])
+    assert out.entities == 2
+    assert out.relations == 1

@@ -46,13 +46,11 @@ def _graph_half(ops):
 
 
 def test_dispatch_returns_nebula_when_backend_nebula(monkeypatch):
-    monkeypatch.setattr(ego.settings.graph, "backend", "nebula")
     ops = ego.build_er_graph_ops(_RecStore())
     assert isinstance(_graph_half(ops), ego.NebulaERGraphOps)
 
 
 def test_dispatch_sends_the_verdict_cache_to_postgres_by_default(monkeypatch):
-    monkeypatch.setattr(ego.settings.graph, "backend", "nebula")
     monkeypatch.setattr(
         ego.settings.agent, "er_verdict_cache_backend", "postgres", raising=False,
     )

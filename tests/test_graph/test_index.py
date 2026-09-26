@@ -153,7 +153,6 @@ def test_ensure_indexes_skip_under_nebula(monkeypatch):
     # (nebula uses TAG INDEX, created by nebula_schema.ensure_schema). The
     # ensure_* helpers must early-return under nebula, NOT fire neo4j DDL —
     # else every search/ingest bootstrap spams fail-open warnings.
-    monkeypatch.setattr(settings.graph, "backend", "nebula")
 
     class _CountingStore:
         def __init__(self):

@@ -1,11 +1,9 @@
 """The graph-store surface the app actually uses.
 
 A narrow subset of LlamaIndex's ``PropertyGraphStore`` — the three methods
-every graph caller funnels through.  Any backend (Neo4j today, NebulaGraph
-after the migration) that structurally satisfies this Protocol can be
-returned by ``src.graph.store.build_graph_store()``.  Keeping the seam this
-small is what makes the strangler migration a per-method job, not a
-per-call-site one.
+every graph caller funnels through.  ``src.graph.store.build_graph_store()``
+returns the NebulaGraph store, which structurally satisfies this Protocol.
+Keeping the seam this small keeps callers independent of the store class.
 """
 
 from __future__ import annotations

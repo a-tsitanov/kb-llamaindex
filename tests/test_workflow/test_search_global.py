@@ -652,7 +652,6 @@ class _FakeReportVecStore:
 
 
 def test_descent_root_nebula_reads_tree_and_attaches_milvus_vecs(monkeypatch):
-    monkeypatch.setattr(settings.graph, "backend", "nebula")
     store = _FakeNebulaStore(canned=[
         ("MATCH (c:`Community`)", [
             {"community_id": "1", "level": 0, "summary": "with-vec"},
@@ -671,7 +670,6 @@ def test_descent_root_nebula_reads_tree_and_attaches_milvus_vecs(monkeypatch):
 
 
 def test_descent_children_nebula_go_parent_of(monkeypatch):
-    monkeypatch.setattr(settings.graph, "backend", "nebula")
     store = _FakeNebulaStore(canned=[
         ("OVER `PARENT_OF`", [{"child": "childvid"}]),
         ("FETCH PROP ON `Community`", [{"community_id": "9", "level": 1, "summary": "child"}]),
@@ -687,7 +685,6 @@ def test_descent_children_nebula_go_parent_of(monkeypatch):
 
 
 def test_attach_report_vecs_nebula_empty_when_no_fetch(monkeypatch):
-    monkeypatch.setattr(settings.graph, "backend", "nebula")
 
     class _NoFetch:
         pass

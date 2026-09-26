@@ -9,7 +9,6 @@ from loguru import logger
 from temporalio import activity
 
 from src.graph.store import build_graph_store
-from src.graph.write_retry import write_with_retry
 from src.workflow.contracts import GraphBuilt, Merged
 from src.workflow.heartbeat import heartbeat_every
 from src.workflow.staging import build_staging_store
@@ -109,11 +108,8 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
 
         activity.heartbeat({"stage": "index_built"})
 
-        # Wrap in write_with_retry: concurrent MERGE into shared hub nodes can
-        # throw a retryable Neo.TransientError (deadlock / lock timeout) under
-        # max_inflight>1 — re-run the write instead of failing the document.
         if entities:
-            await asyncio.to_thread(write_with_retry, graph_store.upsert_nodes, entities)
+            await asyncio.to_thread(graph_store.upsert_nodes, entities)
             activity.heartbeat({"stage": "entities_upserted", "count": len(entities)})
         # Trust-based conflict resolution: read what the graph already believes
         # about this batch's pairs and let the more credible source keep the
@@ -144,7 +140,7 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
             )
 
         if relations:
-            await asyncio.to_thread(write_with_retry, graph_store.upsert_relations, relations)
+            await asyncio.to_thread(graph_store.upsert_relations, relations)
             activity.heartbeat({"stage": "relations_upserted", "count": len(relations)})
 
         if edge_conflicts:

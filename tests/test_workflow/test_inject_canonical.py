@@ -38,7 +38,7 @@ async def test_calls_inject_with_loaded_nodes():
 
 @pytest.mark.asyncio
 async def test_store_built_off_the_event_loop():
-    """Regression: build_neo4j_graph_store() does blocking driver I/O +
+    """Regression: build_graph_store() does blocking driver I/O +
     takes a process-global lock; calling it ON the event loop froze the
     heartbeat_every pulser under contention → timeout_type_heartbeat. It
     must run in a worker thread (asyncio.to_thread), not on the loop."""

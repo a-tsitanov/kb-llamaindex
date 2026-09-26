@@ -27,7 +27,7 @@ async def test_monitor_sweep_returns_disabled_when_off():
 
 @pytest.mark.asyncio
 async def test_monitor_watch_calls_mark_watched():
-    """POST /admin/monitor/watch patches mark_watched and build_neo4j_graph_store."""
+    """POST /admin/monitor/watch patches mark_watched and build_graph_store."""
     from src.api.main import app
 
     recorded: list = []

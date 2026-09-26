@@ -1,10 +1,8 @@
 """NebulaGraph implementation of the KbGraphStore seam (write path).
 
-Phase 1 scope: schema-aware writes (upsert_nodes/upsert_relations) + a raw
-nGQL passthrough (structured_query).  Cypher READ queries are translated in
-Phase 2; until then reads still run against Neo4j.  Process-global cache
-mirrors src/graph/store.py's Neo4j process-global store builder — one
-pooled client per process, thread-safe session use.
+Schema-aware writes (upsert_nodes/upsert_relations) + a raw nGQL
+passthrough (structured_query).  Process-global cache — one pooled client
+per process, thread-safe session use.
 """
 
 from __future__ import annotations
@@ -381,7 +379,7 @@ def _rows_to_dicts(resp: Any) -> list[dict]:
 
 
 def build_nebula_graph_store() -> NebulaGraphStore:
-    """Process-global NebulaGraph store (mirrors build_neo4j_graph_store).
+    """Process-global NebulaGraph store (one pool + session per process).
 
     The store is handed a ``reconnect`` closure so it can transparently
     re-acquire a session when graphd expires the cached one (idle timeout) —

@@ -22,7 +22,7 @@ def test_settings_defaults_load() -> None:
     from src.config import settings
 
     assert settings.milvus.collection == "kb_llamaindex"
-    assert settings.neo4j.uri.startswith("bolt://")
+    assert settings.nebula.port == 9669
     assert settings.postgres.db == "kb_llamaindex"
     assert settings.milvus.dim > 0
     assert settings.temporal.target.endswith(":7233")
