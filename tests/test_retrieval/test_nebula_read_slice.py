@@ -26,7 +26,16 @@ def test_for_store_builds_without_llamaindex_retriever():
     store = _FakeStore()
     r = GraphRetriever.for_store(store)
     assert r._graph_store is store
-    assert r._retriever is None
+    # The Neo4j-era PropertyGraphIndex path is gone, not merely unset.
+    for attr in ("_pg_index", "_retriever", "_retrievers"):
+        assert not hasattr(r, attr), attr
+
+
+def test_graph_retriever_module_has_no_pg_index_path():
+    import src.graph.retriever as gr
+
+    assert not hasattr(gr, "GRAPH_PATH_DEPTH_MAX")
+    assert not hasattr(gr, "PropertyGraphIndex")
 
 
 @pytest.mark.asyncio

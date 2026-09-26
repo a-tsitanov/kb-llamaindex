@@ -4,7 +4,8 @@ Under nebula ``aretrieve`` seeds entities (vector kNN + entity table) and
 subgraph-expands each one via ``awalk``; ``path_depth`` is the walk's hop
 count.  A fake store records the hops each ``subgraph`` call receives — no
 live store / LLM.  Asserts: the default depth is 1, a per-call depth reaches
-the walk, and out-of-range depths are clamped to ``[1, GRAPH_PATH_DEPTH_MAX]``.
+the walk, and out-of-range depths are clamped to ``[1, GRAPH_WALK_MAX_HOPS]``
+(the walk's own hop ceiling).
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import pytest
 
 from src.graph.nebula_store import entity_vid
 from src.graph.retriever import (
-    GRAPH_PATH_DEPTH_MAX,
+    GRAPH_WALK_MAX_HOPS,
     GraphRetriever,
     RoundGraphData,
 )
@@ -69,7 +70,7 @@ async def test_per_call_depth_reaches_walk(monkeypatch):
 async def test_depth_clamped_to_max(monkeypatch):
     store, r = _build(monkeypatch)
     await r.aretrieve("q", path_depth=99)
-    assert _hops(store) == [GRAPH_PATH_DEPTH_MAX]
+    assert _hops(store) == [GRAPH_WALK_MAX_HOPS]
 
 
 @pytest.mark.asyncio

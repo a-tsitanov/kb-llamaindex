@@ -5,9 +5,8 @@ Returns a ``RoundGraphData`` with structured ``entities`` and
 ``query_graph_data`` so dedup / accumulation logic ports
 directly.
 
-Implementation thin over LlamaIndex's PG retriever:
-  * Uses ``LLMSynonymRetriever`` from PropertyGraphIndex by default —
-    it normalises query terms via the LLM before traversing.
+Implementation over the NebulaGraph store (nGQL subgraph walks, seeded
+by Milvus entity kNN + the Postgres entity table):
   * Returns three things the agent cares about:
       - entity dicts (``entity_name``, ``entity_type``,
         ``description``);
@@ -21,7 +20,6 @@ import asyncio
 from dataclasses import dataclass, field
 from datetime import date
 
-from llama_index.core import PropertyGraphIndex
 from llama_index.core.schema import NodeWithScore
 from loguru import logger
 
@@ -35,11 +33,6 @@ from src.graph.nebula_store import entity_vid
 GRAPH_WALK_MAX_HOPS = 3
 GRAPH_WALK_NODE_CAP = 50
 GRAPH_WALK_EDGE_CAP = 100
-
-# Hard ceiling for the similarity-path retriever's ``path_depth`` (how
-# many triplet-hops of neighbours ``aretrieve`` pulls around each matched
-# entity). Bounds rel-map blow-up the same way the walk caps bound awalk.
-GRAPH_PATH_DEPTH_MAX = 3
 
 # ── relation polarity / temporal validity filtering (#8) ─────────────
 # merge.py stores a logical ``polarity`` (majority vote) and an opaque ISO
@@ -130,41 +123,21 @@ def _find_by_name_ngql(query: str, *, limit: int) -> str:
 
 
 class GraphRetriever:
-    """Async wrapper over ``PropertyGraphIndex.as_retriever``."""
+    """Async graph search over the NebulaGraph store (nGQL + Milvus kNN)."""
 
     def __init__(
         self,
-        pg_index: PropertyGraphIndex,
+        store,
         *,
         similarity_top_k: int = 10,
-        path_depth: int = 1,
-        include_text: bool = True,
         filter_polarity_temporal: bool = True,
     ) -> None:
-        self._pg_index = pg_index
+        self._graph_store = store
         self._similarity_top_k = similarity_top_k
-        self._include_text = include_text
-        self._default_path_depth = path_depth
         # #8: drop negated / expired relations from awalk results. Resolved
         # at construction (activity-runtime code) so it's snapshot-stable
         # for the life of the retriever; opt-out via AgentSettings.
         self._filter_polarity_temporal = filter_polarity_temporal
-        self._retriever = pg_index.as_retriever(
-            similarity_top_k=similarity_top_k,
-            path_depth=path_depth,
-            include_text=include_text,
-        )
-        # Lazily-built retrievers keyed by clamped path_depth so a
-        # per-call depth doesn't rebuild on every request. The default
-        # is pre-seeded. Construction is cheap (no LLM/vector I/O — that
-        # happens in ``aretrieve``).
-        self._retrievers: dict[int, object] = {path_depth: self._retriever}
-        # Underlying store handle for the bounded N-hop ``awalk`` (R3).
-        # None for stores that don't expose one — ``awalk`` degrades to
-        # empty.
-        self._graph_store = getattr(
-            pg_index, "property_graph_store", None,
-        )
 
     @classmethod
     def for_store(
@@ -174,28 +147,21 @@ class GraphRetriever:
         similarity_top_k: int = 10,
         filter_polarity_temporal: bool = True,
     ) -> GraphRetriever:
-        """Build a retriever backed only by a KbGraphStore (structured_query),
-        without a LlamaIndex PropertyGraphIndex. Used for the nebula backend:
-        awalk/afind_entities_by_name work over nGQL; the vector/synonym
-        `aretrieve` path is unavailable (Phase 3) and returns empty."""
-        r = cls.__new__(cls)
-        r._pg_index = None
-        r._retriever = None
-        r._retrievers = {}
-        r._similarity_top_k = similarity_top_k
-        r._include_text = True
-        r._default_path_depth = 1
-        r._filter_polarity_temporal = filter_polarity_temporal
-        r._graph_store = store
-        return r
+        """Build a retriever backed by a KbGraphStore (structured_query +
+        subgraph): awalk / afind_entities_by_name / aretrieve all run over
+        nGQL (aretrieve seeds via Milvus kNN + the entity table)."""
+        return cls(
+            store,
+            similarity_top_k=similarity_top_k,
+            filter_polarity_temporal=filter_polarity_temporal,
+        )
 
     async def aretrieve(
         self, query: str, *, path_depth: int | None = None,
     ) -> RoundGraphData:
         """Similarity retrieval over the KG. ``path_depth`` overrides how
-        many triplet-hops of neighbours are pulled around each matched
-        entity (None ⇒ the retriever's default, clamped ≤
-        ``GRAPH_PATH_DEPTH_MAX``)."""
+        many hops ``awalk`` expands around each matched entity (None ⇒ 1;
+        clamped to ``[1, GRAPH_WALK_MAX_HOPS]`` by the walk)."""
         return await self._aretrieve_nebula(query, path_depth)
 
     async def awalk(

@@ -38,7 +38,6 @@ class _FakeStore:
 def _retriever_with_store(store, *, filter_polarity_temporal=True):
     """Build a GraphRetriever without touching PropertyGraphIndex."""
     r = GraphRetriever.__new__(GraphRetriever)
-    r._retriever = None
     r._graph_store = store
     r._filter_polarity_temporal = filter_polarity_temporal
     return r
