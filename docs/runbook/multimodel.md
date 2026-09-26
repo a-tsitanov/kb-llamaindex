@@ -534,9 +534,9 @@ Milvus** (коллекция `entity_er_vec`, шов `EntityVectorStore`):
 (`AGENT_ER_VECTOR_KNN_K`, 20) ближайших канонических по **всему графу**. После
 ER разрешённые канонические upsert'ятся обратно в `entity_er_vec`.
 
-Легаси-загрузчик окна `_load_existing_canonicals` (Cypher, до 5000 по
-`mention_count`) остался только для `AGENT_ER_USE_NATIVE_VECTOR_KNN=false`; на
-NebulaGraph он деградирует до `[]` (ER только внутри батча). Подробнее —
+Легаси-источник окна `_load_existing_canonicals` (для
+`AGENT_ER_USE_NATIVE_VECTOR_KNN=false`) на NebulaGraph возвращает `[]` без
+запросов (ER только внутри батча). Подробнее —
 [`er-native-vector-knn.md`](er-native-vector-knn.md).
 
 ### 8.3 Когда сличение фактически произойдёт

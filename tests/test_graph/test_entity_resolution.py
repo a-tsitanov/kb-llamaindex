@@ -356,17 +356,28 @@ async def test_incremental_er_from_graph_store() -> None:
         ("BCC", "Базальноклеточный Рак"): True,
         ("Базальноклеточный Рак", "BCC"): True,
     })
-    graph_store = _GraphStoreStub(rows=[{
-        "name": "Базальноклеточный Рак",
-        "labels": ["__Entity__", "__Node__", "Concept"],
-        "er_embedding": json.dumps(stored_vec),
-        "mention_count": 10,
-        "description": "Существующая каноническая запись.",
-    }])
+    # Stored canonical arrives via the vector-store kNN (the ingest path);
+    # the graph-store window source yields nothing on Nebula.
+    class _VS:
+        def knn(self, vec, k):
+            return [{
+                "name": "Базальноклеточный Рак",
+                "label": "Concept",
+                "embedding": stored_vec,
+                "mention_count": 10,
+                "description": "Существующая каноническая запись.",
+            }]
+
+        def upsert(self, ents):
+            pass
+
+    graph_store = _GraphStoreStub(rows=[])
     new_entity = _ent("BCC", desc="Abbreviation.", mention_count=2)
     out_ents, _, name_map = await resolve_entities(
         [new_entity], [], [], llm=llm, embed_model=embed,
         graph_store=graph_store,
+        config=ERConfig(use_native_vector_knn=True),
+        vector_store=_VS(),
     )
     # The new BCC should be redirected to the stored canonical.
     assert len(out_ents) == 1
@@ -447,27 +458,17 @@ async def test_singletons_get_er_metadata() -> None:
 
 
 @pytest.mark.asyncio
-async def test_load_existing_canonicals_orders_by_mention_count_and_limits():
-    """The incremental-ER window must load the most-mentioned canonicals
-    first (ORDER BY mention_count DESC) and honour the configured limit —
-    so a graph larger than the window can't silently drop hub entities
-    from dedup."""
+async def test_load_existing_canonicals_issues_no_query_and_returns_empty():
+    """The bounded-window source has no Nebula query path: it must return
+    no stored candidates WITHOUT touching the store (replaces the old
+    Cypher-shape test)."""
     from src.graph.entity_resolution import _load_existing_canonicals
-
-    captured: dict[str, Any] = {}
 
     class _Store:
         def structured_query(self, query, param_map=None):
-            captured["query"] = query
-            captured["param_map"] = param_map
-            return []
+            raise AssertionError("must not query the graph store")
 
-    out = await _load_existing_canonicals(_Store(), limit=123)
-
-    assert out == []
-    assert "ORDER BY mention_count DESC" in captured["query"]
-    assert "LIMIT $limit" in captured["query"]
-    assert captured["param_map"] == {"limit": 123}
+    assert await _load_existing_canonicals(_Store(), limit=123) == []
 
 
 @pytest.mark.asyncio
@@ -703,32 +704,63 @@ async def test_singletons_get_er_vec_when_native_knn_enabled() -> None:
 
 
 @pytest.mark.asyncio
-async def test_load_candidates_native_builds_deduped_items_from_knn() -> None:
+async def test_load_candidates_native_issues_no_query_and_returns_empty() -> None:
+    """Without a vector store there is nothing to kNN against: no stored
+    candidates and no graph-store query (replaces the old Cypher
+    queryNodes fixture test; the Milvus path is covered by
+    test_resolve_entities_uses_vector_store_knn_and_upsert)."""
     from src.graph.entity_resolution import _Item, _load_candidates_native
-
-    knn_rows = [
-        {"name": "Stored A", "labels": ["__Entity__", "Person"],
-         "er_vec": [1.0, 0.0], "er_embedding": None,
-         "mention_count": 7, "description": "d"},
-        {"name": "Stored B", "labels": ["__Entity__", "Organization"],
-         "er_vec": None, "er_embedding": "[0.0, 1.0]",  # JSON fallback
-         "mention_count": 3, "description": ""},
-    ]
 
     class _Store:
         def structured_query(self, query, param_map=None):
-            return knn_rows if "queryNodes" in query else []  # else = index DDL
+            raise AssertionError("must not query the graph store")
 
     new = [_Item(name="New X", norm="new x", label="Person",
                  description="", mention_count=1, source="new",
                  embedding=[1.0, 0.0])]
-    out = await _load_candidates_native(_Store(), new, k=10, dim=2)
+    assert await _load_candidates_native(_Store(), new, k=10) == []
 
+
+@pytest.mark.asyncio
+async def test_load_candidates_via_store_builds_deduped_stored_items() -> None:
+    """Downstream half of the old native-kNN test, fed via the vector-store
+    path: kNN hits across new entities are deduped by name into stored
+    _Items carrying embedding/label/mention_count; hits without an
+    embedding are skipped."""
+    from src.graph.entity_resolution import _Item, _load_candidates_via_store
+
+    hits = [
+        {"name": "Stored A", "label": "Person", "embedding": [1.0, 0.0],
+         "mention_count": 7, "description": "d"},
+        {"name": "Stored B", "label": "Organization", "embedding": [0.0, 1.0],
+         "mention_count": 3, "description": ""},
+        {"name": "No Vec", "label": "Person", "embedding": [],
+         "mention_count": 1, "description": ""},
+    ]
+
+    class _VS:
+        def __init__(self): self.calls = []
+        def knn(self, vec, k):
+            self.calls.append((list(vec), k))
+            return hits  # same hits for every new entity -> dedup
+
+    new = [
+        _Item(name="New X", norm="new x", label="Person", description="",
+              mention_count=1, source="new", embedding=[1.0, 0.0]),
+        _Item(name="New Y", norm="new y", label="Person", description="",
+              mention_count=1, source="new", embedding=[0.0, 1.0]),
+    ]
+    vs = _VS()
+    out = await _load_candidates_via_store(vs, new, k=10)
+
+    assert vs.calls == [([1.0, 0.0], 10), ([0.0, 1.0], 10)]
     by_name = {it.name: it for it in out}
     assert set(by_name) == {"Stored A", "Stored B"}
+    assert len(out) == 2
     assert by_name["Stored A"].embedding == [1.0, 0.0]
     assert by_name["Stored A"].source == "stored"
-    assert by_name["Stored B"].embedding == [0.0, 1.0]  # parsed from JSON
+    assert by_name["Stored A"].mention_count == 7
+    assert by_name["Stored B"].embedding == [0.0, 1.0]
     assert by_name["Stored B"].label == "Organization"
 
 

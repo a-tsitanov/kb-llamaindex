@@ -11,8 +11,10 @@ Unlike ``scripts/merge_identifier_duplicates`` — which covers only
 deterministic identifier nodes (Phone / Email / INN / …) and flattens
 every redirected edge to ``RELATED_TO`` — THIS job operates on semantic
 entities and PRESERVES the original relationship types: it reuses
-``entity_resolution._cleanup_stored_losers`` (``apoc.merge.relationship``
-with the source edge's ``type(r)``), so a ``WORKS_AT`` stays a
+``entity_resolution._cleanup_stored_losers`` →
+``build_er_graph_ops(...).merge_loser_into_canonical`` (nGQL: the loser's
+``RELATED`` edges are repointed onto the canonical with their ``rel_type``,
+then ``DELETE VERTEX ... WITH EDGE``), so a ``WORKS_AT`` stays a
 ``WORKS_AT`` after a merge.
 
 How it works
@@ -29,13 +31,13 @@ real store via ``_cleanup_stored_losers``.
 
 PREREQUISITES (read before running ``--no-dry-run``)
 ----------------------------------------------------
-1. Take a Nebula backup first.  Merges DETACH DELETE the loser nodes.
-2. KNOWN GAP on Nebula: both ``--candidate-source`` modes load stored
-   candidates through the legacy parameterised Cypher loaders in
-   ``src/graph/entity_resolution.py`` (``native`` is the default), which
-   the Nebula store does not execute — they degrade to no stored
-   candidates, so this job currently only merges duplicates found WITHIN
-   each batch (no ``vector_store`` is passed to ``resolve_entities``).
+1. Take a Nebula backup first.  Merges delete the loser vertices
+   (``DELETE VERTEX ... WITH EDGE``) after repointing their edges.
+2. KNOWN GAP: no ``vector_store`` is passed to ``resolve_entities``, so
+   both ``--candidate-source`` modes get no stored candidates
+   (``_load_candidates_native`` / ``_load_existing_canonicals`` return
+   ``[]`` without querying) — this job currently only merges duplicates
+   found WITHIN each batch.
 
 Usage::
 
@@ -82,11 +84,10 @@ _DEFAULT_INCREMENTAL_WINDOW = 5000
 
 # Substrings (uppercased) that mark a Cypher statement as a WRITE.  The
 # read-only proxy no-ops any query containing one of these; everything
-# else (MATCH ... RETURN, the native-kNN db.index.vector.queryNodes read)
-# passes through to the real store.  The leading/trailing spaces on
-# ``DELETE ``/`` MERGE ``/`` SET ``/``CREATE `` keep them from matching
-# substrings of unrelated tokens (e.g. ``RETURN`` does not contain
-# ``CREATE``; ``queryNodes`` does not contain `` MERGE ``).
+# else (MATCH ... RETURN reads) passes through to the real store.  The
+# leading/trailing spaces on ``DELETE ``/`` MERGE ``/`` SET ``/``CREATE ``
+# keep them from matching substrings of unrelated tokens (e.g. ``RETURN``
+# does not contain ``CREATE``).
 _WRITE_MARKERS: tuple[str, ...] = (
     "DETACH DELETE",
     "DELETE ",
@@ -159,8 +160,7 @@ def _resolve_chains(merges: dict[str, str]) -> dict[str, str]:
 class _ReadOnlyGraphStore:
     """Wrap a real graph store so writes become no-ops.
 
-    ``structured_query`` passes READS through to the inner store (so
-    candidate loading / native-kNN works for ``resolve_entities``) but
+    ``structured_query`` passes READS through to the inner store but
     returns ``[]`` for any WRITE (``_is_write_cypher``) without touching
     the inner store.  Every other attribute access is delegated to the
     inner store via ``__getattr__``.
@@ -341,7 +341,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="native",
         help="How to load stored candidates: 'native' = vector kNN, "
         "'window' = bounded mention_count window (default: native). "
-        "Both are within-batch only on Nebula (see module docstring).",
+        "Both currently yield no stored candidates (see module docstring).",
     )
     p.add_argument(
         "--batch-size", type=int, default=200,
@@ -424,7 +424,7 @@ async def _amain(argv: list[str] | None = None) -> int:
     if not args.yes:
         prompt = (
             f"About to apply {len(merges)} merges to the graph store "
-            f"(DETACH DELETE losers, rel-types preserved). "
+            f"(losers deleted after edge repoint, rel-types preserved). "
             f"Did you take a backup? Type 'yes' to proceed: "
         )
         if input(prompt).strip().lower() != "yes":

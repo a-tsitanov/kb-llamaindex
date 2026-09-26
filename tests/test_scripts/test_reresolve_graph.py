@@ -53,16 +53,6 @@ def test_is_write_cypher_false_for_plain_read() -> None:
     assert rrg._is_write_cypher("MATCH (n) RETURN n") is False
 
 
-def test_is_write_cypher_false_for_native_knn_read() -> None:
-    # The native-kNN candidate load is a read and MUST pass through.
-    cypher = (
-        "CALL db.index.vector.queryNodes('er_embedding_vec', $k, $vec) "
-        "YIELD node WHERE node.er_canonical_name IS NOT NULL "
-        "RETURN node.name AS name"
-    )
-    assert rrg._is_write_cypher(cypher) is False
-
-
 def test_is_write_cypher_case_insensitive() -> None:
     # Lower-cased input still classifies as a write.
     assert rrg._is_write_cypher("match (n) detach delete n") is True

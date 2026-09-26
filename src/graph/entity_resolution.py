@@ -9,7 +9,8 @@ orthographic dedup:
   * word-order / morphology ("Рак Кожи БК" ≡ "Рак БК Кожи"),
   * initialisms ("Иванов И.И." ≡ "Иван Иванов"),
   * cross-document (already-stored canonical from doc 1 vs new
-    variant from doc 2 — handled via `_load_existing_canonicals`).
+    variant from doc 2 — handled via Milvus kNN,
+    `_load_candidates_via_store`).
 
 Algorithm — embedding-blocked, LLM-confirmed:
 
@@ -164,15 +165,10 @@ class ERConfig:
     value > 1.0 to disable this bypass."""
 
     incremental_window: int = 5000
-    """How many already-stored canonical entities to load per ingest for
-    cross-document matching.  The load is now ``ORDER BY mention_count
-    DESC`` so the most-mentioned (hub) canonicals are always in the
-    window — without that ordering the LIMIT picked an arbitrary slice
-    and, once the graph exceeds this many canonicals, new mentions of a
-    frequent entity could silently fail to match (→ duplicates).  Raise
-    for larger graphs (memory ≈ window × embedding-dim × 4 bytes: 5k×768
-    ≈ 15 MB, 25k ≈ 75 MB); candidate-generation cost grows with it too.
-
+    """Window size for the legacy bounded-window stored-candidate source
+    (``use_native_vector_knn`` off).  That source yields no stored
+    candidates on the Nebula graph (``_load_existing_canonicals`` → ``[]``),
+    so the value currently has no effect.
     Ignored when ``use_native_vector_knn`` is on."""
 
     use_native_vector_knn: bool = False
@@ -180,9 +176,8 @@ class ERConfig:
     brute-force candidate gen with a whole-graph vector kNN per new
     entity.  With a ``vector_store`` passed to ``resolve_entities`` (the
     ingest path always passes the Milvus ``EntityVectorStore``) the kNN
-    runs there; without one it falls back to ``_load_candidates_native``,
-    whose Cypher vector-index query the Nebula store does not execute
-    (it degrades to ``[]`` → within-batch ER only).
+    runs there; without one there are no stored candidates
+    (``_load_candidates_native`` → ``[]``, within-batch ER only).
     Removes the window ceiling entirely — measured on a synthetic 200k
     graph the mention_count window reaches only ~2 % of true nearest
     canonicals, native kNN ~96 % at ~6 ms/query (see
@@ -190,7 +185,7 @@ class ERConfig:
     activities set it from ``settings.agent.er_use_native_vector_knn``."""
 
     vector_knn_k: int = 20
-    """Neighbours fetched per new entity from the ER vector index when
+    """Neighbours fetched per new entity from the ER vector store when
     ``use_native_vector_knn`` is on (the per-entity candidate fan-out)."""
 
     verdict_cache_enabled: bool = True
@@ -934,8 +929,8 @@ async def _consolidate_cluster(
     }
     if er_review_needed:
         properties["er_review_needed"] = True
-    # Native vector kNN (opt-in): also store the embedding as a native
-    # list property so the ER vector index can find this canonical.
+    # Vector kNN: also carry the embedding as a list property; the Milvus
+    # EntityVectorStore upsert at the end of ER reads it from here.
     if cfg.use_native_vector_knn and canonical.embedding:
         properties["er_vec"] = list(canonical.embedding)
 
@@ -1112,67 +1107,12 @@ async def _load_existing_canonicals(
     *,
     limit: int = 5000,
 ) -> list[_Item]:
-    """Read stored entities with `er_canonical_name` and their stored
-    embedding.  Returns empty when graph_store is None or any error
-    occurs (incremental ER is best-effort — without it we still do
-    within-batch ER).
-
-    The result is ordered by ``mention_count DESC`` so that, when the
-    graph has more canonicals than ``limit``, the window always contains
-    the most-mentioned (hub) entities rather than an arbitrary
-    slice — the difference between a new mention reliably matching a
-    frequent entity and silently fragmenting into a duplicate.
+    """Bounded-window stored-candidate source (``use_native_vector_knn``
+    off).  The Nebula graph store has no query path for it, so it yields
+    no stored candidates — ER runs within-batch only.  Issues no query.
     """
-    if graph_store is None:
-        return []
-    try:
-        # `structured_query` is the generic query entry on the
-        # PropertyGraphStore base.  The Nebula store rejects param_map
-        # (NotImplementedError) → caught below → [] (within-batch ER).
-        rows = await asyncio.to_thread(
-            graph_store.structured_query,
-            """
-            MATCH (n:__Entity__)
-            WHERE n.er_canonical_name IS NOT NULL
-            RETURN n.name AS name,
-                   labels(n) AS labels,
-                   n.er_embedding AS er_embedding,
-                   coalesce(n.mention_count, 1) AS mention_count,
-                   coalesce(n.description, '') AS description
-            ORDER BY mention_count DESC
-            LIMIT $limit
-            """,
-            param_map={"limit": int(limit)},
-        )
-    except Exception as exc:
-        logger.warning("ER load existing canonicals failed: {err}", err=exc)
-        return []
-
-    out: list[_Item] = []
-    for row in rows or []:
-        name = row.get("name") or ""
-        if not name:
-            continue
-        raw_emb = row.get("er_embedding") or "[]"
-        try:
-            emb = json.loads(raw_emb) if isinstance(raw_emb, str) else list(raw_emb)
-        except json.JSONDecodeError:
-            emb = []
-        if not emb:
-            continue
-        labels = [lab for lab in (row.get("labels") or [])
-                  if lab not in ("__Entity__", "__Node__")]
-        label = labels[0] if labels else "Other"
-        out.append(_Item(
-            name=name,
-            norm=_normalize_entity_name(name),
-            label=label,
-            description=row.get("description") or "",
-            mention_count=int(row.get("mention_count") or 1),
-            source="stored",
-            embedding=emb,
-        ))
-    return out
+    _log_no_stored_candidates("window")
+    return []
 
 
 async def _load_candidates_native(
@@ -1180,77 +1120,38 @@ async def _load_candidates_native(
     new_items: list[_Item],
     *,
     k: int,
-    dim: int,
 ) -> list[_Item]:
-    """Native-vector-index alternative to ``_load_existing_canonicals``.
+    """kNN stored-candidate source used when no ``vector_store`` is given.
 
-    For each new entity, queries the ER vector index
-    (``er_embedding_vec`` over ``__Entity__.er_vec``) for its ``k``
-    nearest stored canonicals — across the WHOLE graph, no window — and
-    returns the deduplicated union as stored ``_Item``s.  Best-effort:
-    returns ``[]`` (→ within-batch ER only) when the store is missing or
-    every query errors — which is always the case on the Nebula store
-    (it rejects ``param_map`` and has no such index); ingest routes kNN
-    through ``_load_candidates_via_store`` (Milvus) instead.
+    Stored-canonical kNN lives in the Milvus ``EntityVectorStore``
+    (``_load_candidates_via_store``); without one there is nothing to
+    query, so this yields no stored candidates — ER runs within-batch
+    only.  Issues no query.
     """
-    if graph_store is None:
-        return []
-    seen: dict[str, _Item] = {}
-    for it in new_items:
-        if not it.embedding:
-            continue
-        try:
-            rows = await asyncio.to_thread(
-                graph_store.structured_query,
-                """
-                CALL db.index.vector.queryNodes('er_embedding_vec', $k, $vec)
-                YIELD node
-                WHERE node.er_canonical_name IS NOT NULL
-                RETURN node.name AS name,
-                       labels(node) AS labels,
-                       node.er_vec AS er_vec,
-                       node.er_embedding AS er_embedding,
-                       coalesce(node.mention_count, 1) AS mention_count,
-                       coalesce(node.description, '') AS description
-                """,
-                param_map={"k": int(k), "vec": list(it.embedding)},
-            )
-        except Exception as exc:
-            logger.warning("ER native kNN query failed: {e}", e=exc)
-            continue
-        for row in rows or []:
-            name = row.get("name") or ""
-            if not name or name in seen:
-                continue
-            emb = row.get("er_vec")
-            if not emb:  # fall back to the legacy JSON column
-                raw = row.get("er_embedding") or "[]"
-                try:
-                    emb = json.loads(raw) if isinstance(raw, str) else list(raw)
-                except json.JSONDecodeError:
-                    emb = []
-            if not emb:
-                continue
-            labels = [lab for lab in (row.get("labels") or [])
-                      if lab not in ("__Entity__", "__Node__")]
-            seen[name] = _Item(
-                name=name,
-                norm=_normalize_entity_name(name),
-                label=labels[0] if labels else "Other",
-                description=row.get("description") or "",
-                mention_count=int(row.get("mention_count") or 1),
-                source="stored",
-                embedding=list(emb),
-            )
-    return list(seen.values())
+    _log_no_stored_candidates("knn")
+    return []
+
+
+_NO_STORED_CANDIDATES_LOGGED: set[str] = set()
+
+
+def _log_no_stored_candidates(source: str) -> None:
+    """Say once per process (per source) that cross-ingest ER is off."""
+    if source in _NO_STORED_CANDIDATES_LOGGED:
+        return
+    _NO_STORED_CANDIDATES_LOGGED.add(source)
+    logger.info(
+        "ER: stored candidates unavailable without a vector store "
+        "(source={s}) — within-batch ER only",
+        s=source,
+    )
 
 
 async def _load_candidates_via_store(
     vector_store: Any, new_items: list[_Item], *, k: int,
 ) -> list[_Item]:
     """Per new entity, fetch k nearest canonicals from an EntityVectorStore,
-    dedup by name into stored _Items (mirrors _load_candidates_native but
-    backend-agnostic)."""
+    dedup by name into stored _Items (the ingest-path kNN source)."""
     seen: dict[str, _Item] = {}
     for it in new_items:
         if not it.embedding:
@@ -1316,9 +1217,9 @@ async def resolve_entities(
         is on AND a `vector_store` is given, candidate kNN is routed
         through it (`_load_candidates_via_store`) instead of the legacy
         graph-index query, and resolved canonicals are upserted back into it.
-        `vector_store=None` (the default) preserves today's behaviour
-        exactly — native-index kNN via `_load_candidates_native`, or the
-        bounded-window `_load_existing_canonicals` when native kNN is off.
+        `vector_store=None` (the default) means no stored candidates
+        (`_load_candidates_native` / `_load_existing_canonicals` return
+        `[]`) — within-batch ER only.
     """
     cfg = config or ERConfig()
     eligible = cfg.eligible_labels or None  # empty → all (minus deterministic)
@@ -1361,26 +1262,25 @@ async def resolve_entities(
         return entities, relations, {}
 
     # 2. Embed new entities first — needed for candidate cosines and,
-    #    when native kNN is on, to query the ER vector index.  Stored
+    #    when vector kNN is on, to query the ER vector store.  Stored
     #    items already carry embeddings.
     if not await _embed_entities(new_items, embed_model):
         logger.warning("ER skipped: embed model failed")
         return entities, relations, {}
 
-    # 3. Load the stored canonicals to compare against.  Native vector
-    #    kNN (opt-in) queries the ER vector index per new entity over the
-    #    WHOLE graph (no window ceiling); otherwise the bounded
-    #    mention_count window.
+    # 3. Load the stored canonicals to compare against.  Vector kNN is on
+    #    by default: on ingest it goes to Milvus via
+    #    `_load_candidates_via_store` over the WHOLE graph (no window
+    #    ceiling).  Without a vector store (or with kNN off) there are no
+    #    stored candidates — within-batch ER only.
     if cfg.use_native_vector_knn:
         if vector_store is not None:
             stored_items = await _load_candidates_via_store(
                 vector_store, new_items, k=cfg.vector_knn_k,
             )
         else:
-            from src.config import settings as _settings
-
             stored_items = await _load_candidates_native(
-                graph_store, new_items, k=cfg.vector_knn_k, dim=_settings.milvus.dim,
+                graph_store, new_items, k=cfg.vector_knn_k,
             )
     else:
         stored_items = await _load_existing_canonicals(

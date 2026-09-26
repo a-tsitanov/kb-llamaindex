@@ -36,13 +36,13 @@ safe-by-inaction).
 
 1. **Бэкап NebulaGraph** перед `--no-dry-run` (применение удаляет вершины
    проигравших вместе с рёбрами).
-2. **Известный разрыв на NebulaGraph:** оба источника кандидатов
-   (`--candidate-source native` по умолчанию и `window`) грузят сохранённых
-   каноников легаси-Cypher'ом (`_load_candidates_native` /
-   `_load_existing_canonicals`), который хранилище Nebula не выполняет → 0
-   stored-кандидатов. Скрипт не передаёт `vector_store` (Milvus `entity_er_vec`)
-   в `resolve_entities`, поэтому сейчас сливает только дубли **внутри каждого
-   батча** (`--batch-size`). Крупный `--batch-size` частично компенсирует.
+2. **Известный разрыв:** скрипт не передаёт `vector_store` (Milvus
+   `entity_er_vec`) в `resolve_entities`, а без него оба источника кандидатов
+   (`--candidate-source native` по умолчанию и `window`) возвращают 0
+   stored-кандидатов (`_load_candidates_native` / `_load_existing_canonicals`
+   отдают `[]`, не делая запросов). Поэтому сейчас скрипт сливает только дубли
+   **внутри каждого батча** (`--batch-size`). Крупный `--batch-size` частично
+   компенсирует.
 
 ## 4. Запуск
 
@@ -71,8 +71,8 @@ uv run python -m scripts.reresolve_graph --no-dry-run --yes
 - **Доминирующая** — переэмбеддинг всех сущностей графа (ER всегда эмбеддит
   «новую» пачку, а здесь каждая сущность — «новая»). На большом графе это полный
   переэмбед; запускай нечасто, в тихое окно.
-- `native` пытается сделать один kNN-запрос на сущность (на Nebula он падает и
-  логируется как `ER native kNN query failed`).
+- `native` без `vector_store` запросов не делает (0 stored-кандидатов, одна
+  info-строка `ER: stored candidates unavailable without a vector store`).
 - LLM-judge вызывается только для borderline-пар (кэш вердиктов в dry-run
   заглушен proxy — повторный прогон будет судить заново).
 

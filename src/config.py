@@ -630,8 +630,8 @@ class AgentSettings(BaseSettings):
     # [] (→ within-batch ER only), so this can't crash a fresh deploy.
     # Resolved canonicals are upserted into the vector store as they are
     # created; entities from before it existed won't be found until
-    # re-ingested.  Set false to force the legacy window (whose Cypher
-    # loader the Nebula store does not execute → within-batch ER only).
+    # re-ingested.  Set false to force the legacy window source, which
+    # yields no stored candidates on Nebula → within-batch ER only.
     er_use_native_vector_knn: bool = True
     # Neighbours fetched per new entity from the ER vector index when
     # native kNN is on.
