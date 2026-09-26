@@ -1,7 +1,7 @@
 """push_wikibase activity.
 
 Reads the merged-entities staging blob, loads the bootstrap caches
-(``:WikibaseBaseClass`` and ``:WikibaseProperty`` Neo4j nodes), then
+(``:WikibaseBaseClass`` and ``:WikibaseProperty`` graph-store rows), then
 calls ``src/storage/wikibase.py:push_entities`` to project the
 batch into the local Wikibase instance.
 
@@ -50,7 +50,7 @@ async def push_wikibase(merged: Merged) -> WikibasePushed:
         )
         graph_store = build_graph_store()
 
-        # Neo4j bootstrap-cache reads are sync — off the loop.
+        # Graph-store bootstrap-cache reads are sync — off the loop.
         base_class_qids = await asyncio.to_thread(_load_base_classes, graph_store)
         property_pids = await asyncio.to_thread(_load_properties, graph_store)
         activity.heartbeat({
@@ -81,7 +81,7 @@ async def push_wikibase(merged: Merged) -> WikibasePushed:
         ):
             counts = await push_entities(
                 entities=entities, relations=relations,
-                neo4j_store=graph_store, wb_client=wb_client,
+                graph_store=graph_store, wb_client=wb_client,
                 base_class_qids=base_class_qids, property_pids=property_pids,
             )
         activity.heartbeat({"stage": "pushed", **counts})

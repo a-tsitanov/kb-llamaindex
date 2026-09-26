@@ -24,6 +24,6 @@ async def mark_entities_dirty(payload: MarkDirtyIn) -> int:
     if not names:
         return 0
     store = build_graph_store()
-    await asyncio.to_thread(mark_dirty, store, names)  # sync Neo4j — off loop
+    await asyncio.to_thread(mark_dirty, store, names)  # sync graph-store call — off loop
     activity.logger.info("mark_entities_dirty  count=%d", len(names))
     return len(names)

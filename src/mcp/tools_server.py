@@ -176,7 +176,7 @@ async def graph_search(query: str, depth: int = 1) -> dict[str, Any]:
     PREFER INSTEAD: `find_entity_by_id` (you have an exact identifier),
     `find_entity_by_name` (you have a partial name), `find_neighbours`
     (you have a known entity, want 1 hop), `graph_walk` (known entity,
-    multi-hop chains). Returns empty lists if Neo4j is unavailable."""
+    multi-hop chains). Returns empty lists if the graph store is unavailable."""
     r = await atomic_tools.graph_search(await _g(), query=query, depth=depth)
     return json.loads(r.observation)
 
@@ -296,12 +296,12 @@ async def read_full_document(
     return {"text": r.observation}
 
 
-# ── graph analysis tools (Track 7b — read-only GDS) ────────────────
+# ── graph analysis tools (Track 7b — read-only) ────────────────────
 #
-# Diagnostic / exploratory, NOT retrieval: they run GDS algorithms over
-# the whole __Entity__ graph (heavier, projection-backed) and are
-# fail-soft — Neo4j/GDS down or unavailable yields a safe empty result,
-# never an error.  `from src.graph import analysis` is module-level.
+# Diagnostic / exploratory, NOT retrieval: they run in-worker igraph
+# algorithms over the whole-graph edge export (heavier) or read the
+# materialised `pagerank` property, and are fail-soft — a store that is
+# down or unavailable yields a safe empty result, never an error.  `from src.graph import analysis` is module-level.
 
 
 @mcp.tool(timeout=1800)
@@ -312,7 +312,7 @@ async def graph_pagerank(top_n: int = 20) -> dict[str, Any]:
     a global importance ranking, not tied to a query.
     PREFER INSTEAD: `graph_personalized_pagerank` when you want
     importance *relative to* specific seed entities. Returns top_n
-    {name, score}. Empty if Neo4j/GDS is unavailable."""
+    {name, score}. Empty if the graph store is unavailable."""
     from src.graph import analysis
     return {"top": await analysis.pagerank(await _gs(), top_n=top_n)}
 
@@ -327,7 +327,7 @@ async def graph_personalized_pagerank(
     USE FOR: "what's most connected to X and Y" — centrality relative to
     `seeds` (exact entity names). Resolve names first with
     `find_entity_by_name` if unsure. Empty seeds → empty result. Returns
-    top_n {name, score}; empty if Neo4j/GDS is unavailable."""
+    top_n {name, score}; empty if the graph store is unavailable."""
     from src.graph import analysis
     return {"top": await analysis.personalized_pagerank(
         await _gs(), seeds, top_n=top_n,
@@ -340,7 +340,7 @@ async def graph_components() -> dict[str, Any]:
 
     USE FOR: connectivity health — a large singleton fraction explains
     sparse/empty communities and weak multi-hop reach. Returns
-    {component_count, distribution}; empty if Neo4j/GDS is unavailable."""
+    {component_count, distribution}; empty if the graph store is unavailable."""
     from src.graph import analysis
     return await analysis.components(await _gs())
 
@@ -354,7 +354,7 @@ async def graph_shortest_path(
     USE FOR: "how are X and Y connected" — the concrete chain of entities
     between them. Resolve names first with `find_entity_by_name` if
     unsure. Returns {path:[names], hops}; {path:[], hops:-1} when there's
-    no path (or Neo4j unavailable)."""
+    no path (or the graph store is unavailable)."""
     from src.graph import analysis
     return await analysis.shortest_path(
         await _gs(), source, target, max_hops=max_hops,
@@ -593,15 +593,12 @@ async def topic_trend(
     USE FOR: "как часто писали про X", and as the channel-side input to
     the MCP-3 `stat_align` tool when comparing attention against a poll
     indicator.  `granularity`: day / week / month (default) / quarter /
-    year.  `since` / `until` are ISO `YYYY-MM-DD` bounds applied to the
-    returned buckets.  Returns `{topic, granularity, rows:[{period,
-    mentions, period_start, value}]}`, where `period` is a human label
-    (`"2026-Q1"`, `"2026-03"`) and `period_start` is that bucket's first
-    day as an ISO date.  PASS THE ROWS STRAIGHT TO `stat_align`: it reads
-    `period_start` and `value`, which is why both are here.
-    If the graph backend cannot serve this query, you get `{"error": …}`
-    rather than an empty series — do not read a missing answer as "this
-    topic was never mentioned".
+    year.  `since` / `until` are ISO `YYYY-MM-DD` bounds.
+    CURRENTLY UNAVAILABLE on the Nebula graph: after argument validation
+    this tool ALWAYS returns `{"error": …}` (its query needs parameter
+    binding the Nebula store does not support yet) — no rows, no
+    `period_start`/`value` series for `stat_align`.  Do not read the error
+    as "this topic was never mentioned".
     NOT FOR: ingest volume (use `channel_message_timeline`) or message
     content (use `vector_search`)."""
     await _init()

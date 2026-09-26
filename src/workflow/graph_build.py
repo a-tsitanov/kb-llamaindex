@@ -1,4 +1,4 @@
-"""`GraphBuildWorkflow` — runs the heavy LLM merge + Neo4j graph
+"""`GraphBuildWorkflow` — runs the heavy LLM merge + Nebula graph
 build as a Temporal **child** of `DocumentIngestWorkflow`.
 
 Splitting these two activities out of the parent has three wins:
@@ -91,7 +91,7 @@ class GraphBuildWorkflow:
         # starts on ``merge_task_queue`` (kb-ingest-merge).  So the whole
         # merge stage rides the merge lane, separate from extract_kg on
         # kb-ingest-llm.  ``build_property_graph`` is also in
-        # MAIN_ACTIVITIES (Neo4j-write, not GPU-bound) for single-pool
+        # MAIN_ACTIVITIES (graph-write, not GPU-bound) for single-pool
         # deployments.
         built: GraphBuilt = await workflow.execute_activity(
             "build_property_graph", merged,

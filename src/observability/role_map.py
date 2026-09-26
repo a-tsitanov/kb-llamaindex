@@ -25,7 +25,7 @@ ACTIVITY_TO_ROLE: Final[dict[str, LLMRole | None]] = {
     "inject_canonical":     None,           # regex identifier injection
     "extract_kg":           "extraction",   # LightRAG KG extraction
     "merge_and_resolve":    "judge",        # ER LLM-judge + cross-chunk merge
-    "build_property_graph": None,           # Neo4j writes only
+    "build_property_graph": None,           # graph writes only
     "push_wikibase":        None,           # MediaWiki REST, no LLM
     "finalize":             None,           # Postgres + cleanup only
 }

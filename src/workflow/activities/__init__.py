@@ -47,7 +47,7 @@ EXTRACT_ACTIVITIES = [
 
 # merge_and_resolve + build_property_graph are the GraphBuildWorkflow
 # stage; they run together on kb-ingest-merge.  build_property_graph is
-# ALSO registered in MAIN_ACTIVITIES (Neo4j-write, not LLM-bound) so a
+# ALSO registered in MAIN_ACTIVITIES (graph-write, not LLM-bound) so a
 # single-pool deployment can still claim it locally.
 MERGE_ACTIVITIES = [
     merge_and_resolve,

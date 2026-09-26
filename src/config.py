@@ -284,8 +284,8 @@ class TemporalSettings(BaseSettings):
     # so the whole file lands in `os.environ` the moment anything touches
     # pymilvus.  Since `settings.temporal` is a `cached_property` on a
     # process singleton, whichever code path ran first froze the value for
-    # the process.  Reproduced: `community_backend` is "gds" before
-    # importing `src.workflow.worker` and "leidenalg" after.
+    # the process.  Reproduced: a TEMPORAL_* field read its class default
+    # before importing `src.workflow.worker` and the `.env` value after.
     #
     # In tests that meant a red or green result could depend on collection
     # order rather than on the code.  In production it changes nothing:
@@ -373,7 +373,7 @@ class TemporalSettings(BaseSettings):
     # Offline analytics materialisation (Wave 1): centrality + link-prediction
     # runs on the same kb-graph-build queue so it shares its low concurrency cap
     # and never touches the query hot path.  Raise to process more nodes in
-    # parallel; keep modest so a rebuild doesn't starve Neo4j / LLM proxy.
+    # parallel; keep modest so a rebuild doesn't starve Nebula / LLM proxy.
     analytics_materialize_concurrency: int = Field(
         default=2,
         ge=1,
@@ -392,8 +392,7 @@ class TemporalSettings(BaseSettings):
 
     # Community-detection backend. "leidenalg" = in-worker hierarchical
     # Leiden over the edge export; "graphscope" = distributed single-level
-    # Leiden. "gds" (Neo4j GDS) was removed with Neo4j; a legacy "gds" value
-    # in an old .env maps to "leidenalg".
+    # Leiden. A legacy "gds" value in an old .env maps to "leidenalg".
     community_backend: Literal["leidenalg", "graphscope"] = "leidenalg"
 
     @field_validator("community_backend", mode="before")
@@ -442,7 +441,7 @@ class IngestionSettings(BaseSettings):
     # When True, ingest pipeline runs a per-chunk LLM translation
     # step that fills node.metadata["translated_text"] with a
     # Russian rendering of the original.  Original chunk text is
-    # NOT mutated — Milvus / Neo4j :Chunk nodes keep the source
+    # NOT mutated — Milvus chunks keep the source
     # language for citation fidelity.  The KG extractor then reads
     # the translated text so entities + descriptions land in
     # Russian, enabling cross-lingual graph dedup.
@@ -556,7 +555,7 @@ class WikibaseSettings(BaseSettings):
 
 class WikiSettings(BaseSettings):
     """Continuous wiki-article editor (Project A). Generates per-entity
-    MediaWiki pages from the Neo4j graph. Opt-in via WIKI_ENABLED."""
+    MediaWiki pages from the Nebula graph. Opt-in via WIKI_ENABLED."""
 
     model_config = SettingsConfigDict(
         env_prefix="WIKI_",
@@ -609,9 +608,9 @@ class AgentSettings(BaseSettings):
     # Pairs per LLM-judge call when ER routes borderline candidates.
     er_judge_batch_size: int = Field(default=10, ge=1, le=50)
     # Persistent ER verdict cache: when on, borderline LLM-judge
-    # verdicts are stored in Neo4j (`:ERVerdict`, order-insensitive
-    # name/label key) so recurring pairs across re-ingests / hub-heavy
-    # docs skip the LLM.  OPTIONAL + FAIL-SAFE: any Neo4j error or a
+    # verdicts are cached (order-insensitive name/label key; see
+    # `er_verdict_cache_backend`) so recurring pairs across re-ingests /
+    # hub-heavy docs skip the LLM.  OPTIONAL + FAIL-SAFE: any store error or a
     # missing store falls back to pure LLM judging.
     er_verdict_cache_enabled: bool = True
     # WHERE those verdicts are stored.  `postgres` (default) keeps them in
@@ -622,18 +621,17 @@ class AgentSettings(BaseSettings):
     # cache is not knowledge and does not belong in the graph.  `graph` is
     # the rollback, and needs no image rebuild.
     er_verdict_cache_backend: Literal["postgres", "graph"] = "postgres"
-    # Native Neo4j vector-index kNN for ER instead of the bounded
-    # 5000-entity window.  Removes the window ceiling (at 200k canonicals
+    # Whole-graph vector kNN for ER (Milvus `EntityVectorStore` on the
+    # ingest path) instead of the bounded 5000-entity window.  Removes the window ceiling (at 200k canonicals
     # the window reaches only ~2% of true nearest matches; native kNN
     # ~96%) — essential under high-volume ingest where the graph outgrows
     # the window fast and the windowed path silently stops finding
-    # cross-doc duplicates.  ON by default.  FAIL-SAFE: the native loader
-    # idempotently builds `er_embedding_vec` and returns [] (→ within-batch
-    # ER only) when `er_vec` isn't populated yet, so this can't crash a
-    # fresh deploy.  For EXISTING graphs run `scripts/backfill_er_vector.py`
-    # to populate `er_vec` on prior entities; without it, pre-backfill
-    # entities won't be found until re-ingested.  Set false to force the
-    # legacy window.
+    # cross-doc duplicates.  ON by default.  FAIL-SAFE: a kNN error yields
+    # [] (→ within-batch ER only), so this can't crash a fresh deploy.
+    # Resolved canonicals are upserted into the vector store as they are
+    # created; entities from before it existed won't be found until
+    # re-ingested.  Set false to force the legacy window (whose Cypher
+    # loader the Nebula store does not execute → within-batch ER only).
     er_use_native_vector_knn: bool = True
     # Neighbours fetched per new entity from the ER vector index when
     # native kNN is on.
@@ -1059,7 +1057,7 @@ class RabbitMQSettings(BaseSettings):
     # Per-queue consumer ack timeout (ms), set as the ``x-consumer-timeout``
     # arg on ``queue``.  The consumer awaits the WHOLE DocumentIngestWorkflow
     # before acking, so a delivery can stay unacked for the full per-document
-    # wall-clock (slow Neo4j writes; activity schedule_to_close up to ~12h).
+    # wall-clock (slow graph writes; activity schedule_to_close up to ~12h).
     # RabbitMQ's default (30 min) would force-close the channel mid-document
     # and requeue every in-flight message → a storm of duplicate workflow
     # starts.  Set WELL above the longest document run (default 24h).

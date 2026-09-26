@@ -40,7 +40,7 @@ from src.workflow._search_serde import node_to_serialized
 from src.workflow.contracts import RetrieveParams, RetrieveResult
 
 # Deterministic tool pipeline for one sub-question.  Vector first
-# (always available), then graph (skipped gracefully if Neo4j is down —
+# (always available), then graph (skipped gracefully if the graph store is down —
 # atomic_tools.graph_search returns empty for a None retriever).
 #
 # graph_walk (bounded multi-hop, R3) is registered in atomic_tools and

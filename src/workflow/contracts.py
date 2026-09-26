@@ -575,8 +575,8 @@ class DetectCommunitiesParams(_Frozen):
 class DetectedCommunity(_Frozen):
     """Slim cross-activity handle the build workflow fans out over to
     summarise.  Deliberately carries NO member name list — membership is
-    already persisted in Neo4j (``(:__Entity__)-[:IN_COMMUNITY]->
-    (:Community)``) and is read back per-community inside
+    already persisted in Nebula (``Entity -[IN_COMMUNITY]-> Community``)
+    and is read back per-community inside
     ``summarize_community_activity``.  Keeping the detect result O(number of
     communities) instead of O(number of entities) is what prevents the
     Temporal "Complete result exceeds size limit" failure on large graphs
@@ -602,7 +602,7 @@ class SummarizeCommunityParams(_Frozen):
     tier and persist on ``:Community.summary``.
 
     Carries ``member_count`` (a cheap gate to skip empty communities) — NOT
-    the member names: the activity reads members from Neo4j by
+    the member names: the activity reads members from Nebula by
     ``community_id`` so per-spec payloads stay tiny regardless of community
     size."""
 
@@ -622,7 +622,7 @@ class SummarizeCommunityResult(_Frozen):
 
 class CommunityBuildResult(_Frozen):
     """Final ``CommunityBuildWorkflow`` output — counts only (the data
-    lives on the ``:Community`` nodes in Neo4j)."""
+    lives on the ``Community`` vertices in Nebula)."""
 
     detected: int = 0
     summarized: int = 0

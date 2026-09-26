@@ -7,7 +7,6 @@ project LLM and stores the result on `node.metadata["translated_text"]`
 — `node.text` itself stays verbatim so:
 
   * Milvus stores the original-language chunk text (citation fidelity).
-  * Neo4j `:Chunk` nodes store the original-language text.
   * `LightRAGExtractor` reads `translated_text` and produces
     Russian entity names + descriptions → cross-lingual graph
     dedup works ("Basal cell carcinoma" + "базальноклеточный рак"
@@ -38,7 +37,7 @@ TRANSLATED_TEXT_KEY = "translated_text"
 # Metadata keys used to ferry a document-level translation through
 # the SentenceSplitter so each resulting chunk can carve out its own
 # proportional span.  Cleaned up after alignment so they don't end
-# up in Milvus / Neo4j.
+# up in Milvus / the graph.
 FULL_TRANSLATED_TEXT_KEY = "full_translated_text"
 ORIGINAL_DOC_LENGTH_KEY = "orig_doc_length"
 
@@ -203,7 +202,7 @@ class TranslateToRussianTransform(TransformComponent):
             return node
         finally:
             # Unconditionally drop the doc-level scaffolding so
-            # Milvus / Neo4j don't get a 100kB blob on every chunk's
+            # Milvus / the graph don't get a 100kB blob on every chunk's
             # metadata (Milvus dynamic-field cap is 65k chars).
             _drop_doc_translation_metadata(node)
 

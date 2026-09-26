@@ -1,5 +1,5 @@
 # src/analytics/store_query.py
-"""Read-only Neo4j query execution for analytics primitives (fail-soft)."""
+"""Read-only graph-store query execution for analytics primitives (fail-soft)."""
 
 from __future__ import annotations
 

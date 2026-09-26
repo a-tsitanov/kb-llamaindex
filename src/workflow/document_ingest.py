@@ -29,7 +29,7 @@ otherwise we'd loop for the full budget on a known-dead document.
 
 Two retry profiles:
 
-* ``_FAST_RETRY`` — IO / embedding / Neo4j MERGE / PG UPDATE.
+* ``_FAST_RETRY`` — IO / embedding / Nebula upsert / PG UPDATE.
   1s → 2s → 4s → … capped at 60s, up to 50 attempts.
 * ``_HEAVY_RETRY`` — LLM-bound (``extract_kg``, ``merge_and_resolve``).
   2min → 4min → … capped at 30min, up to 50 attempts.
@@ -210,7 +210,7 @@ class DocumentIngestWorkflow:
                 injected = await workflow.execute_activity(
                     "inject_canonical", parsed,
                     result_type=Injected,
-                    # Neo4j canonical-entity upsert — 1h single-attempt
+                    # Nebula canonical-entity upsert — 1h single-attempt
                     # ceiling. The activity heartbeats throughout the
                     # blocking upsert, so a 2m heartbeat_timeout catches a
                     # stuck connection fast instead of waiting the full 1h.

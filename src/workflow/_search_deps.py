@@ -2,7 +2,7 @@
 activities.
 
 Activities re-enter Python on each invocation; building a Milvus
-client + connecting to Neo4j + bootstrapping the BGE-reranker from
+client + connecting to Nebula + bootstrapping the BGE-reranker from
 scratch on every ReAct step would multiply latency.  We memoise per
 worker process — first activity in this worker builds them, all
 subsequent calls reuse.

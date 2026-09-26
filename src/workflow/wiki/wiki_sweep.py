@@ -34,7 +34,7 @@ def _tally(outcomes) -> dict[str, int]:
 async def select_dirty_entities(limit: int) -> list[str]:
     from src.graph.store import build_graph_store
     from src.graph.wiki_dirty import select_dirty
-    # sync Neo4j — off the shared loop.
+    # sync graph-store call — off the shared loop.
     return await asyncio.to_thread(select_dirty, build_graph_store(), limit)
 
 
@@ -55,7 +55,7 @@ async def write_entity_article(name: str) -> str:
 
     store = build_graph_store()
     ops = build_wiki_graph_ops(store)
-    # All Neo4j reads/writes here use the sync driver — off the shared loop.
+    # All graph-store reads/writes here are sync — off the shared loop.
     ctx = await asyncio.to_thread(
         read_entity_subgraph, store, name, settings.wiki.max_relations)
     docs = await asyncio.to_thread(read_source_docs, store, name)

@@ -13,14 +13,14 @@ from src.workflow.contracts import GraphBuilt, Merged
 from src.workflow.heartbeat import heartbeat_every
 from src.workflow.staging import build_staging_store
 
-# Pulse interval for the blocking Neo4j writes. Must stay well under the
+# Pulse interval for the blocking Nebula writes. Must stay well under the
 # activity's heartbeat_timeout (5m in graph_build.py). At 37k nodes / 60k
 # edges a single upsert can outrun that window; without a continuous pulse
 # Temporal fires timeout_type_heartbeat and _FAST_RETRY re-runs the whole
-# activity (up to 50×), amplifying offered load into a Neo4j-CPU retry storm.
+# activity (up to 50×), amplifying offered load into a graph-store retry storm.
 _HEARTBEAT_INTERVAL_S = 60.0
 
-_NEO4J_UNSAFE_METADATA_KEYS: frozenset[str] = frozenset(
+_GRAPH_UNSAFE_METADATA_KEYS: frozenset[str] = frozenset(
     {
         "canonical_identifiers",
         "canonical_identifiers_augment",
@@ -34,7 +34,7 @@ _PRESERVE_METADATA_KEYS: frozenset[str] = frozenset(
 )
 
 
-def _is_neo4j_safe(value) -> bool:
+def _is_graph_safe(value) -> bool:
     if value is None or isinstance(value, (str, int, float, bool)):
         return True
     if isinstance(value, (list, tuple)):
@@ -42,7 +42,7 @@ def _is_neo4j_safe(value) -> bool:
     return False
 
 
-def _strip_neo4j_unsafe_metadata(nodes) -> None:
+def _strip_graph_unsafe_metadata(nodes) -> None:
     for n in nodes:
         md = getattr(n, "metadata", None)
         if not md:
@@ -50,7 +50,7 @@ def _strip_neo4j_unsafe_metadata(nodes) -> None:
         for key in list(md.keys()):
             if key in _PRESERVE_METADATA_KEYS:
                 continue
-            if key in _NEO4J_UNSAFE_METADATA_KEYS or not _is_neo4j_safe(md[key]):
+            if key in _GRAPH_UNSAFE_METADATA_KEYS or not _is_graph_safe(md[key]):
                 md.pop(key, None)
 
 
@@ -78,15 +78,15 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
 
     # Pulse on a timer throughout the blocking graph-write region: store
     # construction (driver I/O + schema refresh, behind a process-global
-    # lock), the entity/relation upserts, the gated first_seen stamp, and the lookup-index
-    # DDL all run off the loop via to_thread and can each be slow under
+    # lock), the entity/relation upserts and the gated first_seen stamp
+    # all run off the loop via to_thread and can each be slow under
     # hub-node lock contention. A one-shot heartbeat between steps is not
     # enough — a single step can outrun heartbeat_timeout. heartbeat_every
     # keeps a progressing-but-slow build from being mistaken for a dead one.
     async with heartbeat_every(_HEARTBEAT_INTERVAL_S, {"stage": "writing"}):
         graph_store = await asyncio.to_thread(build_graph_store)
 
-        _strip_neo4j_unsafe_metadata(nodes)
+        _strip_graph_unsafe_metadata(nodes)
         activity.heartbeat({"stage": "scrubbed"})
 
         activity.logger.info(
@@ -179,7 +179,6 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
             except Exception as exc:  # enrichment, not the build
                 logger.warning("first_seen stamping skipped (non-fatal): {e}", e=exc)
             activity.heartbeat({"stage": "first_seen_stamped"})
-
 
     logger.info(
         "build_property_graph done  doc={d}  e={e}  r={r}",

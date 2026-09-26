@@ -17,14 +17,14 @@ Design highlights
   PID is the cache built by ``scripts/setup_wikibase.py``.
 
 * Owner Items are upserted: if the corresponding ``:__Entity__``
-  node in Neo4j carries a ``wikibase_qid`` property already, we
+  vertex in the graph store carries a ``wikibase_qid`` property already, we
   ``update_item`` (and reuse the QID); otherwise we ``create_item``
-  and persist the new QID back into Neo4j so subsequent ingests
+  and persist the new QID back into the graph store so subsequent ingests
   hit the update path (idempotency).
 
 * Owner ↔ owner relations become statements through the relation
   label's Property.  Unknown labels lazy-create an ``item`` Property
-  via ``create_property`` and cache the new PID in Neo4j +
+  via ``create_property`` and cache the new PID in the graph store +
   ``property_pids`` in-memory.
 
 * Never raises out of :func:`push_entities` — per-entity / per-
@@ -270,11 +270,11 @@ def _build_claim(pid: str, value: str, datatype: str) -> Any | None:
     return None
 
 
-# ── neo4j cache helpers ───────────────────────────────────────────
+# ── graph-store cache helpers ──────────────────────────────────────
 
 
-def _lookup_qid_for_entity(neo4j_store: Any, entity: Any) -> str | None:
-    """Return the ``wikibase_qid`` stored on the entity's Neo4j node, if any.
+def _lookup_qid_for_entity(graph_store: Any, entity: Any) -> str | None:
+    """Return the ``wikibase_qid`` stored on the entity's graph vertex, if any.
 
     Matches by ``name`` (the same key used elsewhere in this codebase
     for ``:__Entity__`` nodes — see ``src/graph/entity_resolution.py``).
@@ -282,7 +282,7 @@ def _lookup_qid_for_entity(neo4j_store: Any, entity: Any) -> str | None:
     a fresh Item.
     """
     try:
-        rows = neo4j_store.structured_query(
+        rows = graph_store.structured_query(
             """
             MATCH (n:__Entity__ {name: $name})
             WHERE n.wikibase_qid IS NOT NULL
@@ -305,10 +305,10 @@ def _lookup_qid_for_entity(neo4j_store: Any, entity: Any) -> str | None:
     return qid or None
 
 
-def _persist_qid_for_entity(neo4j_store: Any, entity: Any, qid: str) -> None:
-    """Stamp the freshly-created QID onto the entity's Neo4j node."""
+def _persist_qid_for_entity(graph_store: Any, entity: Any, qid: str) -> None:
+    """Stamp the freshly-created QID onto the entity's graph vertex."""
     try:
-        neo4j_store.structured_query(
+        graph_store.structured_query(
             """
             MATCH (n:__Entity__ {name: $name})
             SET n.wikibase_qid = $qid,
@@ -324,11 +324,11 @@ def _persist_qid_for_entity(neo4j_store: Any, entity: Any, qid: str) -> None:
 
 
 def _persist_property_pid(
-    neo4j_store: Any, label: str, pid: str, datatype: str,
+    graph_store: Any, label: str, pid: str, datatype: str,
 ) -> None:
     """Upsert a ``:WikibaseProperty`` cache row for a lazy-created Property."""
     try:
-        neo4j_store.structured_query(
+        graph_store.structured_query(
             """
             MERGE (p:WikibaseProperty {label: $label})
             SET p.pid = $pid, p.datatype = $dt, p.last_seen = datetime()
@@ -349,7 +349,7 @@ async def push_entities(
     entities: list[Any],
     relations: list[Any],
     *,
-    neo4j_store: Any,
+    graph_store: Any,
     wb_client: AsyncWikibase,
     base_class_qids: dict[str, str],
     property_pids: dict[str, str],
@@ -363,7 +363,7 @@ async def push_entities(
          identifying identifier-bearing edges by exactly-one endpoint
          being an identifier entity.  Other relations are queued as
          owner-owner statements.
-      3. For each owner: look up existing QID in Neo4j → update or
+      3. For each owner: look up existing QID in the graph store → update or
          create; collect identifier external-id claims; persist new
          QID back if created.
       4. For each owner-owner relation: lazy-create the relation
@@ -449,7 +449,7 @@ async def push_entities(
 
             all_claims = common_claims + ident_claims
 
-            existing_qid = _lookup_qid_for_entity(neo4j_store, owner)
+            existing_qid = _lookup_qid_for_entity(graph_store, owner)
             if existing_qid:
                 await wb_client.update_item(qid=existing_qid, claims=all_claims)
                 counts["updated_items"] += 1
@@ -466,7 +466,7 @@ async def push_entities(
                 )
                 counts["created_items"] += 1
                 qid_by_entity_id[owner.id] = qid
-                _persist_qid_for_entity(neo4j_store, owner, qid)
+                _persist_qid_for_entity(graph_store, owner, qid)
 
             # Record observed surface forms as aliases on the owner Item
             # (foundation for canonical entity linking — see
@@ -512,7 +512,7 @@ async def push_entities(
                 )
                 property_pids[rel.label] = pid
                 _persist_property_pid(
-                    neo4j_store, rel.label, pid, "wikibase-item",
+                    graph_store, rel.label, pid, "wikibase-item",
                 )
                 counts["new_properties_created"] += 1
             await wb_client.add_statement(

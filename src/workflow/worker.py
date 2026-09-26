@@ -6,7 +6,7 @@ Run with::
 
 Each worker pool runs in its OWN OS process (forked by the launcher),
 NOT as coroutines on one shared event loop.  This isolates the pools:
-a blocking/CPU-heavy stretch in one pool (e.g. a Neo4j upsert or a slow
+a blocking/CPU-heavy stretch in one pool (e.g. a Nebula upsert or a slow
 Ollama generation) can no longer freeze the others — each process has
 its own event loop AND its own GIL.
 

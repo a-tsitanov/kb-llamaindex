@@ -3,8 +3,8 @@
 Two small-tier activities backing ``GlobalSearchWorkflow``'s map-reduce
 over the community summaries built in R6:
 
-  * ``map_communities`` — read the stored ``:Community.summary`` texts
-    from Neo4j for a given level, bounded by ``limit``.  This is the set
+  * ``map_communities`` — read the stored ``Community.summary`` texts
+    from Nebula for a given level, bounded by ``limit``.  This is the set
     the MAP step fans out over.  Optionally ranked by lexical overlap with
     the query (cheap, deterministic) so the most relevant summaries map
     first when the corpus exceeds the limit.
@@ -62,7 +62,7 @@ _PARTIAL_SYSTEM = (
 
 
 def _get_store() -> Any | None:
-    """Build the Neo4j graph store (or ``None`` when unreachable).
+    """Build the Nebula graph store (or ``None`` when unreachable).
 
     Indirected for monkeypatching (mirrors ``community._get_store``)."""
     try:

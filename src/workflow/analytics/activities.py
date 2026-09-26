@@ -2,7 +2,7 @@
 
 Three activities:
   * analytical_plan      — NL → AnalysisPlan (LLM, "plan" role)
-  * execute_step         — run one primitive from CATALOG against Neo4j
+  * execute_step         — run one primitive from CATALOG against the graph store
   * synthesize_analytical — AnalysisPlan results → verbalized answer (LLM, "synthesis" role)
 
 Module-level lists for worker registration:

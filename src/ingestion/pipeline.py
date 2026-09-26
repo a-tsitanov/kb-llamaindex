@@ -114,7 +114,7 @@ def build_ingestion_pipeline(
             `TranslateToRussianTransform` AFTER identifier-canon —
             populates `node.metadata["translated_text"]` so the KG
             extractor can produce Russian-normalised entities while
-            Milvus / Neo4j chunks keep the original language.
+            Milvus chunks keep the original language.
             Defaults to `settings.ingestion.translate_to_russian`.
             Requires `translator_llm`; raises ValueError otherwise.
         translator_llm: LLM client used by the translator transform.

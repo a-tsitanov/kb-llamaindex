@@ -135,10 +135,10 @@ def _parse_report(text: str) -> dict:
 
 
 def _get_store() -> Any | None:
-    """Build the Neo4j graph store (or ``None`` when unreachable).
+    """Build the Nebula graph store (or ``None`` when unreachable).
 
     Indirected through a module-level fn so tests can monkeypatch it
-    without touching the heavy Neo4j factory."""
+    without touching the heavy graph-store factory."""
     try:
         from src.graph.store import build_graph_store
 
@@ -332,7 +332,7 @@ async def detect_communities_activity(
         len(communities), params.min_size, params.max_levels,
     )
     # Return SLIM refs (counts only): membership is already persisted in
-    # Neo4j by detect_* above, so the result stays O(num communities) and
+    # Nebula by detect_* above, so the result stays O(num communities) and
     # never trips Temporal's payload size limit on large graphs.
     return DetectCommunitiesResult(communities=[
         DetectedCommunity(
@@ -462,10 +462,10 @@ async def summarize_community_activity(
     report_vec = await _embed_report(title, summary)
 
     # 3b. Mirror the report vector through the CommunityReportVectorStore
-    #     seam (fail-open — never blocks persistence below).  On the
-    #     default neo4j/native backend this is a no-op (report_vec is
-    #     persisted on the :Community node by summ.write_report below);
-    #     under an opt-in Milvus backend this is the actual write.
+    #     seam (fail-open — never blocks persistence below).  This is
+    #     the Milvus ``community_report_vec`` write; Nebula has no
+    #     in-graph vector index, so the vector is never stored on the
+    #     Community vertex.
     if report_vec is not None:
         try:
             report_store = build_community_report_vector_store(store)

@@ -55,7 +55,7 @@ def build_summarize_specs(
     """Pure spec: detected communities → batchable summarize params.
 
     One ``SummarizeCommunityParams`` per community that NEEDS a report,
-    preserving id/level/member_count (members are read from Neo4j in the
+    preserving id/level/member_count (members are read from Nebula in the
     activity, not carried).  Communities carried over unchanged from a
     prior build (``needs_report=False``, set by ``detect_hierarchy``) are
     skipped — their report is already persisted.  Extracted so the fan-out

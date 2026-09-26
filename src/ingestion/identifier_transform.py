@@ -21,7 +21,7 @@ each chunk:
 A companion helper ``inject_canonical_entities(graph_store, nodes)``
 pre-populates the property-graph store with canonical entity nodes
 before the extractor runs — guarantees that ``+74952345678``,
-``7707083893`` etc. exist in Neo4j with the right type even if the
+``7707083893`` etc. exist in the graph with the right type even if the
 LLM later picks a verbatim form.
 """
 
@@ -79,7 +79,7 @@ class IdentifierCanonicalizationTransform(TransformComponent):
     Pure transformation — does NOT touch the graph store.  Injection
     is a separate step (``inject_canonical_entities``) so the
     transform stays callable in unit tests that don't care about
-    Neo4j.
+    the graph store.
     """
 
     def __call__(

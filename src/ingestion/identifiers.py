@@ -3,11 +3,11 @@
 Pre-LLM stage of the retrieval pipeline.  Detects business, digital
 and device identifiers in raw document text via regex / lib-based
 parsers and returns each match with a canonical form suitable for
-use as an ``entity_name`` in Neo4j.
+use as an ``entity_name`` in the graph.
 
 Why deterministic + canonical:
   Two documents may write the same phone as ``+7 (495) 123-45-67`` and
-  ``8 495 1234567``.  If we let the LLM extract both verbatim, Neo4j
+  ``8 495 1234567``.  If we let the LLM extract both verbatim, the graph
   ends up with two separate nodes — graph dedup breaks.  We pre-canon
   to E.164 (``+74951234567``) so identical entities collapse to one
   node regardless of source formatting.
@@ -30,7 +30,7 @@ Currently 24 types across three groups (see ``IdentifierType``):
 The output of ``extract_identifiers()`` is consumed by
 ``IdentifierCanonicalizationTransform`` in ``pipeline.py``, which:
   1. Calls ``inject_canonical_entities`` to upsert one canonical
-     ``EntityNode`` per ``(entity_type, canonical)`` pair into Neo4j —
+     ``EntityNode`` per ``(entity_type, canonical)`` pair into the graph —
      guarantees the canonical node exists before LLM extraction.
   2. Appends a ``Канонические идентификаторы:`` block to the chunk
      text so the LLM uses canonical forms when building relationships
@@ -1409,7 +1409,7 @@ def build_custom_kg_payload(
 
     ``description`` includes the verbatim original form and a small
     surrounding snippet so the node carries provenance once it lands in
-    Neo4j — useful both for the LLM (when it later relates entities
+    the graph — useful both for the LLM (when it later relates entities
     via ``ainsert(text)``) and for human auditing.
     """
     entities: list[dict] = []

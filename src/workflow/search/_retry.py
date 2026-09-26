@@ -54,7 +54,7 @@ DETECT_START_TO_CLOSE = timedelta(minutes=60)
 DETECT_SCHEDULE_TO_CLOSE = timedelta(minutes=90)
 
 # Detect-communities is heavy and resource-bound: a true OOM/resource error
-# will recur on retry and only pile load onto Neo4j/the worker, so it is
+# will recur on retry and only pile load onto the graph store/the worker, so it is
 # non-retryable.  Transient transport errors still get a couple of tries.
 DETECT_RETRY = RetryPolicy(
     initial_interval=timedelta(seconds=2),

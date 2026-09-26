@@ -1,11 +1,11 @@
 """Read-only graph-analysis admin endpoints (Track 7b).
 
-Thin glue over ``src.graph.analysis`` — runs GDS/Cypher analysis on the
-live ``__Entity__`` graph for operators.  Read-only, API-key gated, and
+Thin glue over ``src.graph.analysis`` — runs igraph/nGQL analysis on the
+live Nebula entity graph for operators.  Read-only, API-key gated, and
 fail-soft (the analysis layer returns safe empties rather than raising),
-so a GDS hiccup yields an empty result + a worker log, not a 500.
+so a query hiccup yields an empty result + a worker log, not a 500.
 
-The Neo4j store is built once (cached) — these are low-frequency admin
+The graph store is built once (cached) — these are low-frequency admin
 calls, not the query hot path.
 """
 

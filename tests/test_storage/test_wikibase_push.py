@@ -4,7 +4,7 @@ The :class:`AsyncWikibase` SDK wrapper is fully mocked — these tests
 exercise the orchestrator's partition + lookup + claim-assembly
 logic without round-tripping any real Wikibase instance.
 
-Neo4j is also mocked via ``structured_query.return_value`` to
+The graph store is also mocked via ``structured_query.return_value`` to
 control the existing-QID branch.
 """
 
@@ -31,7 +31,7 @@ def _wb_client() -> Any:
     return wb
 
 
-def _neo4j_store(existing_qid: str | None = None) -> Any:
+def _graph_store(existing_qid: str | None = None) -> Any:
     gs = MagicMock()
     if existing_qid is not None:
         gs.structured_query.return_value = [{"qid": existing_qid}]
@@ -61,18 +61,18 @@ def _property_pids() -> dict[str, str]:
 
 
 @pytest.mark.asyncio
-async def test_new_entity_gets_qid_and_writes_back_to_neo4j() -> None:
-    """Absent QID in Neo4j → ``create_item`` fires → QID stamped back
+async def test_new_entity_gets_qid_and_writes_back_to_graph_store() -> None:
+    """Absent QID in the graph store → ``create_item`` fires → QID stamped back
     onto the ``:__Entity__`` node via ``SET n.wikibase_qid``.
     """
     person = EntityNode(name="Анна Морозова", label="Person")
     wb = _wb_client()
-    gs = _neo4j_store(existing_qid=None)
+    gs = _graph_store(existing_qid=None)
 
     counts = await push_entities(
         entities=[person],
         relations=[],
-        neo4j_store=gs,
+        graph_store=gs,
         wb_client=wb,
         base_class_qids=_base_class_qids(),
         property_pids=_property_pids(),
@@ -95,15 +95,15 @@ async def test_new_entity_gets_qid_and_writes_back_to_neo4j() -> None:
 
 @pytest.mark.asyncio
 async def test_existing_qid_takes_update_path() -> None:
-    """Neo4j returns an existing QID → ``update_item`` fires, no create."""
+    """The graph store returns an existing QID → ``update_item`` fires, no create."""
     person = EntityNode(name="Анна Морозова", label="Person")
     wb = _wb_client()
-    gs = _neo4j_store(existing_qid="Q999")
+    gs = _graph_store(existing_qid="Q999")
 
     counts = await push_entities(
         entities=[person],
         relations=[],
-        neo4j_store=gs,
+        graph_store=gs,
         wb_client=wb,
         base_class_qids=_base_class_qids(),
         property_pids=_property_pids(),
@@ -128,12 +128,12 @@ async def test_identifier_entity_becomes_external_id_statement_on_owner() -> Non
     rel = Relation(label="has_phone", source_id=person.id, target_id=phone.id)
 
     wb = _wb_client()
-    gs = _neo4j_store(existing_qid=None)
+    gs = _graph_store(existing_qid=None)
 
     counts = await push_entities(
         entities=[person, phone],
         relations=[rel],
-        neo4j_store=gs,
+        graph_store=gs,
         wb_client=wb,
         base_class_qids=_base_class_qids(),
         property_pids=_property_pids(),
@@ -157,7 +157,7 @@ async def test_identifier_entity_becomes_external_id_statement_on_owner() -> Non
 async def test_lazy_relation_property_creation() -> None:
     """Owner-owner relation with unseen label → ``create_property``
     fires once; the PID is cached both in ``property_pids`` and in
-    Neo4j via a MERGE on ``:WikibaseProperty``.
+    the graph store via a MERGE on ``:WikibaseProperty``.
     """
     person = EntityNode(name="Анна Морозова", label="Person")
     org = EntityNode(name="ACME", label="Organization")
@@ -166,8 +166,8 @@ async def test_lazy_relation_property_creation() -> None:
     )
 
     wb = _wb_client()
-    # Neo4j returns no existing QID for either entity → both get created.
-    gs = _neo4j_store(existing_qid=None)
+    # The graph store returns no existing QID for either entity → both get created.
+    gs = _graph_store(existing_qid=None)
 
     property_pids = _property_pids()  # EMPLOYMENT is NOT in here
     assert "EMPLOYMENT" not in property_pids
@@ -175,7 +175,7 @@ async def test_lazy_relation_property_creation() -> None:
     counts = await push_entities(
         entities=[person, org],
         relations=[rel],
-        neo4j_store=gs,
+        graph_store=gs,
         wb_client=wb,
         base_class_qids=_base_class_qids(),
         property_pids=property_pids,
@@ -210,12 +210,12 @@ async def test_orphan_identifier_with_no_owner_relation_is_skipped() -> None:
     phone = EntityNode(name="+74951234567", label="PhoneNumber")
 
     wb = _wb_client()
-    gs = _neo4j_store(existing_qid=None)
+    gs = _graph_store(existing_qid=None)
 
     counts = await push_entities(
         entities=[phone],
         relations=[],
-        neo4j_store=gs,
+        graph_store=gs,
         wb_client=wb,
         base_class_qids=_base_class_qids(),
         property_pids=_property_pids(),

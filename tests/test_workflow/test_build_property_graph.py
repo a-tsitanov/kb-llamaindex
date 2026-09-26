@@ -6,15 +6,15 @@ import pytest
 
 from src.ingestion.identifier_transform import _AUGMENT_METADATA_KEY
 from src.workflow.activities.build_property_graph import (
-    _strip_neo4j_unsafe_metadata,
+    _strip_graph_unsafe_metadata,
     build_property_graph,
 )
 from src.workflow.contracts import Ctx, KGExtracted, Merged, Parsed
 
 
-def test_strip_neo4j_unsafe_removes_augment_key() -> None:
+def test_strip_graph_unsafe_removes_augment_key() -> None:
     """``canonical_identifiers_augment`` must be removed from Chunk node
-    metadata before Neo4j upsert — consistent with fix #5's goal of keeping
+    metadata before the graph upsert — consistent with fix #5's goal of keeping
     the augment block out of all stores."""
     node = MagicMock()
     node.metadata = {
@@ -22,7 +22,7 @@ def test_strip_neo4j_unsafe_removes_augment_key() -> None:
         _AUGMENT_METADATA_KEY: "Канонические идентификаторы: +79001234567 (PHONE)",
         "canonical_identifiers": [{"canonical": "+79001234567"}],
     }
-    _strip_neo4j_unsafe_metadata([node])
+    _strip_graph_unsafe_metadata([node])
     assert _AUGMENT_METADATA_KEY not in node.metadata
     assert "canonical_identifiers" not in node.metadata
     assert node.metadata.get("safe_key") == "value"
