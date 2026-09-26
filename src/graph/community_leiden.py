@@ -1,6 +1,6 @@
 """In-worker Leiden community detection (leidenalg/igraph).
 
-Produces the SAME ``rows`` shape as the GDS path
+Produces the ``rows`` shape
 (``[{name, communityId, ids}]``, ``ids`` finest->coarsest) so
 ``communities._coarsest_from_rows`` / ``_group_by_levels`` and all
 :Community persistence are reused unchanged.  Memory lives in the worker
@@ -81,8 +81,8 @@ def hierarchy_rows(
 ) -> list[dict]:
     """Build a Leiden dendrogram by iterative aggregation.
 
-    Returns rows ``[{name, communityId, ids:[finest..coarsest]}]`` matching
-    the GDS ``intermediateCommunityIds`` contract.
+    Returns rows ``[{name, communityId, ids:[finest..coarsest]}]`` (the
+    shape ``communities._group_by_levels`` consumes).
     """
     import igraph as ig
     import leidenalg as la
