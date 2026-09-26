@@ -327,7 +327,7 @@ async def test_detect_forwards_gamma_to_leiden(leiden):
         {"name": "C", "communityId": 1},
     ]
     leiden(rows)
-    await detect_communities(_Store(), min_size=3, gamma=3.0, concurrency=6)
+    await detect_communities(_Store(), min_size=3, gamma=3.0)
     assert leiden.seen and leiden.seen[0]["gamma"] == 3.0
 
 
@@ -341,27 +341,41 @@ async def test_detect_hierarchy_forwards_gamma_to_leiden(leiden):
         {"name": "C", "communityId": 1, "ids": [1, 1]},
     ]
     leiden(rows)
-    await detect_hierarchy(_Store(), max_levels=2, min_size=3,
-                           gamma=2.0, concurrency=2)
+    await detect_hierarchy(_Store(), max_levels=2, min_size=3, gamma=2.0)
     assert leiden.seen and leiden.seen[0]["gamma"] == 2.0
     assert leiden.seen[0]["max_levels"] == 2
 
 
-def test_detect_communities_params_carry_gamma_concurrency():
+def test_detect_communities_params_carry_gamma_no_concurrency():
     from src.workflow.contracts import DetectCommunitiesParams
 
     p = DetectCommunitiesParams()
     assert p.gamma == 1.0
-    assert p.concurrency == 4
-    p2 = DetectCommunitiesParams(gamma=2.0, concurrency=8)
-    assert p2.gamma == 2.0 and p2.concurrency == 8
+    assert "concurrency" not in DetectCommunitiesParams.model_fields
+    p2 = DetectCommunitiesParams(gamma=2.0)
+    assert p2.gamma == 2.0
+    # In-flight Temporal payloads serialised before the GDS knob was removed
+    # still carry ``concurrency``; the model ignores extra keys.
+    legacy = DetectCommunitiesParams.model_validate(
+        {"min_size": 5, "gamma": 1.5, "concurrency": 8},
+    )
+    assert legacy.min_size == 5 and legacy.gamma == 1.5
+
+
+def test_detect_functions_have_no_concurrency_param():
+    import inspect
+
+    from src.graph.communities import detect_communities, detect_hierarchy
+
+    assert "concurrency" not in inspect.signature(detect_communities).parameters
+    assert "concurrency" not in inspect.signature(detect_hierarchy).parameters
 
 
 def test_community_leiden_settings_defaults():
     from src.config import settings
 
     assert settings.temporal.community_leiden_gamma == 1.0
-    assert settings.temporal.community_leiden_concurrency == 4
+    assert not hasattr(settings.temporal, "community_leiden_concurrency")
 
 
 # ── Task 4: BUILD write-back routed through the CommunityWriteback seam ──

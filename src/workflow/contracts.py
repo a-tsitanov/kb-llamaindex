@@ -550,7 +550,7 @@ class CommunityRef(_Frozen):
 
 
 class DetectCommunitiesParams(_Frozen):
-    """Input to ``detect_communities_activity`` — GDS Leiden detection.
+    """Input to ``detect_communities_activity`` — Leiden detection.
 
     ``min_size`` drops communities below the threshold (noise); ``level``
     tags the written ``:Community`` nodes (single-level for R6, kept for a
@@ -559,16 +559,17 @@ class DetectCommunitiesParams(_Frozen):
     ``>1`` == materialise the dendrogram HIERARCHY (``detect_hierarchy``).
     Phase 5 wires ``max_levels`` from config.
 
-    ``gamma`` (Leiden resolution) and ``concurrency`` (GDS worker threads)
-    are snapshotted from config at workflow-start (the trigger route) and
-    carried here so the activity is deterministic — it never re-reads env.
+    ``gamma`` (Leiden resolution) is snapshotted from config at
+    workflow-start (the trigger route) and carried here so the activity is
+    deterministic — it never re-reads env.  In-flight payloads that still
+    carry the removed GDS ``concurrency`` key deserialise fine: the model
+    ignores extra fields (pydantic default).
     """
 
     min_size: int = 3
     level: int = 0
     max_levels: int = 1
     gamma: float = 1.0
-    concurrency: int = 4
 
 
 class DetectedCommunity(_Frozen):

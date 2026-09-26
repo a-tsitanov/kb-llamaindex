@@ -225,7 +225,6 @@ async def detect_communities(
     min_size: int = 3,
     level: int = 0,
     gamma: float = 1.0,
-    concurrency: int = 4,
 ) -> list[CommunityRef]:
     """Run Leiden over the entity graph and materialise ``:Community``.
 
@@ -238,8 +237,7 @@ async def detect_communities(
 
     Returns the detected communities (``member_count >= min_size``).
     Fail-safe: ``store is None`` or ANY detection error → ``[]`` (logged,
-    never raised) so the calling activity stays green.  ``concurrency`` was
-    the GDS thread count and is accepted but ignored (no in-worker use).
+    never raised) so the calling activity stays green.
     """
     if store is None:
         logger.info("communities: no graph store — skipping detection")
@@ -326,7 +324,6 @@ async def detect_hierarchy(
     max_levels: int,
     min_size: int = 3,
     gamma: float = 1.0,
-    concurrency: int = 4,
 ) -> list[CommunityRef]:
     """Run Leiden over the entity graph and materialise the community
     HIERARCHY (up to ``max_levels`` dendrogram levels).
@@ -345,7 +342,7 @@ async def detect_hierarchy(
 
     Returns the detected communities across all levels (coarsest first).
     Fail-safe: ``store is None`` or ANY detection error → ``[]`` (logged,
-    never raised).  ``concurrency`` is accepted but ignored (was GDS-only).
+    never raised).
     """
     if store is None:
         logger.info("communities: no graph store — skipping hierarchy detection")

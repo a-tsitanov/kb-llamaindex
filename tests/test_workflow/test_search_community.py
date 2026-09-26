@@ -522,7 +522,7 @@ async def test_detect_activity_strips_members_from_result(monkeypatch):
     from src.workflow.contracts import CommunityRef, DetectCommunitiesParams
     from src.workflow.search.activities.community import detect_communities_activity
 
-    async def fake_single(store, *, min_size, level=0, gamma=1.0, concurrency=4):
+    async def fake_single(store, *, min_size, level=0, gamma=1.0):
         return [CommunityRef(
             community_id="9", level=0, members=["a", "b", "c", "d"])]
 
@@ -696,11 +696,11 @@ async def test_detect_activity_hierarchy_branch(monkeypatch):
 
     calls = {"hierarchy": 0, "single": 0}
 
-    async def fake_hierarchy(store, *, max_levels, min_size, gamma=1.0, concurrency=4):
+    async def fake_hierarchy(store, *, max_levels, min_size, gamma=1.0):
         calls["hierarchy"] += 1
         return [CommunityRef(community_id="1", level=0, members=["a", "b"])]
 
-    async def fake_single(store, *, min_size, level=0, gamma=1.0, concurrency=4):
+    async def fake_single(store, *, min_size, level=0, gamma=1.0):
         calls["single"] += 1
         return []
 

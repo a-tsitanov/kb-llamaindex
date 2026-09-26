@@ -297,7 +297,6 @@ async def rebuild_communities() -> dict[str, str]:
                 level=0,
                 max_levels=settings.agent.community_max_levels,
                 gamma=settings.temporal.community_leiden_gamma,
-                concurrency=settings.temporal.community_leiden_concurrency,
             ),
             id=f"community-build-{request_id}",
             task_queue=settings.temporal.graph_build_task_queue,
