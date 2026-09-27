@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 
 from src.config import settings
 
@@ -65,6 +65,7 @@ def _args(raw: str | None) -> dict:
 
 class OpenAICompatLLM:
     def __init__(self, client: Any | None = None) -> None:
+        self._no_json_mode: set[str] = set()
         self._client = client or AsyncOpenAI(
             base_url=settings.litellm.base_url,
             api_key=settings.litellm.api_key.get_secret_value(),
@@ -91,7 +92,17 @@ class OpenAICompatLLM:
         return ChatReply(text=msg.content, tool_calls=calls)
 
     async def json(self, *, model: str, messages: list[dict]) -> dict:
-        resp = await self._client.chat.completions.create(
-            model=model, messages=messages, response_format={"type": "json_object"},
-        )
+        if model not in self._no_json_mode:
+            try:
+                resp = await self._client.chat.completions.create(
+                    model=model, messages=messages, response_format={"type": "json_object"},
+                )
+                return extract_json(resp.choices[0].message.content or "")
+            except BadRequestError as e:
+                # Some backends (MLX in Unsloth Studio, plain servers) have no JSON mode:
+                # remember that and ask for plain text — extract_json handles fences.
+                if "response_format" not in str(e):
+                    raise
+                self._no_json_mode.add(model)
+        resp = await self._client.chat.completions.create(model=model, messages=messages)
         return extract_json(resp.choices[0].message.content or "")
