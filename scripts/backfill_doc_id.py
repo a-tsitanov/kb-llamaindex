@@ -45,7 +45,7 @@ from src.storage.backfill import (
     row_to_node,
 )
 from src.storage.postgres import AsyncPostgres
-from src.tenancy.context import default_graph_context
+from src.tenancy.context import GraphContext, cli_graph_context
 from src.utils.logging import configure_logging
 
 # Milvus output fields: everything (metadata/_node_content/dynamic) plus
@@ -72,8 +72,8 @@ def _iter_rows(client: MilvusClient, collection: str, batch_size: int):
         it.close()
 
 
-async def _load_path_index() -> dict[str, str]:
-    pg = AsyncPostgres(graph=default_graph_context())
+async def _load_path_index(graph: GraphContext) -> dict[str, str]:
+    pg = AsyncPostgres(graph=graph)
     rows = await pg.list_id_path()
     return build_path_index(rows)
 
@@ -85,16 +85,19 @@ def main(argv: list[str] | None = None) -> int:
         help="actually re-insert chunks with doc_id (default: dry-run)",
     )
     parser.add_argument("--batch-size", type=int, default=1000)
+    parser.add_argument(
+        "--graph", default="default", help="target graph id (default: %(default)s)",
+    )
     parser.set_defaults(dry_run=True)
     args = parser.parse_args(argv)
 
     configure_logging()
+    graph = cli_graph_context(args.graph)
 
-    path_to_doc = asyncio.run(_load_path_index())
+    path_to_doc = asyncio.run(_load_path_index(graph))
     logger.info("backfill doc_id: {n} registered documents", n=len(path_to_doc))
 
     client = MilvusClient(uri=settings.milvus.uri, timeout=settings.milvus.timeout_s)
-    graph = default_graph_context()
     collection = graph.chunks_collection
     store = build_vector_store(graph)
 

@@ -21,7 +21,7 @@ import psycopg
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.storage.pg_scope import graph_connection, search_path_sql
-from src.tenancy.context import GraphContext, transitional_default_graph
+from src.tenancy.context import GraphContext
 
 
 class MetricRow(BaseModel):
@@ -116,7 +116,7 @@ class AsyncIngestMetrics:
                 yield conn
 
 
-def build_ingest_metrics_store(graph: GraphContext | None = None) -> AsyncIngestMetrics:
-    """Factory consistent with the rest of ``src/storage/``.  Activities pass
-    their resolved graph; ``None`` keeps the default graph for legacy callers."""
-    return AsyncIngestMetrics(graph=graph or transitional_default_graph())
+def build_ingest_metrics_store(graph: GraphContext) -> AsyncIngestMetrics:
+    """Factory consistent with the rest of ``src/storage/``.  Callers pass
+    the graph they resolved (activities: from ``graph_id``)."""
+    return AsyncIngestMetrics(graph=graph)

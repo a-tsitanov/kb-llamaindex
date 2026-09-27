@@ -10,13 +10,21 @@ import httpx
 from loguru import logger
 
 from src.bot.answers import is_empty_answer
+from src.tenancy.context import DEFAULT_GRAPH_ID
 
 SearchFn = Callable[[str], Awaitable[str]]
 _VALID_MODES = frozenset({"auto", "local", "global", "drift"})
 
 
+def _headers(api_key: str, graph: str) -> dict[str, str]:
+    """Every KB call carries the key AND the graph it is bound to (BOT_GRAPH),
+    so a multi-graph key never gets a 400 and the bot never drifts graphs."""
+    return {"X-API-Key": api_key, "X-Graph": graph}
+
+
 def make_search(
-    *, api_base: str, api_key: str, mode: str = "auto", timeout_s: float = 120.0,
+    *, api_base: str, api_key: str, graph: str = DEFAULT_GRAPH_ID,
+    mode: str = "auto", timeout_s: float = 120.0,
 ) -> Callable[[str], Awaitable[str]]:
     """Build an async ``search(query) -> answer`` bound to one search mode.
 
@@ -30,7 +38,7 @@ def make_search(
     async def search(query: str) -> str:
         async with httpx.AsyncClient(timeout=timeout_s) as http:
             resp = await http.post(
-                url, headers={"X-API-Key": api_key}, json={"query": query},
+                url, headers=_headers(api_key, graph), json={"query": query},
             )
             resp.raise_for_status()
             return (resp.json() or {}).get("answer") or ""
@@ -39,7 +47,7 @@ def make_search(
 
 
 def make_search_full(
-    *, api_base: str, api_key: str, mode: str = "auto",
+    *, api_base: str, api_key: str, graph: str = DEFAULT_GRAPH_ID, mode: str = "auto",
     timeout_s: float = 180.0, synthesize: bool = True,
 ) -> Callable[[str], Awaitable[dict]]:
     """Like ``make_search`` but returns the WHOLE payload, not just the text.
@@ -64,7 +72,7 @@ def make_search_full(
         async with httpx.AsyncClient(timeout=timeout_s) as http:
             resp = await http.post(
                 url,
-                headers={"X-API-Key": api_key},
+                headers=_headers(api_key, graph),
                 json={"query": query, "synthesize": synthesize},
             )
             resp.raise_for_status()
@@ -78,7 +86,7 @@ def make_search_full(
 
 
 def make_analyze(
-    *, api_base: str, api_key: str, timeout_s: float = 180.0,
+    *, api_base: str, api_key: str, graph: str = DEFAULT_GRAPH_ID, timeout_s: float = 180.0,
 ) -> SearchFn:
     """Build an async ``analyze(query) -> answer`` over the analytical layer
     (POST /api/v1/analyze — plan→compute→synthesize over the graph). Same
@@ -88,7 +96,7 @@ def make_analyze(
     async def analyze(query: str) -> str:
         async with httpx.AsyncClient(timeout=timeout_s) as http:
             resp = await http.post(
-                url, headers={"X-API-Key": api_key}, json={"query": query},
+                url, headers=_headers(api_key, graph), json={"query": query},
             )
             resp.raise_for_status()
             return (resp.json() or {}).get("answer") or ""

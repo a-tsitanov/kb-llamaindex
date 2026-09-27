@@ -77,6 +77,15 @@ def new_graph_context(graph_id: str, *, nebula_partition_num: int = 10) -> Graph
     )
 
 
+def cli_graph_context(graph_id: str) -> GraphContext:
+    """``--graph`` for CLIs/scripts that may run without PG (no registry):
+    ``default`` → :func:`default_graph_context`, anything else →
+    :func:`new_graph_context` (validated slug, conventional physical names)."""
+    if graph_id == DEFAULT_GRAPH_ID:
+        return default_graph_context()
+    return new_graph_context(graph_id)
+
+
 def graph_scoped_id(prefix: str, graph_id: str, suffix: str) -> str:
     """Temporal workflow id; `default` keeps its pre-multi-graph id (R-A2)."""
     if graph_id == DEFAULT_GRAPH_ID:

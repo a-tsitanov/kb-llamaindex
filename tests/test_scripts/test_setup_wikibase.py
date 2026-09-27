@@ -52,10 +52,14 @@ def test_persist_cache_writes_two_node_types() -> None:
         "PhoneNumber":       ("P3", "external-id"),
     }
 
+    from src.tenancy.context import new_graph_context
+
     with patch(
         "scripts.setup_wikibase.build_graph_store", return_value=gs
-    ):
-        _persist_cache(base_qids, property_pids)
+    ) as build:
+        _persist_cache(base_qids, property_pids, new_graph_context("acme"))
+
+    assert build.call_args.args[0].id == "acme"
 
     # 2 base + 2 properties = 4 queries.
     assert gs.structured_query.call_count == 4

@@ -18,6 +18,7 @@ from src.storage.ingest_metrics import (
     MetricRow,
     build_ingest_metrics_store,
 )
+from src.tenancy.context import default_graph_context
 
 
 def _pg_reachable() -> bool:
@@ -62,8 +63,13 @@ def _cleanup(workflow_run_id: str) -> None:
 
 
 def test_build_returns_async_wrapper():
-    s = build_ingest_metrics_store()
+    s = build_ingest_metrics_store(default_graph_context())
     assert isinstance(s, AsyncIngestMetrics)
+
+
+def test_build_requires_a_graph():
+    with pytest.raises(TypeError):
+        build_ingest_metrics_store()  # type: ignore[call-arg]
 
 
 def test_bulk_insert_then_dedup_on_unique_constraint():
@@ -77,7 +83,7 @@ def test_bulk_insert_then_dedup_on_unique_constraint():
     )]
 
     async def go() -> tuple[int, int]:
-        store = build_ingest_metrics_store()
+        store = build_ingest_metrics_store(default_graph_context())
         first = await store.insert_metrics(rows)
         second = await store.insert_metrics(rows)   # re-emit identical batch
         return first, second
@@ -92,7 +98,7 @@ def test_bulk_insert_then_dedup_on_unique_constraint():
 
 def test_empty_batch_is_noop():
     async def go() -> int:
-        store = build_ingest_metrics_store()
+        store = build_ingest_metrics_store(default_graph_context())
         return await store.insert_metrics([])
     assert asyncio.run(go()) == 0
 
@@ -108,7 +114,7 @@ def test_retry_writes_attempt_as_separate_row():
     ]
 
     async def go() -> int:
-        store = build_ingest_metrics_store()
+        store = build_ingest_metrics_store(default_graph_context())
         return await store.insert_metrics(rows)
 
     try:

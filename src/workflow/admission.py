@@ -6,7 +6,8 @@ started, runs to completion as a priority unit instead of its tail
 scheduling logic lives here (deterministic, unit-tested); the Temporal
 ``IngestSchedulerWorkflow`` is just a thin shell around it.
 
-Keyed by ``doc_id`` (a string) — the workflow maps ids back to the full
+Keyed by an opaque string (the scheduler uses ``admission_key`` =
+``"<graph_id>:<doc_id>"``) — the workflow maps keys back to the full
 ``IngestParams`` it carries.
 """
 

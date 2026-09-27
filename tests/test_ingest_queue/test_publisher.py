@@ -55,3 +55,27 @@ async def test_publish_defaults_to_live_priority(monkeypatch) -> None:
     await publisher.publish_ingest(_params())
 
     assert captured["msg"].priority == PRIO_LIVE
+
+
+async def _publish_capture(monkeypatch, params: IngestParams) -> dict:
+    captured: dict = {}
+    channel = _fake_channel(captured)
+    conn = MagicMock()
+    conn.channel = AsyncMock(return_value=channel)
+    monkeypatch.setattr(publisher, "_get_connection", AsyncMock(return_value=conn))
+    monkeypatch.setattr(publisher, "declare_ingest_topology", AsyncMock())
+    await publisher.publish_ingest(params)
+    return captured
+
+
+@pytest.mark.asyncio
+async def test_default_graph_message_id_is_bare_doc_id(monkeypatch) -> None:
+    captured = await _publish_capture(monkeypatch, _params())
+    assert captured["msg"].message_id == "doc-1"
+
+
+@pytest.mark.asyncio
+async def test_other_graph_message_id_is_admission_key(monkeypatch) -> None:
+    params = IngestParams(doc_id="doc-1", path="s3://b/k", graph_id="acme")
+    captured = await _publish_capture(monkeypatch, params)
+    assert captured["msg"].message_id == "acme:doc-1"

@@ -24,3 +24,17 @@ def test_channels_subcommand_uses_source_channel() -> None:
         cls.return_value.status_counts_by = AsyncMock(return_value=fake)
         main(["channels"])
     assert cls.return_value.status_counts_by.call_args.args[0] == "source_channel"
+
+
+def test_graph_option_selects_the_graph() -> None:
+    with patch("scripts.message_stats.AsyncPostgres") as cls:
+        cls.return_value.status_counts_by = AsyncMock(return_value=[])
+        main(["--graph", "acme", "channels"])
+    assert cls.call_args.kwargs["graph"].id == "acme"
+
+
+def test_graph_option_defaults_to_default() -> None:
+    with patch("scripts.message_stats.AsyncPostgres") as cls:
+        cls.return_value.status_counts_by = AsyncMock(return_value=[])
+        main(["channels"])
+    assert cls.call_args.kwargs["graph"].id == "default"

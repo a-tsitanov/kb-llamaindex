@@ -1143,6 +1143,11 @@ class BotSettings(BaseSettings):
     api_key: str = Field(
         default="", description="X-API-Key for the search API. Empty → falls back to API_KEYS[0].",
     )
+    graph: str = Field(
+        default="default",
+        description="Graph id the bot queries (BOT_GRAPH): sent as X-Graph on every "
+        "API call. The API key must be allowed this graph.",
+    )
     search_mode: str = Field(
         default="local",
         description="Primary search mode: auto | local | global | drift. `local` is "

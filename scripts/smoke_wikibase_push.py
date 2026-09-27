@@ -11,7 +11,7 @@ lookup path.
 
 Usage::
 
-    uv run python -m scripts.smoke_wikibase_push
+    uv run python -m scripts.smoke_wikibase_push [--graph acme]
 
 Requires:
   * docker compose --profile wikibase --profile nebula up -d
@@ -23,6 +23,7 @@ Requires:
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import os
 import sys
@@ -38,13 +39,15 @@ load_dotenv()
 from src.config import WikibaseSettings, settings  # noqa: E402
 from src.graph.store import build_graph_store  # noqa: E402
 from src.storage.wikibase import AsyncWikibase, push_entities  # noqa: E402
-from src.tenancy.context import default_graph_context  # noqa: E402
+from src.tenancy.context import GraphContext, cli_graph_context  # noqa: E402
 from src.utils.logging import configure_logging  # noqa: E402
 
 
-def _load_cache_from_graph() -> tuple[dict[str, str], dict[str, str]]:
+def _load_cache_from_graph(
+    graph: GraphContext,
+) -> tuple[dict[str, str], dict[str, str]]:
     """Pull cached base-class QIDs + property PIDs from the graph store."""
-    gs = build_graph_store(default_graph_context())
+    gs = build_graph_store(graph)
     base = gs.structured_query(
         "MATCH (b:WikibaseBaseClass) RETURN b.label AS label, b.qid AS qid",
     )
@@ -56,7 +59,12 @@ def _load_cache_from_graph() -> tuple[dict[str, str], dict[str, str]]:
     return base_qids, property_pids
 
 
-async def main() -> int:
+async def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--graph", default="default", help="target graph id (default: %(default)s)",
+    )
+    graph = cli_graph_context(parser.parse_args(argv).graph)
     configure_logging(level="info", json_output=False)
 
     # Allow admin-creds fallback like setup_wikibase.py does.
@@ -74,7 +82,7 @@ async def main() -> int:
 
     logger.info("smoke  base_url={u}  user={n}", u=cfg.base_url, n=cfg.bot_user)
 
-    base_qids, property_pids = _load_cache_from_graph()
+    base_qids, property_pids = _load_cache_from_graph(graph)
     logger.info(
         "smoke  cache  base_qids={b}  property_pids={p}",
         b=len(base_qids), p=len(property_pids),
@@ -92,7 +100,7 @@ async def main() -> int:
         label="has_phone", source_id=person.id, target_id=phone.id,
     )
 
-    gs = build_graph_store(default_graph_context())
+    gs = build_graph_store(graph)
     counts = await push_entities(
         entities=[person, phone],
         relations=[rel],

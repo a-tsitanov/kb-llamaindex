@@ -57,7 +57,7 @@ load_dotenv()
 from src.config import settings  # noqa: E402
 from src.graph.store import build_graph_store  # noqa: E402
 from src.ingestion.identifiers import IdentifierType  # noqa: E402
-from src.tenancy.context import default_graph_context  # noqa: E402
+from src.tenancy.context import GraphContext, cli_graph_context  # noqa: E402
 from src.utils.logging import configure_logging  # noqa: E402
 
 # ── taxonomy ─────────────────────────────────────────────────────────
@@ -290,9 +290,11 @@ def _ensure_property(
 def _persist_cache(
     base_qids: dict[str, str],
     property_pids: dict[str, tuple[str, str]],
+    graph: GraphContext,
 ) -> None:
-    """Upsert ``:WikibaseBaseClass`` and ``:WikibaseProperty`` nodes."""
-    gs = build_graph_store(default_graph_context())
+    """Upsert ``:WikibaseBaseClass`` and ``:WikibaseProperty`` nodes into
+    ``graph``'s store."""
+    gs = build_graph_store(graph)
     for label, qid in base_qids.items():
         if not qid:
             continue
@@ -326,7 +328,12 @@ def main() -> int:
         help="Refresh graph-store cache from existing Wikibase entities; "
              "do not create anything new.",
     )
+    parser.add_argument(
+        "--graph", default="default",
+        help="graph whose store receives the cache (default: %(default)s)",
+    )
     args = parser.parse_args()
+    graph = cli_graph_context(args.graph)
 
     configure_logging(level=settings.api.log_level, json_output=False)
     cfg = settings.wikibase
@@ -382,7 +389,7 @@ def main() -> int:
 
     # 4. Persist into graph-store cache (skip when dry-run)
     if not args.dry_run:
-        _persist_cache(base_qids, property_pids)
+        _persist_cache(base_qids, property_pids, graph)
 
     logger.info(
         "wikibase bootstrap done  base={b}  common={c}  identifier={i}  "

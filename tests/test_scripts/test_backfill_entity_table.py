@@ -96,3 +96,42 @@ def test_retries_are_bounded_and_the_error_surfaces(monkeypatch):
     store = _FlakyStore(["Аня"], fail_times=99)
     with pytest.raises(RuntimeError, match="high watermark"):
         backfill(store, page=10, retries=2, sink=lambda rows: None)
+
+
+def test_default_sink_mirrors_into_the_given_graph(monkeypatch):
+    """Without a sink, rows go to ``mirror_entities(graph, rows)`` — the
+    graph the script was pointed at (``--graph``), not an implicit default."""
+    import src.graph.entity_table as et
+    from src.tenancy.context import new_graph_context
+
+    calls = []
+    monkeypatch.setattr(et, "mirror_entities", lambda g, rows: calls.append((g.id, len(rows))))
+    copied, _ = backfill(
+        _StubStore(["Аня", "Борис"]), page=10, graph=new_graph_context("acme"),
+    )
+    assert copied == 2
+    assert calls == [("acme", 2)]
+
+
+def test_default_sink_requires_a_graph():
+    with pytest.raises(ValueError):
+        backfill(_StubStore(["Аня"]), page=10)
+
+
+def test_main_resolves_graph_option(monkeypatch):
+    import sys
+
+    import scripts.backfill_entity_table as mod
+    import src.graph.store as gs
+
+    seen = {}
+    monkeypatch.setattr(gs, "build_graph_store", lambda g: seen.setdefault("store", g.id))
+
+    def _fake_backfill(store, **kw):
+        seen["sink"] = kw["graph"].id
+        return 0, None
+
+    monkeypatch.setattr(mod, "backfill", _fake_backfill)
+    monkeypatch.setattr(sys, "argv", ["backfill_entity_table", "--graph", "acme"])
+    mod.main()
+    assert seen == {"store": "acme", "sink": "acme"}

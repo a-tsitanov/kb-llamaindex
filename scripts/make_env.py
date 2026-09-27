@@ -413,6 +413,7 @@ _ENV_DESCRIPTIONS: dict[str, str] = {
     "BOT_DEFAULT_DAILY_QUOTA": "Запросов в сутки на нового пользователя. Считаются все попытки, включая отказы. 0 = без ограничений.",
     "BOT_API_BASE": "Base URL поискового API, который дёргает бот (по умолчанию compose-internal http://api:8000).",
     "BOT_API_KEY": "X-API-Key для поискового API от лица бота. Пусто → берётся первый ключ из API_KEYS.",
+    "BOT_GRAPH": "Граф, к которому обращается бот: уходит заголовком X-Graph в каждом запросе к API. Ключ бота должен иметь доступ к этому графу. По умолчанию default.",
     "BOT_FALLBACK_MODE": "Fallback-режим поиска, если основной вернул пусто/ошибку (auto|local|global|drift). Пустая строка = без fallback.",
     "BOT_MAX_MESSAGES": "Сколько последних сообщений чата держать в скользящем окне разговора бота. >= 1.",
     "BOT_SEARCH_MODE": "Основной режим поиска бота: auto | local | global | drift.",

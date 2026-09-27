@@ -10,6 +10,7 @@ from src.config import settings
 from src.graph.store import build_graph_store
 from src.graph.wiki_dirty import mark_dirty
 from src.tenancy.activity import resolve_graph_for_activity
+from src.tenancy.context import DEFAULT_GRAPH_ID
 from src.workflow.contracts import MarkDirtyIn
 
 
@@ -20,6 +21,14 @@ def _dirty_names(payload: MarkDirtyIn) -> set[str]:
 @activity.defn
 async def mark_entities_dirty(payload: MarkDirtyIn) -> int:
     if not settings.wiki.enabled:
+        return 0
+    if payload.graph_id != DEFAULT_GRAPH_ID:
+        # D6 / Plan A: the wiki is a single artifact of the default graph;
+        # other graphs keep no wiki bookkeeping.
+        activity.logger.info(
+            "mark_entities_dirty skipped: wiki is default-graph-only (graph=%s)",
+            payload.graph_id,
+        )
         return 0
     names = sorted(_dirty_names(payload))
     if not names:

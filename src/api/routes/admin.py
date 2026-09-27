@@ -44,6 +44,16 @@ async def wiki_rebuild(
     return {"status": "started", "workflow_id": handle.id}
 
 
+def _require_default_graph_for_monitor(graph: GraphContext) -> None:
+    # R-P4: monitoring (sweep + watchlist) is default-graph-only in Plan A —
+    # MonitorSweepWorkflow is zero-arg with a fixed id and sweeps `default`.
+    if not graph.is_default:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "monitor is available only for the default graph",
+        )
+
+
 monitor_router = APIRouter(
     prefix="/admin/monitor", tags=["admin"], dependencies=[Depends(require_admin)],
 )
@@ -51,8 +61,8 @@ monitor_router = APIRouter(
 
 @monitor_router.post("/sweep")
 async def monitor_sweep(graph: GraphContext = Depends(resolve_graph)) -> dict:
-    # MonitorSweepWorkflow is default-only in Plan A (zero-arg run, fixed id);
-    # the graph dependency still authenticates and authorizes the caller.
+    # MonitorSweepWorkflow is default-only in Plan A (zero-arg run, fixed id).
+    _require_default_graph_for_monitor(graph)
     if not settings.monitor.enabled:
         return {"status": "disabled"}
     client = await get_temporal_client()
@@ -74,5 +84,6 @@ async def monitor_watch(
     # watchlist is the input the sweep consumes, so operators pre-seed it while
     # monitoring is still dark, then flip MONITOR_ENABLED on. `names` binds to
     # the JSON body (a string array); `watched` is a query param.
+    _require_default_graph_for_monitor(graph)
     mark_watched(build_graph_store(graph), names, watched)
     return {"status": "ok", "count": len(names), "watched": watched}

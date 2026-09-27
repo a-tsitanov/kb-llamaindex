@@ -4,6 +4,7 @@ Usage::
 
     python -m src.ingestion.run ./fixtures/
     python -m src.ingestion.run ./fixtures/ --recursive
+    python -m src.ingestion.run ./fixtures/ --graph acme
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from src.retrieval.vector_index import (
     build_vector_store,
     index_nodes,
 )
-from src.tenancy.context import transitional_default_graph
+from src.tenancy.context import DEFAULT_GRAPH_ID, cli_graph_context
 from src.utils.logging import configure_logging
 
 
@@ -47,12 +48,17 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="DROP and recreate the Milvus collection — destructive",
     )
+    p.add_argument(
+        "--graph", default=DEFAULT_GRAPH_ID,
+        help="target graph id (default: %(default)s)",
+    )
     return p.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
     configure_logging(level=settings.api.log_level)
+    graph = cli_graph_context(args.graph)
 
     from src.retrieval.llm_pool import get_llm_pool
 
@@ -75,11 +81,13 @@ def main() -> None:
     logger.info("pipeline produced {n} nodes", n=len(nodes))
 
     vector_store = build_vector_store(
-        transitional_default_graph(), overwrite=args.overwrite_collection,
+        graph, overwrite=args.overwrite_collection,
     )
     index = build_vector_index(vector_store, embed_model)
     inserted = index_nodes(index, nodes)
-    logger.info("inserted {n} nodes into Milvus", n=inserted)
+    logger.info(
+        "inserted {n} nodes into Milvus  graph={g}", n=inserted, g=graph.id,
+    )
 
 
 if __name__ == "__main__":

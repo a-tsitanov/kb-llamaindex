@@ -162,14 +162,16 @@ def main() -> None:
     ap.add_argument("--limit-pages", type=int, default=None)
     ap.add_argument("--retries", type=int, default=4)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--graph", default="default", help="target graph id (default: %(default)s)")
     args = ap.parse_args()
 
     from src.graph.er_graph_ops import PostgresERVerdictCache
     from src.graph.store import build_graph_store
-    from src.tenancy.context import default_graph_context
+    from src.tenancy.context import cli_graph_context
 
-    store = build_graph_store(default_graph_context())
-    cache = PostgresERVerdictCache(graph=default_graph_context())
+    graph = cli_graph_context(args.graph)
+    store = build_graph_store(graph)
+    cache = PostgresERVerdictCache(graph=graph)
     if not args.dry_run:
         cache.ensure_verdict_schema()
 

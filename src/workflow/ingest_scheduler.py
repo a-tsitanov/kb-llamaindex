@@ -34,6 +34,17 @@ with workflow.unsafe.imports_passed_through():
 _HISTORY_RECYCLE_THRESHOLD = 4000
 
 
+def admission_key(p: IngestParams) -> str:
+    """Dedupe/state key for one document: ``"<graph_id>:<doc_id>"``.
+
+    The same ``doc_id`` in two graphs is two admissions.  The key is only
+    in-memory workflow state (never a Temporal command), so changing its
+    format is replay-safe; what crosses the history boundary is the child
+    id (``graph_scoped_id`` — legacy bytes for ``default``) and the
+    ``SchedulerParams.pending`` list of ``IngestParams``, both unchanged."""
+    return f"{p.graph_id}:{p.doc_id}"
+
+
 @workflow.defn
 class IngestSchedulerWorkflow:
     def __init__(self) -> None:
@@ -43,9 +54,10 @@ class IngestSchedulerWorkflow:
 
     @workflow.signal
     def submit(self, params: IngestParams) -> None:
-        """Enqueue a document for admission (dedup by doc_id)."""
-        self._params[params.doc_id] = params
-        self._state.submit(params.doc_id)
+        """Enqueue a document for admission (dedup by (graph_id, doc_id))."""
+        key = admission_key(params)
+        self._params[key] = params
+        self._state.submit(key)
 
     @workflow.signal
     def set_max_inflight(self, n: int) -> None:
@@ -60,8 +72,9 @@ class IngestSchedulerWorkflow:
         self._state.max_inflight = max(1, cfg.max_inflight)
         # Re-absorb documents carried over from the previous run's recycle.
         for p in cfg.pending:
-            self._params[p.doc_id] = p
-            self._state.submit(p.doc_id)
+            key = admission_key(p)
+            self._params[key] = p
+            self._state.submit(key)
 
         while True:
             await workflow.wait_condition(
@@ -90,8 +103,8 @@ class IngestSchedulerWorkflow:
                     )
                 )
 
-            for doc_id in self._state.admit_ready():
-                self._start_child(doc_id)
+            for key in self._state.admit_ready():
+                self._start_child(key)
 
     # ── helpers ──────────────────────────────────────────────────────
 
@@ -117,12 +130,13 @@ class IngestSchedulerWorkflow:
         In-flight docs are NOT included — they finish during the drain
         before continue_as_new fires."""
         return [
-            self._params[d] for d in self._state.pending
-            if d in self._params
+            self._params[k] for k in self._state.pending
+            if k in self._params
         ]
 
-    def _start_child(self, doc_id: str) -> None:
-        params = self._params[doc_id]
+    def _start_child(self, key: str) -> None:
+        params = self._params[key]
+        doc_id = params.doc_id
 
         async def _go() -> None:
             try:
@@ -144,8 +158,8 @@ class IngestSchedulerWorkflow:
                     "ingest child failed doc=%s: %s", doc_id, exc,
                 )
             finally:
-                self._state.complete(doc_id)
-                self._running.pop(doc_id, None)
-                self._params.pop(doc_id, None)
+                self._state.complete(key)
+                self._running.pop(key, None)
+                self._params.pop(key, None)
 
-        self._running[doc_id] = asyncio.ensure_future(_go())
+        self._running[key] = asyncio.ensure_future(_go())

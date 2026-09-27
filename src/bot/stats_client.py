@@ -13,12 +13,16 @@ from typing import Any
 
 import httpx
 
+from src.bot.search_client import _headers
+from src.tenancy.context import DEFAULT_GRAPH_ID
+
 ChannelsFn = Callable[[], Awaitable[list[dict[str, Any]]]]
 TimelineFn = Callable[..., Awaitable[list[dict[str, Any]]]]
 
 
 def make_channels(
-    *, api_base: str, api_key: str, timeout_s: float = 30.0,
+    *, api_base: str, api_key: str, graph: str = DEFAULT_GRAPH_ID,
+    timeout_s: float = 30.0,
 ) -> ChannelsFn:
     """Per-channel ingest totals → the `rows` list."""
     url = f"{api_base.rstrip('/')}/api/v1/stats/messages"
@@ -26,7 +30,7 @@ def make_channels(
     async def channels() -> list[dict[str, Any]]:
         async with httpx.AsyncClient(timeout=timeout_s) as http:
             resp = await http.get(
-                url, headers={"X-API-Key": api_key}, params={"group_by": "channel"},
+                url, headers=_headers(api_key, graph), params={"group_by": "channel"},
             )
             resp.raise_for_status()
             return (resp.json() or {}).get("rows") or []
@@ -35,7 +39,8 @@ def make_channels(
 
 
 def make_timeline(
-    *, api_base: str, api_key: str, timeout_s: float = 30.0,
+    *, api_base: str, api_key: str, graph: str = DEFAULT_GRAPH_ID,
+    timeout_s: float = 30.0,
 ) -> TimelineFn:
     """Daily counts → the `buckets` list.
 
@@ -56,7 +61,7 @@ def make_timeline(
         if since:
             params["since"] = since
         async with httpx.AsyncClient(timeout=timeout_s) as http:
-            resp = await http.get(url, headers={"X-API-Key": api_key}, params=params)
+            resp = await http.get(url, headers=_headers(api_key, graph), params=params)
             resp.raise_for_status()
             return (resp.json() or {}).get("buckets") or []
 
@@ -70,7 +75,8 @@ EntitiesFn = Callable[..., Awaitable[dict[str, Any]]]
 
 
 def make_entities(
-    *, api_base: str, api_key: str, timeout_s: float = 30.0,
+    *, api_base: str, api_key: str, graph: str = DEFAULT_GRAPH_ID,
+    timeout_s: float = 30.0,
 ) -> EntitiesFn:
     """Entity name lookup → the whole body, `error` included.
 
@@ -85,7 +91,7 @@ def make_entities(
         async with httpx.AsyncClient(timeout=timeout_s) as http:
             resp = await http.get(
                 url,
-                headers={"X-API-Key": api_key},
+                headers=_headers(api_key, graph),
                 params={"query": query, "limit": limit},
             )
             resp.raise_for_status()

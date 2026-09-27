@@ -20,7 +20,9 @@ from loguru import logger
 from src.config import settings
 from src.ingest_queue.priorities import PRIO_LIVE
 from src.ingest_queue.topology import declare_ingest_topology
+from src.tenancy.context import DEFAULT_GRAPH_ID
 from src.workflow.contracts import IngestParams
+from src.workflow.ingest_scheduler import admission_key
 
 _connection: aio_pika.abc.AbstractRobustConnection | None = None
 _lock = asyncio.Lock()
@@ -49,8 +51,9 @@ async def publish_ingest(
     to a free consumer slot only when no higher-priority message is ready,
     so backfill drains only when the live feed is idle.
 
-    ``message_id`` = ``doc_id`` so the payload is dedup-friendly and
-    traceable; ``PERSISTENT`` so an enqueued document survives a broker
+    ``message_id`` = ``doc_id`` for the default graph (unchanged bytes) and
+    ``admission_key`` (``"<graph_id>:<doc_id>"``) for any other graph, so
+    the payload is dedup-friendly and traceable per graph; ``PERSISTENT`` so an enqueued document survives a broker
     restart before the consumer admits it."""
     cfg = settings.rabbitmq
     target = queue or cfg.default_queue
@@ -63,14 +66,17 @@ async def publish_ingest(
                 body=params.model_dump_json().encode(),
                 content_type="application/json",
                 delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-                message_id=params.doc_id,
+                message_id=(
+                    params.doc_id if params.graph_id == DEFAULT_GRAPH_ID
+                    else admission_key(params)
+                ),
                 priority=priority,
             ),
             routing_key=target,
         )
         logger.info(
-            "ingest published to rabbitmq  doc={d}  queue={q}",
-            d=params.doc_id, q=target,
+            "ingest published to rabbitmq  graph={g}  doc={d}  queue={q}",
+            g=params.graph_id, d=params.doc_id, q=target,
         )
     finally:
         await channel.close()

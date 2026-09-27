@@ -33,9 +33,26 @@ async def test_mark_entities_dirty_uses_input_graph(monkeypatch):
     monkeypatch.setattr(md, "build_graph_store", lambda g: seen.append(g) or object())
     monkeypatch.setattr(md, "mark_dirty", lambda store, names: None)
     monkeypatch.setattr(md, "activity", MagicMock())
-    n = await md.mark_entities_dirty(MarkDirtyIn(entity_names=["A"], graph_id="acme"))
+    n = await md.mark_entities_dirty(MarkDirtyIn(entity_names=["A"], graph_id="default"))
     assert n == 1
-    assert [g.id for g in seen] == ["acme"]
+    assert [g.id for g in seen] == ["default"]
+
+
+async def test_mark_entities_dirty_skips_non_default_graph(monkeypatch):
+    """Task 11 / D6: the wiki is default-graph-only in Plan A — a non-default
+    ingest must not touch any graph store for wiki bookkeeping."""
+    import src.workflow.activities.mark_dirty as md
+
+    seen = []
+    act = MagicMock()
+    monkeypatch.setattr(md.settings.wiki, "enabled", True, raising=False)
+    monkeypatch.setattr(md, "build_graph_store", lambda g: seen.append(g) or object())
+    monkeypatch.setattr(md, "mark_dirty", lambda store, names: seen.append(names))
+    monkeypatch.setattr(md, "activity", act)
+    n = await md.mark_entities_dirty(MarkDirtyIn(entity_names=["A"], graph_id="acme"))
+    assert n == 0
+    assert seen == []
+    assert act.logger.info.called
 
 
 async def test_documents_for_communities_uses_input_graph(monkeypatch):

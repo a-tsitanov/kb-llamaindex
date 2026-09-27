@@ -34,6 +34,7 @@ from src.bot.session import InMemorySessionStore
 from src.bot.stats_client import make_channels, make_entities, make_timeline
 from src.config import settings
 from src.storage.bot import BotRepository
+from src.tenancy.context import validate_graph_id
 
 _WORKING = "Принял, работаю… (поиск занимает около полутора минут)"
 
@@ -49,10 +50,14 @@ def _api_key() -> str:
 def build_ctx() -> cmd.Ctx:
     cfg = settings.bot
     key = _api_key()
+    # The bot reaches graph data only via the HTTP API; X-Graph binds every
+    # call to BOT_GRAPH (the API resolves it through the graph registry and
+    # checks the key is allowed it). Validate here to fail fast at startup.
+    graph = validate_graph_id(cfg.graph)
     return cmd.Ctx(
         repo=BotRepository(),
         search=make_search_full(
-            api_base=cfg.api_base, api_key=key, mode=cfg.search_mode,
+            api_base=cfg.api_base, api_key=key, graph=graph, mode=cfg.search_mode,
             timeout_s=cfg.search_timeout_s, synthesize=True,
         ),
         # `/find` gets the SAME timeout as `/ask`. It is not a fast path:
@@ -63,12 +68,12 @@ def build_ctx() -> cmd.Ctx:
         # an order of magnitude. A 60s cap was tight enough that a
         # slightly longer question timed out.
         find=make_search_full(
-            api_base=cfg.api_base, api_key=key, mode=cfg.search_mode,
+            api_base=cfg.api_base, api_key=key, graph=graph, mode=cfg.search_mode,
             timeout_s=cfg.search_timeout_s, synthesize=False,
         ),
-        channels=make_channels(api_base=cfg.api_base, api_key=key),
-        timeline=make_timeline(api_base=cfg.api_base, api_key=key),
-        entities=make_entities(api_base=cfg.api_base, api_key=key),
+        channels=make_channels(api_base=cfg.api_base, api_key=key, graph=graph),
+        timeline=make_timeline(api_base=cfg.api_base, api_key=key, graph=graph),
+        entities=make_entities(api_base=cfg.api_base, api_key=key, graph=graph),
         session=InMemorySessionStore(max_messages=cfg.max_messages),
         rewrite=make_rewrite(),
         agent=(make_agent(base_url=cfg.agent_base, token=cfg.agent_token or key,

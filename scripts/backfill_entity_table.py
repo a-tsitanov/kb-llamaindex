@@ -85,10 +85,21 @@ def backfill(
     retries: int = 8,
     sink: Callable[[list[dict]], None] | None = None,
     progress: Any = None,
+    graph: Any = None,
 ) -> tuple[int, str | None]:
-    """Copy every entity into the sink. Returns (copied, last_name)."""
-    from src.graph.entity_table import mirror_entities
-    write = sink if sink is not None else mirror_entities
+    """Copy every entity into the sink. Returns (copied, last_name).
+
+    Without ``sink`` rows are mirrored into ``graph``'s Postgres schema, so
+    ``graph`` is then required."""
+    if sink is None:
+        if graph is None:
+            raise ValueError("backfill: graph is required when no sink is given")
+        from src.graph import entity_table
+
+        def write(rows: list[dict]) -> None:
+            entity_table.mirror_entities(graph, rows)
+    else:
+        write = sink
 
     copied, last_name, pages = 0, start_after, 0
     while True:
@@ -115,10 +126,12 @@ def main() -> None:
     ap.add_argument("--page", type=int, default=2000)
     ap.add_argument("--start-after", default=None)
     ap.add_argument("--retries", type=int, default=8)
+    ap.add_argument("--graph", default="default", help="target graph id (default: %(default)s)")
     args = ap.parse_args()
     from src.graph.store import build_graph_store
-    from src.tenancy.context import default_graph_context
-    store = build_graph_store(default_graph_context())
+    from src.tenancy.context import cli_graph_context
+    graph = cli_graph_context(args.graph)
+    store = build_graph_store(graph)
 
     # Every progress line carries `last=…`; keep the newest so a failure
     # can name the exact resume point instead of the (possibly stale)
@@ -138,6 +151,7 @@ def main() -> None:
             store, page=args.page, start_after=args.start_after,
             retries=args.retries,
             progress=_say,
+            graph=graph,
         )
     except Exception as exc:
         print(f"FAILED: {exc}")

@@ -215,3 +215,24 @@ def test_retries_are_bounded_and_the_error_surfaces(monkeypatch):
     store, cache = _FlakyStore({"a": True}, fail_times=99), _StubCache()
     with pytest.raises(RuntimeError, match="high watermark"):
         migrate(store, cache, page=10, retries=2)
+
+
+def test_main_graph_option_binds_store_and_cache(monkeypatch):
+    import sys
+
+    import scripts.migrate_er_verdicts as mod
+    import src.graph.er_graph_ops as ops
+    import src.graph.store as gs
+
+    seen = {}
+
+    class _Cache:
+        def __init__(self, graph):
+            seen["cache"] = graph.id
+
+    monkeypatch.setattr(gs, "build_graph_store", lambda g: seen.setdefault("store", g.id))
+    monkeypatch.setattr(ops, "PostgresERVerdictCache", _Cache)
+    monkeypatch.setattr(mod, "migrate", lambda *a, **kw: (0, None))
+    monkeypatch.setattr(sys, "argv", ["migrate_er_verdicts", "--graph", "acme", "--dry-run"])
+    mod.main()
+    assert seen == {"store": "acme", "cache": "acme"}
