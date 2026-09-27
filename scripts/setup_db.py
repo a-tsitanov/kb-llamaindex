@@ -290,6 +290,61 @@ CREATE TABLE IF NOT EXISTS er_verdict (
 );
 """
 
+# Multi-graph registry (Plan A).  Lives in `public` regardless of which
+# schema a given graph's own tables live in — this is the directory that
+# maps a graph id to its physical storage names, not per-graph data.
+_GRAPHS_DDL = """
+CREATE TABLE IF NOT EXISTS public.graphs (
+    id                     TEXT PRIMARY KEY,
+    owner                  TEXT NOT NULL,
+    status                 TEXT NOT NULL,
+    status_error           TEXT NOT NULL DEFAULT '',
+    nebula_space           TEXT NOT NULL,
+    nebula_partition_num   INTEGER NOT NULL DEFAULT 10,
+    chunks_collection      TEXT NOT NULL,
+    er_vec_collection      TEXT NOT NULL,
+    report_vec_collection  TEXT NOT NULL,
+    pg_schema              TEXT NOT NULL,
+    max_inflight           INTEGER,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+"""
+
+# API keys, sha256-hashed at rest — never the raw key.  Also global (public),
+# since a key can span multiple graphs (`graph_ids`).
+_API_KEYS_DDL = """
+CREATE TABLE IF NOT EXISTS public.api_keys (
+    key_hash    TEXT PRIMARY KEY,
+    owner       TEXT NOT NULL,
+    graph_ids   TEXT[] NOT NULL DEFAULT '{}',
+    is_admin    BOOLEAN NOT NULL DEFAULT false,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+"""
+
+
+def _bootstrap_registry(cur) -> None:
+    """Idempotent: register `default` under its legacy names and the env
+    API_KEYS as admin keys for `default`."""
+    from src.tenancy.api_keys import hash_api_key
+    from src.tenancy.context import default_graph_context
+
+    d = default_graph_context()
+    cur.execute(
+        "INSERT INTO public.graphs (id, owner, status, nebula_space, nebula_partition_num, "
+        "chunks_collection, er_vec_collection, report_vec_collection, pg_schema) "
+        "VALUES (%s, %s, 'ready', %s, %s, %s, %s, %s, %s) ON CONFLICT (id) DO NOTHING",
+        (d.id, "system", d.nebula_space, d.nebula_partition_num, d.chunks_collection,
+         d.er_vec_collection, d.report_vec_collection, d.pg_schema),
+    )
+    for raw in [k.strip() for k in settings.api.keys.split(",") if k.strip()]:
+        cur.execute(
+            "INSERT INTO public.api_keys (key_hash, owner, graph_ids, is_admin) "
+            "VALUES (%s, 'legacy-env', ARRAY['default'], true) ON CONFLICT (key_hash) DO NOTHING",
+            (hash_api_key(raw),),
+        )
+
 # Search mirror of the graph's entities. NOT a second source of truth —
 # the graph stays canonical; this is a trigram-indexed flat copy so name
 # lookup (exact/prefix/substring + label filter) runs in Postgres instead
@@ -457,6 +512,9 @@ def setup_postgres() -> None:
         cur.execute(_BOT_USER_DDL)
         cur.execute(_BOT_REQUEST_DDL)
         cur.execute(_BOT_INDEXES_DDL)
+        cur.execute(_GRAPHS_DDL)
+        cur.execute(_API_KEYS_DDL)
+        _bootstrap_registry(cur)
     logger.info("postgres setup  done")
 
 
