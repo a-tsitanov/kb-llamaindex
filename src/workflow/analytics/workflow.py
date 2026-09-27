@@ -67,6 +67,7 @@ class AnalyticalQueryWorkflow:
                     top_n=params.top_n,
                     date_from_epoch=params.date_from_epoch,
                     date_to_epoch=params.date_to_epoch,
+                    graph_id=params.graph_id,
                 ),
                 result_type=StepResult,
                 start_to_close_timeout=_DB_START,

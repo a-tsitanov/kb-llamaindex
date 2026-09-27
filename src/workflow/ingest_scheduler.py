@@ -23,6 +23,7 @@ from temporalio.common import WorkflowIDReusePolicy
 
 with workflow.unsafe.imports_passed_through():
     from src.config import settings
+    from src.tenancy.context import graph_scoped_id
     from src.workflow.admission import AdmissionState
     from src.workflow.contracts import IngestParams, SchedulerParams
     from src.workflow.document_ingest import DocumentIngestWorkflow
@@ -128,7 +129,7 @@ class IngestSchedulerWorkflow:
                 await workflow.execute_child_workflow(
                     DocumentIngestWorkflow.run,
                     params,
-                    id=f"ingest-{doc_id}",
+                    id=graph_scoped_id("ingest", params.graph_id, doc_id),
                     # Pin children to the MAIN queue: the scheduler now runs on
                     # its own queue, whose pool does NOT register
                     # DocumentIngestWorkflow. Without this the child would

@@ -49,6 +49,7 @@ class SubQueryRetrievalWorkflow:
                 inserted_before_epoch=params.inserted_before_epoch,
                 groups=params.groups,
                 exclude_groups=params.exclude_groups,
+                graph_id=params.graph_id,
             ),
             result_type=RetrieveResult,
             start_to_close_timeout=LLM_START_TO_CLOSE,

@@ -203,6 +203,7 @@ class GlobalSearchWorkflow:
                 level=params.level,
                 limit=params.max_communities,
                 selection=params.community_selection,
+                graph_id=params.graph_id,
             ),
             result_type=MapCommunitiesResult,
             start_to_close_timeout=timedelta(minutes=2),
@@ -261,7 +262,8 @@ class GlobalSearchWorkflow:
         docs_res: DocumentsForCommunitiesResult = await workflow.execute_activity(
             "documents_for_communities",
             DocumentsForCommunitiesParams(
-                community_ids=surviving_community_ids(partials)),
+                community_ids=surviving_community_ids(partials),
+                graph_id=params.graph_id),
             result_type=DocumentsForCommunitiesResult,
             start_to_close_timeout=timedelta(minutes=2),
             schedule_to_close_timeout=timedelta(minutes=10),

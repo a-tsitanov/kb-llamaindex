@@ -11,6 +11,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.tenancy.context import DEFAULT_GRAPH_ID
+
 
 class _Frozen(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -61,6 +63,7 @@ class AnalyzeParams(_Frozen):
     top_n: int = 20
     date_from_epoch: int | None = None
     date_to_epoch: int | None = None
+    graph_id: str = DEFAULT_GRAPH_ID
 
 
 class AnalyticsOutcome(_Frozen):
@@ -85,6 +88,7 @@ class ExecInput(_Frozen):
     top_n: int = 20
     date_from_epoch: int | None = None
     date_to_epoch: int | None = None
+    graph_id: str = DEFAULT_GRAPH_ID
 
 
 class SynthInput(_Frozen):
@@ -105,18 +109,20 @@ class MaterializeParams(_Frozen):
     metrics: list[str] = Field(default_factory=lambda: ["pagerank", "betweenness", "eigenvector"])
     link_prediction: bool = True
     risk: bool = True
+    graph_id: str = DEFAULT_GRAPH_ID
 
 
 class CentralityIn(_Frozen):
     metrics: list[str] = Field(default_factory=lambda: ["pagerank", "betweenness", "eigenvector"])
+    graph_id: str = DEFAULT_GRAPH_ID
 
 
 class LinkPredictionIn(_Frozen):
-    pass
+    graph_id: str = DEFAULT_GRAPH_ID
 
 
 class RiskIn(_Frozen):
-    pass
+    graph_id: str = DEFAULT_GRAPH_ID
 
 
 class StageResult(_Frozen):
@@ -139,6 +145,7 @@ class MaterializeResult(_Frozen):
 class MonitorIn(_Frozen):
     window_days: int = 7
     risk_rise_delta: float = 0.1
+    graph_id: str = DEFAULT_GRAPH_ID
 
 
 class MonitorResult(_Frozen):
@@ -150,6 +157,7 @@ class MonitorResult(_Frozen):
 
 class DeliverIn(_Frozen):
     cap: int = 100
+    graph_id: str = DEFAULT_GRAPH_ID
 
 
 class DeliverResult(_Frozen):

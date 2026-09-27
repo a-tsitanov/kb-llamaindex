@@ -16,7 +16,7 @@ from temporalio import activity
 from src.observability.ingest_metrics_extractor import parse_activity_timings
 from src.storage.ingest_metrics import build_ingest_metrics_store
 from src.storage.postgres import AsyncPostgres
-from src.tenancy.context import transitional_default_graph
+from src.tenancy.context import graph_scoped_id, transitional_default_graph
 from src.workflow.client import get_temporal_client
 from src.workflow.contracts import (
     FinalizeIn,
@@ -127,7 +127,7 @@ async def _persist_ingest_metrics(payload: FinalizeIn) -> None:
         # 2. Child history — best-effort.  When graph_status="vector_only"
         # the child never ran, so the fetch yields "not found"; that's
         # fine and we just skip the merge-side rows.
-        child_id = f"graph-{payload.ctx.doc_id}"
+        child_id = graph_scoped_id("graph", payload.graph_id, payload.ctx.doc_id)
         try:
             child_handle = client.get_workflow_handle(child_id)
             child_history = await child_handle.fetch_history()

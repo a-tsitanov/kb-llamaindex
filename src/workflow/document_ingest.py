@@ -46,6 +46,7 @@ from temporalio.workflow import ParentClosePolicy
 
 with workflow.unsafe.imports_passed_through():
     from src.config import settings
+    from src.tenancy.context import graph_scoped_id
     from src.workflow.contracts import (
         ClassifyIn,
         ClassifyResult,
@@ -162,7 +163,8 @@ class DocumentIngestWorkflow:
                     })
                     return await workflow.execute_activity(
                         "mark_skipped",
-                        SkipIn(ctx=ctx, reason=verdict.reason),
+                        SkipIn(ctx=ctx, reason=verdict.reason,
+                               graph_id=params.graph_id),
                         result_type=IngestResult,
                         start_to_close_timeout=timedelta(minutes=5),
                         schedule_to_close_timeout=timedelta(hours=1),
@@ -258,8 +260,9 @@ class DocumentIngestWorkflow:
                 # child still downgrades to vector_only without failing
                 # the whole document.
                 gb_result = await workflow.execute_child_workflow(
-                    GraphBuildWorkflow.run, kg,
-                    id=f"graph-{params.doc_id}",
+                    GraphBuildWorkflow.run,
+                    kg.model_copy(update={"graph_id": params.graph_id}),
+                    id=graph_scoped_id("graph", params.graph_id, params.doc_id),
                     task_queue=settings.temporal.merge_task_queue,
                     parent_close_policy=ParentClosePolicy.REQUEST_CANCEL,
                     id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
@@ -283,7 +286,8 @@ class DocumentIngestWorkflow:
                         await workflow.execute_activity(
                             "mark_entities_dirty",
                             MarkDirtyIn(entity_names=ent_names,
-                                        relation_endpoints=endpoints),
+                                        relation_endpoints=endpoints,
+                                        graph_id=params.graph_id),
                             start_to_close_timeout=timedelta(minutes=2),
                             schedule_to_close_timeout=timedelta(minutes=5),
                             retry_policy=_WIKI_BESTEFFORT,
@@ -354,6 +358,7 @@ class DocumentIngestWorkflow:
                     judge_model=params.judge_model,
                     search_model=params.search_model,
                     env=params.env,
+                    graph_id=params.graph_id,
                 ),
                 result_type=IngestResult,
                 start_to_close_timeout=timedelta(minutes=10),
@@ -376,7 +381,8 @@ class DocumentIngestWorkflow:
             )
             await workflow.execute_activity(
                 "mark_failed",
-                MarkFailedIn(ctx=ctx, params=params, error=str(exc)),
+                MarkFailedIn(ctx=ctx, params=params, error=str(exc),
+                             graph_id=params.graph_id),
                 start_to_close_timeout=timedelta(minutes=10),
                 schedule_to_close_timeout=timedelta(hours=12),
                 retry_policy=_FAST_RETRY,

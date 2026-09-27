@@ -52,6 +52,10 @@ def test_worker_module_wires_merge_queue() -> None:
     assert "MERGE_ACTIVITIES" in src
     assert "EXTRACT_ACTIVITIES" in src
     # GraphBuildWorkflow hosts on the dedicated "merge" pool, not the llm one.
-    assert "GraphBuildWorkflow" in src
+    from src.workflow.graph_build import GraphBuildWorkflow
+
+    assert "workflows=workflows_for_group(group)" in src
+    assert worker_mod.workflows_for_group("merge") == [GraphBuildWorkflow]
+    assert worker_mod.workflows_for_group("llm") == []
     # "merge" is a first-class pool group with its own process.
     assert "merge" in worker_mod.WORKER_GROUPS

@@ -17,7 +17,9 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from src.tenancy.context import DEFAULT_GRAPH_ID
 
 GraphStatus = Literal["completed", "vector_only"]
 WikibaseStatus = Literal["ok", "skipped", "failed"]
@@ -31,6 +33,22 @@ SearchMode = Literal["simple", "local", "global", "drift"]
 
 class _Frozen(BaseModel):
     model_config = ConfigDict(frozen=True)
+
+
+def _inherit_graph_id(data: Any, *parents: str) -> Any:
+    """``graph_id`` not given explicitly → take it from the first nested
+    parent model that carries one (activity outputs such as ``Parsed``
+    are built from their input's ``ctx`` / ``parsed`` / ``kg``).  Legacy
+    payloads with no ``graph_id`` anywhere fall through to the default."""
+    if not isinstance(data, dict) or "graph_id" in data:
+        return data
+    for name in parents:
+        nested = data.get(name)
+        gid = (nested.get("graph_id") if isinstance(nested, dict)
+               else getattr(nested, "graph_id", None))
+        if gid:
+            return {**data, "graph_id": gid}
+    return data
 
 
 class WikibasePushed(_Frozen):
@@ -83,6 +101,7 @@ class IngestParams(_Frozen):
     # Channel group (news/analytics/.../data or "" = ungrouped). Stamped
     # onto each chunk's doc_group metadata for search filter/rerank/synth.
     group: str = ""
+    graph_id: str = DEFAULT_GRAPH_ID
 
 
 class Ctx(_Frozen):
@@ -95,6 +114,7 @@ class Ctx(_Frozen):
     doc_date_epoch: int | None = None
     inserted_at_epoch: int | None = None
     group: str = ""
+    graph_id: str = DEFAULT_GRAPH_ID
 
 
 class SchedulerParams(_Frozen):
@@ -104,6 +124,10 @@ class SchedulerParams(_Frozen):
 
     max_inflight: int = 1
     pending: list[IngestParams] = Field(default_factory=list)
+    # The scheduler is system-wide (fixed id ``ingest-scheduler``); each
+    # ``pending`` IngestParams carries its own graph_id.  This field only
+    # satisfies the "every workflow input carries graph_id" contract.
+    graph_id: str = DEFAULT_GRAPH_ID
 
 
 class ClassifyIn(_Frozen):
@@ -127,12 +151,24 @@ class SkipIn(_Frozen):
 
     ctx: Ctx
     reason: str = ""
+    graph_id: str = DEFAULT_GRAPH_ID
+
+    @model_validator(mode="before")
+    @classmethod
+    def _graph_id_from_parent(cls, data: Any) -> Any:
+        return _inherit_graph_id(data, "ctx")
 
 
 class Parsed(_Frozen):
     ctx: Ctx
     nodes_uri: str
     chunk_count: int
+    graph_id: str = DEFAULT_GRAPH_ID
+
+    @model_validator(mode="before")
+    @classmethod
+    def _graph_id_from_parent(cls, data: Any) -> Any:
+        return _inherit_graph_id(data, "ctx")
 
 
 class Indexed(_Frozen):
@@ -176,6 +212,12 @@ class KGExtracted(_Frozen):
     relation_labels_top: dict[str, int] = {}
     sample_entities: list[EntitySample] = []
     sample_relations: list[RelationSample] = []
+    graph_id: str = DEFAULT_GRAPH_ID
+
+    @model_validator(mode="before")
+    @classmethod
+    def _graph_id_from_parent(cls, data: Any) -> Any:
+        return _inherit_graph_id(data, "parsed")
 
 
 class Merged(_Frozen):
@@ -193,6 +235,12 @@ class Merged(_Frozen):
     # Populated by merge_and_resolve; empty default keeps old callers working.
     entity_names: list[str] = Field(default_factory=list)
     relation_endpoints: list[str] = Field(default_factory=list)
+    graph_id: str = DEFAULT_GRAPH_ID
+
+    @model_validator(mode="before")
+    @classmethod
+    def _graph_id_from_parent(cls, data: Any) -> Any:
+        return _inherit_graph_id(data, "kg")
 
 
 class GraphBuilt(_Frozen):
@@ -226,12 +274,24 @@ class FinalizeIn(_Frozen):
     judge_model: str = ""
     search_model: str = ""
     env: str = ""
+    graph_id: str = DEFAULT_GRAPH_ID
+
+    @model_validator(mode="before")
+    @classmethod
+    def _graph_id_from_parent(cls, data: Any) -> Any:
+        return _inherit_graph_id(data, "ctx")
 
 
 class MarkFailedIn(_Frozen):
     ctx: Ctx | None
     params: IngestParams
     error: str
+    graph_id: str = DEFAULT_GRAPH_ID
+
+    @model_validator(mode="before")
+    @classmethod
+    def _graph_id_from_parent(cls, data: Any) -> Any:
+        return _inherit_graph_id(data, "ctx", "params")
 
 
 class MarkDirtyIn(_Frozen):
@@ -243,6 +303,7 @@ class MarkDirtyIn(_Frozen):
 
     entity_names: list[str] = Field(default_factory=list)
     relation_endpoints: list[str] = Field(default_factory=list)
+    graph_id: str = DEFAULT_GRAPH_ID
 
 
 class IngestResult(_Frozen):
@@ -392,6 +453,7 @@ class RetrieveParams(_Frozen):
     # Channel-group filter (include / exclude lists; empty = all groups).
     groups: list[str] = Field(default_factory=list)
     exclude_groups: list[str] = Field(default_factory=list)
+    graph_id: str = DEFAULT_GRAPH_ID
 
 
 class RetrieveResult(_Frozen):
@@ -448,6 +510,7 @@ class SubQueryParams(_Frozen):
     # Channel-group filter (include / exclude lists; empty = all groups).
     groups: list[str] = Field(default_factory=list)
     exclude_groups: list[str] = Field(default_factory=list)
+    graph_id: str = DEFAULT_GRAPH_ID
 
 
 class SubQueryResult(_Frozen):
@@ -511,6 +574,7 @@ class OrchestratorParams(_Frozen):
     # context), so it is no longer discardable when synthesis is off.
     # Only the synthesis prompt gets the `rerank_top_n` cap.
     synthesize: bool = True
+    graph_id: str = DEFAULT_GRAPH_ID
 
 
 class SearchOutcome(_Frozen):
@@ -570,6 +634,7 @@ class DetectCommunitiesParams(_Frozen):
     level: int = 0
     max_levels: int = 1
     gamma: float = 1.0
+    graph_id: str = DEFAULT_GRAPH_ID
 
 
 class DetectedCommunity(_Frozen):
@@ -609,6 +674,7 @@ class SummarizeCommunityParams(_Frozen):
     community_id: str
     level: int = 0
     member_count: int = 0
+    graph_id: str = DEFAULT_GRAPH_ID
 
 
 class SummarizeCommunityResult(_Frozen):
@@ -687,6 +753,7 @@ class MapCommunitiesParams(_Frozen):
     level: int = 0
     limit: int = 20
     selection: str = "lexical"
+    graph_id: str = DEFAULT_GRAPH_ID
 
 
 class MapCommunitiesResult(_Frozen):
@@ -721,6 +788,7 @@ class DocumentsForCommunitiesParams(_Frozen):
     back to their source documents."""
 
     community_ids: list[str] = Field(default_factory=list)
+    graph_id: str = DEFAULT_GRAPH_ID
 
 
 class DocumentsForCommunitiesResult(_Frozen):
@@ -756,3 +824,4 @@ class GlobalSearchParams(_Frozen):
     # source selection and step_stats are unaffected — same sources
     # either way. Mirrors OrchestratorParams.synthesize.
     synthesize: bool = True
+    graph_id: str = DEFAULT_GRAPH_ID

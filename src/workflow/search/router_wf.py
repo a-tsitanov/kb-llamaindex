@@ -135,7 +135,9 @@ class DriftSearchWorkflow:
         # 2. Global expansion seeded with the local sources.  drift_mode
         #    merges the local sources AHEAD of the community partials in the
         #    REDUCE context and labels the outcome "drift".
-        drift_global = global_params.model_copy(update={"drift_mode": True})
+        #    ``local_params`` is the run's primary input: its graph_id wins.
+        drift_global = global_params.model_copy(
+            update={"drift_mode": True, "graph_id": local_params.graph_id})
         try:
             outcome: SearchOutcome = await workflow.execute_child_workflow(
                 GlobalSearchWorkflow.run,
@@ -204,7 +206,8 @@ class AutoSearchWorkflow:
         if target == GLOBAL_WF:
             return await workflow.execute_child_workflow(
                 GlobalSearchWorkflow.run,
-                global_params,
+                global_params.model_copy(
+                    update={"graph_id": local_params.graph_id}),
                 id=f"{wf_id}-global",
                 result_type=SearchOutcome,
             )

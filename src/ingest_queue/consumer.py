@@ -46,6 +46,7 @@ from temporalio.exceptions import WorkflowAlreadyStartedError
 
 from src.config import RabbitMQSettings, settings
 from src.ingest_queue.topology import declare_ingest_topology
+from src.tenancy.context import graph_scoped_id
 from src.workflow.client import get_temporal_client
 from src.workflow.contracts import IngestParams
 from src.workflow.document_ingest import DocumentIngestWorkflow
@@ -63,11 +64,12 @@ async def _start_or_attach(client: Client, params: IngestParams) -> None:
     Raises whatever the await raises, so ``handle_message`` applies the SAME
     failure/transient split to a started run and an attached one.
     """
+    wf_id = graph_scoped_id("ingest", params.graph_id, params.doc_id)
     try:
         await client.execute_workflow(
             DocumentIngestWorkflow.run,
             params,
-            id=f"ingest-{params.doc_id}",
+            id=wf_id,
             task_queue=settings.temporal.task_queue,
             id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
         )
@@ -79,7 +81,7 @@ async def _start_or_attach(client: Client, params: IngestParams) -> None:
             "duplicate ingest doc={d}; attaching to the running run",
             d=params.doc_id,
         )
-        await client.get_workflow_handle(f"ingest-{params.doc_id}").result()
+        await client.get_workflow_handle(wf_id).result()
 
 
 async def handle_message(

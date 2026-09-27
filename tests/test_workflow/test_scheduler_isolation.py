@@ -30,11 +30,15 @@ def test_scheduler_is_a_worker_group():
 
 def test_scheduler_isolated_from_main_pool():
     from src.workflow import worker
+    from src.workflow.document_ingest import DocumentIngestWorkflow
+    from src.workflow.ingest_scheduler import IngestSchedulerWorkflow
+
     src = inspect.getsource(worker._build_worker)
+    assert "workflows=workflows_for_group(group)," in src
     # main pool registers ONLY DocumentIngestWorkflow now (scheduler moved out)
-    assert "workflows=[DocumentIngestWorkflow]," in src
+    assert worker.workflows_for_group("main") == [DocumentIngestWorkflow]
     # dedicated scheduler pool registers the singleton
-    assert "workflows=[IngestSchedulerWorkflow]," in src
+    assert worker.workflows_for_group("scheduler") == [IngestSchedulerWorkflow]
 
 
 def test_scheduler_starts_children_on_main_queue():

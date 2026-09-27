@@ -45,6 +45,7 @@ from src.mcp._shared import (
     parse_args,
 )
 from src.retrieval.date_filters import DateBounds, bounds_from_iso, iso_to_epoch_days
+from src.tenancy.context import graph_scoped_id
 from src.workflow.client import get_temporal_client
 from src.workflow.contracts import (
     GlobalSearchParams,
@@ -284,10 +285,11 @@ async def kb_search(
     bounds = _bounds_or_error(doc_date_after, doc_date_before, created_after, created_before)
     if isinstance(bounds, dict):
         return bounds
+    params = _local_params(query, max_refinements, bounds, synthesize=synthesize)
     handle = await (await get_temporal_client()).start_workflow(
         SearchOrchestratorWorkflow.run,
-        _local_params(query, max_refinements, bounds, synthesize=synthesize),
-        id=f"mcp-search-{uuid.uuid4().hex}",
+        params,
+        id=graph_scoped_id("mcp-search", params.graph_id, uuid.uuid4().hex),
         task_queue=settings.temporal.search_task_queue,
         id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
     )
@@ -331,10 +333,11 @@ async def kb_global_search(
     come back empty — they are products of the REDUCE synthesis you
     skipped; `sources` and `step_stats` are unchanged.
     """
+    params = _global_params(query, synthesize=synthesize)
     handle = await (await get_temporal_client()).start_workflow(
         GlobalSearchWorkflow.run,
-        _global_params(query, synthesize=synthesize),
-        id=f"mcp-global-{uuid.uuid4().hex}",
+        params,
+        id=graph_scoped_id("mcp-global", params.graph_id, uuid.uuid4().hex),
         task_queue=settings.temporal.search_task_queue,
         id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
     )
@@ -388,15 +391,16 @@ async def kb_drift_search(
     bounds = _bounds_or_error(doc_date_after, doc_date_before, created_after, created_before)
     if isinstance(bounds, dict):
         return bounds
+    local = _local_params(query, bounds=bounds, synthesize=synthesize)
     handle = await (await get_temporal_client()).start_workflow(
         DriftSearchWorkflow.run,
         # drift_mode=True mirrors the FastAPI /search/drift route; the
         # workflow also forces it internally, so this is defensive.
         args=[
-            _local_params(query, bounds=bounds, synthesize=synthesize),
+            local,
             _global_params(query, drift_mode=True, synthesize=synthesize),
         ],
-        id=f"mcp-drift-{uuid.uuid4().hex}",
+        id=graph_scoped_id("mcp-drift", local.graph_id, uuid.uuid4().hex),
         task_queue=settings.temporal.search_task_queue,
         id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
     )
@@ -444,13 +448,14 @@ async def kb_auto_search(
     bounds = _bounds_or_error(doc_date_after, doc_date_before, created_after, created_before)
     if isinstance(bounds, dict):
         return bounds
+    local = _local_params(query, bounds=bounds, synthesize=synthesize)
     handle = await (await get_temporal_client()).start_workflow(
         AutoSearchWorkflow.run,
         args=[
-            _local_params(query, bounds=bounds, synthesize=synthesize),
+            local,
             _global_params(query, synthesize=synthesize),
         ],
-        id=f"mcp-auto-{uuid.uuid4().hex}",
+        id=graph_scoped_id("mcp-auto", local.graph_id, uuid.uuid4().hex),
         task_queue=settings.temporal.search_task_queue,
         id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
     )
@@ -468,10 +473,11 @@ async def kb_analyze(query: str, ctx: Context, top_n: int = 20) -> dict[str, Any
     from src.analytics.contracts import AnalyzeParams
     from src.workflow.analytics.workflow import AnalyticalQueryWorkflow
 
+    params = AnalyzeParams(query=query, top_n=top_n)
     handle = await (await get_temporal_client()).start_workflow(
         AnalyticalQueryWorkflow.run,
-        AnalyzeParams(query=query, top_n=top_n),
-        id=f"mcp-analyze-{uuid.uuid4().hex}",
+        params,
+        id=graph_scoped_id("mcp-analyze", params.graph_id, uuid.uuid4().hex),
         task_queue=settings.temporal.search_task_queue,
         id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
     )

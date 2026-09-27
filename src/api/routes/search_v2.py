@@ -25,6 +25,7 @@ from src.config import settings
 from src.models.search import DocumentRef, SearchRequest, SearchResponse, SourceCitation
 from src.observability.trace import trace_request
 from src.retrieval.date_filters import bounds_from_iso
+from src.tenancy.context import graph_scoped_id
 from src.workflow.client import get_temporal_client
 from src.workflow.contracts import (
     ConversationTurnDict,
@@ -151,10 +152,11 @@ async def search_local(req: SearchRequest) -> SearchResponse:
     try:
         with trace_request("search_local", req.query):
             client = await get_temporal_client()
+            params = _local_params(req)
             handle = await client.start_workflow(
                 SearchOrchestratorWorkflow.run,
-                _local_params(req),
-                id=f"search-local-{request_id}",
+                params,
+                id=graph_scoped_id("search-local", params.graph_id, request_id),
                 task_queue=settings.temporal.search_task_queue,
                 id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
             )
@@ -185,10 +187,11 @@ async def search_global(req: SearchRequest) -> SearchResponse:
     try:
         with trace_request("search_global", req.query):
             client = await get_temporal_client()
+            params = _global_params(req)
             handle = await client.start_workflow(
                 GlobalSearchWorkflow.run,
-                _global_params(req),
-                id=f"search-global-{request_id}",
+                params,
+                id=graph_scoped_id("search-global", params.graph_id, request_id),
                 task_queue=settings.temporal.search_task_queue,
                 id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
             )
@@ -219,10 +222,11 @@ async def search_drift(req: SearchRequest) -> SearchResponse:
     try:
         with trace_request("search_drift", req.query):
             client = await get_temporal_client()
+            local = _local_params(req)
             handle = await client.start_workflow(
                 DriftSearchWorkflow.run,
-                args=[_local_params(req), _global_params(req, drift_mode=True)],
-                id=f"search-drift-{request_id}",
+                args=[local, _global_params(req, drift_mode=True)],
+                id=graph_scoped_id("search-drift", local.graph_id, request_id),
                 task_queue=settings.temporal.search_task_queue,
                 id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
             )
@@ -253,10 +257,11 @@ async def search_auto(req: SearchRequest) -> SearchResponse:
     try:
         with trace_request("search_auto", req.query):
             client = await get_temporal_client()
+            local = _local_params(req)
             handle = await client.start_workflow(
                 AutoSearchWorkflow.run,
-                args=[_local_params(req), _global_params(req)],
-                id=f"search-auto-{request_id}",
+                args=[local, _global_params(req)],
+                id=graph_scoped_id("search-auto", local.graph_id, request_id),
                 task_queue=settings.temporal.search_task_queue,
                 id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
             )
@@ -290,15 +295,16 @@ async def rebuild_communities() -> dict[str, str]:
     request_id = uuid.uuid4().hex
     try:
         client = await get_temporal_client()
+        params = DetectCommunitiesParams(
+            min_size=settings.temporal.community_min_size,
+            level=0,
+            max_levels=settings.agent.community_max_levels,
+            gamma=settings.temporal.community_leiden_gamma,
+        )
         handle = await client.start_workflow(
             CommunityBuildWorkflow.run,
-            DetectCommunitiesParams(
-                min_size=settings.temporal.community_min_size,
-                level=0,
-                max_levels=settings.agent.community_max_levels,
-                gamma=settings.temporal.community_leiden_gamma,
-            ),
-            id=f"community-build-{request_id}",
+            params,
+            id=graph_scoped_id("community-build", params.graph_id, request_id),
             task_queue=settings.temporal.graph_build_task_queue,
             id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
         )

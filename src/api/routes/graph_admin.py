@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from src.api.auth import require_api_key
 from src.config import settings
 from src.graph import analysis
-from src.tenancy.context import GraphContext, transitional_default_graph
+from src.tenancy.context import GraphContext, graph_scoped_id, transitional_default_graph
 
 router = APIRouter(prefix="/admin/graph", tags=["admin"])
 
@@ -122,10 +122,11 @@ async def materialize() -> dict[str, str]:
     request_id = uuid.uuid4().hex
     try:
         client = await get_temporal_client()
+        params = MaterializeParams()
         handle = await client.start_workflow(
             AnalyticsMaterializeWorkflow.run,
-            MaterializeParams(),
-            id=f"analytics-materialize-{request_id}",
+            params,
+            id=graph_scoped_id("analytics-materialize", params.graph_id, request_id),
             task_queue=settings.temporal.graph_build_task_queue,
             id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
         )

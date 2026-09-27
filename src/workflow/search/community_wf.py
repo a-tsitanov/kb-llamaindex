@@ -32,6 +32,7 @@ from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
     from src.config import settings
+    from src.tenancy.context import DEFAULT_GRAPH_ID
     from src.workflow.contracts import (
         CommunityBuildResult,
         DetectCommunitiesParams,
@@ -52,6 +53,7 @@ with workflow.unsafe.imports_passed_through():
 
 def build_summarize_specs(
     detect: DetectCommunitiesResult,
+    graph_id: str = DEFAULT_GRAPH_ID,
 ) -> list[SummarizeCommunityParams]:
     """Pure spec: detected communities → batchable summarize params.
 
@@ -69,6 +71,7 @@ def build_summarize_specs(
             community_id=c.community_id,
             level=c.level,
             member_count=c.member_count,
+            graph_id=graph_id,
         )
         for c in detect.communities
         if getattr(c, "needs_report", True)
@@ -123,7 +126,7 @@ class CommunityBuildWorkflow:
             schedule_to_close_timeout=DETECT_SCHEDULE_TO_CLOSE,
             retry_policy=DETECT_RETRY,
         )
-        specs = build_summarize_specs(detect)
+        specs = build_summarize_specs(detect, params.graph_id)
         self._state["detected"] = len(specs)
         log.info("community_build  detected %d communities", len(specs))
 

@@ -11,6 +11,7 @@ from src.analytics.contracts import AnalyzeParams
 from src.api.auth import require_api_key
 from src.config import settings
 from src.models.analyze import AnalyzeRequest, AnalyzeResponse
+from src.tenancy.context import graph_scoped_id
 from src.workflow.analytics.workflow import AnalyticalQueryWorkflow
 from src.workflow.client import get_temporal_client
 
@@ -33,10 +34,11 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     request_id = uuid.uuid4().hex
     try:
         client = await get_temporal_client()
+        params = _to_params(req)
         handle = await client.start_workflow(
             AnalyticalQueryWorkflow.run,
-            _to_params(req),
-            id=f"analyze-{request_id}",
+            params,
+            id=graph_scoped_id("analyze", params.graph_id, request_id),
             task_queue=settings.temporal.search_task_queue,
             id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
         )

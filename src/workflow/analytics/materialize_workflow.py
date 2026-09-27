@@ -83,7 +83,10 @@ class AnalyticsMaterializeWorkflow:
 
         # ── 1. centrality (always) ───────────────────────────────────
         self._state["phase"] = "centrality"
-        c = await self._stage("materialize_centrality", CentralityIn(metrics=params.metrics))
+        c = await self._stage(
+            "materialize_centrality",
+            CentralityIn(metrics=params.metrics, graph_id=params.graph_id),
+        )
         if c.error:
             errors.append(f"centrality: {c.error}")
 
@@ -91,7 +94,9 @@ class AnalyticsMaterializeWorkflow:
         links = StageResult()
         if params.link_prediction:
             self._state["phase"] = "link_prediction"
-            links = await self._stage("materialize_link_prediction", LinkPredictionIn())
+            links = await self._stage(
+                "materialize_link_prediction", LinkPredictionIn(graph_id=params.graph_id),
+            )
             if links.error:
                 errors.append(f"link_prediction: {links.error}")
 
@@ -99,7 +104,7 @@ class AnalyticsMaterializeWorkflow:
         risk = StageResult()
         if params.risk:
             self._state["phase"] = "risk"
-            risk = await self._stage("materialize_risk", RiskIn())
+            risk = await self._stage("materialize_risk", RiskIn(graph_id=params.graph_id))
             if risk.error:
                 errors.append(f"risk: {risk.error}")
 

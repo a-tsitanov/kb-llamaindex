@@ -167,6 +167,22 @@ def _build_runtime(group: str) -> Runtime | None:
     return runtime
 
 
+def workflows_for_group(group: str) -> list[type]:
+    """Workflow classes registered by the ``group`` pool (empty for
+    activity-only pools)."""
+    if group not in WORKER_GROUPS:
+        raise ValueError(f"unknown group: {group!r}")
+    return {
+        "main": [DocumentIngestWorkflow],
+        "scheduler": [IngestSchedulerWorkflow],
+        "merge": [GraphBuildWorkflow],
+        "search": list(SEARCH_WORKFLOWS),
+        "graph_build": [CommunityBuildWorkflow, AnalyticsMaterializeWorkflow],
+        "wiki": [WikiSweepWorkflow],
+        "monitor": [MonitorSweepWorkflow],
+    }.get(group, [])
+
+
 def _build_worker(client: Client, group: str) -> Worker:
     """Construct the single Worker pool for ``group``."""
     t = settings.temporal
@@ -174,7 +190,7 @@ def _build_worker(client: Client, group: str) -> Worker:
         return Worker(
             client,
             task_queue=t.task_queue,
-            workflows=[DocumentIngestWorkflow],
+            workflows=workflows_for_group(group),
             activities=MAIN_ACTIVITIES,
             max_concurrent_activities=t.activity_concurrency,
         )
@@ -186,7 +202,7 @@ def _build_worker(client: Client, group: str) -> Worker:
         return Worker(
             client,
             task_queue=t.scheduler_task_queue,
-            workflows=[IngestSchedulerWorkflow],
+            workflows=workflows_for_group(group),
         )
     if group == "llm":
         # extract_kg only — concurrency throttled further by the LLMPool.
@@ -200,7 +216,7 @@ def _build_worker(client: Client, group: str) -> Worker:
         return Worker(
             client,
             task_queue=t.merge_task_queue,
-            workflows=[GraphBuildWorkflow],
+            workflows=workflows_for_group(group),
             activities=MERGE_ACTIVITIES,
             max_concurrent_activities=t.merge_activity_concurrency,
         )
@@ -208,7 +224,7 @@ def _build_worker(client: Client, group: str) -> Worker:
         return Worker(
             client,
             task_queue=t.search_task_queue,
-            workflows=SEARCH_WORKFLOWS,
+            workflows=workflows_for_group(group),
             activities=SEARCH_ACTIVITIES + SEARCH_V2_ACTIVITIES + ANALYTICS_ACTIVITIES,
             max_concurrent_activities=t.search_activity_concurrency,
         )
@@ -225,7 +241,7 @@ def _build_worker(client: Client, group: str) -> Worker:
         return Worker(
             client,
             task_queue=t.graph_build_task_queue,
-            workflows=[CommunityBuildWorkflow, AnalyticsMaterializeWorkflow],
+            workflows=workflows_for_group(group),
             activities=GRAPH_BUILD_ACTIVITIES,
             max_concurrent_activities=t.graph_build_activity_concurrency,
         )
@@ -233,7 +249,7 @@ def _build_worker(client: Client, group: str) -> Worker:
         return Worker(
             client,
             task_queue=settings.wiki.task_queue,
-            workflows=[WikiSweepWorkflow],
+            workflows=workflows_for_group(group),
             activities=[select_dirty_entities, write_entity_article],
             max_concurrent_activities=settings.wiki.activity_concurrency,
         )
@@ -241,7 +257,7 @@ def _build_worker(client: Client, group: str) -> Worker:
         return Worker(
             client,
             task_queue=settings.monitor.task_queue,
-            workflows=[MonitorSweepWorkflow],
+            workflows=workflows_for_group(group),
             activities=MONITOR_ACTIVITIES,
             max_concurrent_activities=settings.monitor.activity_concurrency,
         )
