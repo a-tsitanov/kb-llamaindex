@@ -31,6 +31,7 @@ from src.retrieval.group_filter import (
     combined_metadata_filters,
     filter_nodes_by_group,
 )
+from src.tenancy.context import transitional_default_graph
 from src.workflow._search_deps import (
     get_graph_retriever,
     get_retriever,
@@ -130,18 +131,20 @@ async def retrieve_subquestion(params: RetrieveParams) -> RetrieveResult:
         include=tuple(params.groups),
         exclude=tuple(params.exclude_groups),
     )
+    graph = transitional_default_graph()
     if bounds.any_set or gf.any_set:
         # Push date AND group INTO the Milvus vector search (not just the
         # post-filter below): otherwise the vector top-k is chosen across
         # ALL docs and the post-filter starves the in-scope pool.
         retriever = await get_vector_retriever(
+            graph,
             overfetch_top_k(params.top_k, bounds) if bounds.any_set
             else params.top_k * 3,
             filters=combined_metadata_filters(bounds, gf),
         )
     else:
-        retriever = await get_retriever()
-    graph_retriever = await get_graph_retriever()
+        retriever = await get_retriever(graph)
+    graph_retriever = await get_graph_retriever(graph)
 
     collected = []  # list[NodeWithScore]
     seen: set[str] = set()

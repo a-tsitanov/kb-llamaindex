@@ -49,7 +49,7 @@ from src.mcp._shared import (
 )
 from src.retrieval import atomic_tools
 from src.stats.align import GRANULARITIES
-from src.tenancy.context import transitional_default_graph
+from src.tenancy.context import GraphContext, transitional_default_graph
 
 mcp = FastMCP(
     name="kb-llamaindex-tools",
@@ -67,19 +67,26 @@ mcp = FastMCP(
 
 
 _lock = asyncio.Lock()
-_deps: dict[str, Any] = {}
+# Graph-scoped deps keyed by ``graph.id``: retriever, graph (retriever),
+# graph_store, chunks.  The LLM is graph-agnostic and lives in the shared
+# per-process ``LLMPool``; the embed model is cached once in ``_embed``.
+_deps_by_graph: dict[str, dict[str, Any]] = {}
+_embed: dict[str, Any] = {}
 
 
-async def _init() -> None:
-    """First-call init: build retriever / graph_retriever /
-    chunk_repository / BoundedLLM-wrapped LLM via the same factories
-    used by the FastAPI route handlers and the Temporal search-side
-    activities (see ``src/workflow/_search_deps.py``)."""
-    if _deps:
-        return
+async def _init(graph: GraphContext) -> dict[str, Any]:
+    """First-call-per-graph init: build ``graph``'s retriever /
+    graph_retriever / graph_store / chunk_repository via the same
+    factories used by the FastAPI route handlers and the Temporal
+    search-side activities (see ``src/workflow/_search_deps.py``).
+    Returns the graph's deps dict."""
+    deps = _deps_by_graph.get(graph.id)
+    if deps is not None:
+        return deps
     async with _lock:
-        if _deps:
-            return
+        deps = _deps_by_graph.get(graph.id)
+        if deps is not None:
+            return deps
         from src.ingestion.embeddings import build_embedding_model
         from src.retrieval.vector_index import (
             build_vector_index,
@@ -88,23 +95,21 @@ async def _init() -> None:
         from src.storage.chunk_repository import ChunkRepository
         from src.storage.postgres import AsyncPostgres
 
-        embed = build_embedding_model()
-        store = build_vector_store(transitional_default_graph())
-        index = build_vector_index(store, embed)
-        _deps["retriever"] = index.as_retriever(similarity_top_k=10)
-
-        from src.retrieval.llm_pool import get_llm_pool
-        llm = get_llm_pool().get("search")
-        _deps["llm"] = llm
+        deps = {}
+        if "model" not in _embed:
+            _embed["model"] = build_embedding_model()
+        store = build_vector_store(graph)
+        index = build_vector_index(store, _embed["model"])
+        deps["retriever"] = index.as_retriever(similarity_top_k=10)
 
         try:
             from src.graph.retriever import GraphRetriever
             from src.graph.store import build_graph_store
-            gs = build_graph_store(transitional_default_graph())
+            gs = build_graph_store(graph)
             # Nebula has no LlamaIndex PropertyGraphStore; use the
             # store-only retriever (nGQL awalk/find). Mirrors
-            # _search_deps._get_graph_retriever.
-            _deps["graph"] = GraphRetriever.for_store(
+            # _search_deps.get_graph_retriever.
+            deps["graph"] = GraphRetriever.for_store(
                 gs,
                 similarity_top_k=settings.agent.graph_similarity_top_k,
                 filter_polarity_temporal=(
@@ -112,39 +117,37 @@ async def _init() -> None:
                 ),
             )
             # Raw store for the graph analysis tools (need structured_query).
-            _deps["graph_store"] = gs
+            deps["graph_store"] = gs
         except Exception as exc:
             logger.warning(
-                "MCP-2: graph_retriever disabled (graph store down?): {e}",
-                e=exc,
+                "MCP-2: graph_retriever disabled for graph {g} "
+                "(graph store down?): {e}",
+                g=graph.id, e=exc,
             )
-            _deps["graph"] = None
-            _deps["graph_store"] = None
+            deps["graph"] = None
+            deps["graph_store"] = None
 
-        _deps["chunks"] = ChunkRepository(
-            graph=transitional_default_graph(),
-            pg=AsyncPostgres(graph=transitional_default_graph()),
-        )
-
-
-async def _r():
-    await _init()
-    return _deps["retriever"]
+        deps["chunks"] = ChunkRepository(graph=graph, pg=AsyncPostgres(graph=graph))
+        # Publish only once fully built so a lock-free reader never sees a
+        # half-populated dict.
+        _deps_by_graph[graph.id] = deps
+        return deps
 
 
-async def _g():
-    await _init()
-    return _deps["graph"]
+async def _r(graph: GraphContext):
+    return (await _init(graph))["retriever"]
 
 
-async def _c():
-    await _init()
-    return _deps["chunks"]
+async def _g(graph: GraphContext):
+    return (await _init(graph))["graph"]
 
 
-async def _gs():
-    await _init()
-    return _deps.get("graph_store")
+async def _c(graph: GraphContext):
+    return (await _init(graph))["chunks"]
+
+
+async def _gs(graph: GraphContext):
+    return (await _init(graph)).get("graph_store")
 
 
 # ── MCP tools (one per atomic_tools.* function) ────────────────────
@@ -162,7 +165,9 @@ async def vector_search(query: str, top_k: int = 10) -> dict[str, Any]:
     NEXT STEP: to read more around a good hit, call `get_chunks_by_doc_id`
     with its `doc_id`.
     """
-    r = await atomic_tools.vector_search(await _r(), query=query, top_k=top_k)
+    r = await atomic_tools.vector_search(
+        await _r(transitional_default_graph()), query=query, top_k=top_k,
+    )
     return {"sources": json.loads(r.observation)}
 
 
@@ -181,7 +186,9 @@ async def graph_search(query: str, depth: int = 1) -> dict[str, Any]:
     `find_entity_by_name` (you have a partial name), `find_neighbours`
     (you have a known entity, want 1 hop), `graph_walk` (known entity,
     multi-hop chains). Returns empty lists if the graph store is unavailable."""
-    r = await atomic_tools.graph_search(await _g(), query=query, depth=depth)
+    r = await atomic_tools.graph_search(
+        await _g(transitional_default_graph()), query=query, depth=depth,
+    )
     return json.loads(r.observation)
 
 
@@ -198,7 +205,7 @@ async def graph_walk(
     NOT FOR: a single hop (use `find_neighbours`) or discovery without a
     start entity (use `graph_search` / `find_entity_by_name` first)."""
     r = await atomic_tools.graph_walk(
-        await _g(), start_entity=start_entity, hops=hops,
+        await _g(transitional_default_graph()), start_entity=start_entity, hops=hops,
         rel_filter=rel_filter,
     )
     return json.loads(r.observation)
@@ -216,7 +223,7 @@ async def find_entity_by_id(
     PREFER INSTEAD: `find_entity_by_name` when you only have a partial /
     approximate name; `graph_search` for non-name semantic queries."""
     r = await atomic_tools.find_entity_by_id(
-        await _g(), name=name, entity_type=entity_type,
+        await _g(transitional_default_graph()), name=name, entity_type=entity_type,
     )
     return json.loads(r.observation)
 
@@ -235,7 +242,7 @@ async def find_entity_by_name(
     `graph_search` for non-name semantic queries. Returns entity rows
     only (no chunks)."""
     r = await atomic_tools.find_entity_by_name(
-        await _g(), query=query, limit=limit,
+        await _g(transitional_default_graph()), query=query, limit=limit,
     )
     return json.loads(r.observation)
 
@@ -254,7 +261,7 @@ async def find_neighbours(
     rel-type filtering; `graph_search` if the entity isn't pinned down
     yet; `find_entity_*` to resolve the entity first."""
     r = await atomic_tools.find_neighbours(
-        await _g(), entity_name=entity_name, hops=hops,
+        await _g(transitional_default_graph()), entity_name=entity_name, hops=hops,
     )
     return json.loads(r.observation)
 
@@ -271,7 +278,7 @@ async def get_chunks_by_doc_id(
     REQUIRES: a `doc_id` you already have (from `vector_search` or graph
     results). For the whole raw file at once, see `read_full_document`."""
     r = await atomic_tools.get_chunks_by_doc_id(
-        await _c(), doc_id=doc_id, limit=limit, offset=offset,
+        await _c(transitional_default_graph()), doc_id=doc_id, limit=limit, offset=offset,
     )
     # Observation is either a JSON list of chunks or an error dict.
     try:
@@ -293,7 +300,7 @@ async def read_full_document(
     `get_chunks_by_doc_id` (this returns one big blob, truncated at
     `max_chars`)."""
     r = await atomic_tools.read_full_document(
-        await _c(), doc_id=doc_id, max_chars=max_chars,
+        await _c(transitional_default_graph()), doc_id=doc_id, max_chars=max_chars,
     )
     if r.observation.startswith("Error"):
         return {"error": r.observation}
@@ -318,7 +325,9 @@ async def graph_pagerank(top_n: int = 20) -> dict[str, Any]:
     importance *relative to* specific seed entities. Returns top_n
     {name, score}. Empty if the graph store is unavailable."""
     from src.graph import analysis
-    return {"top": await analysis.pagerank(await _gs(), top_n=top_n)}
+    return {"top": await analysis.pagerank(
+        await _gs(transitional_default_graph()), top_n=top_n,
+    )}
 
 
 @mcp.tool(timeout=1800)
@@ -334,7 +343,7 @@ async def graph_personalized_pagerank(
     top_n {name, score}; empty if the graph store is unavailable."""
     from src.graph import analysis
     return {"top": await analysis.personalized_pagerank(
-        await _gs(), seeds, top_n=top_n,
+        await _gs(transitional_default_graph()), seeds, top_n=top_n,
     )}
 
 
@@ -346,7 +355,7 @@ async def graph_components() -> dict[str, Any]:
     sparse/empty communities and weak multi-hop reach. Returns
     {component_count, distribution}; empty if the graph store is unavailable."""
     from src.graph import analysis
-    return await analysis.components(await _gs())
+    return await analysis.components(await _gs(transitional_default_graph()))
 
 
 @mcp.tool(timeout=1800)
@@ -361,7 +370,7 @@ async def graph_shortest_path(
     no path (or the graph store is unavailable)."""
     from src.graph import analysis
     return await analysis.shortest_path(
-        await _gs(), source, target, max_hops=max_hops,
+        await _gs(transitional_default_graph()), source, target, max_hops=max_hops,
     )
 
 
@@ -380,7 +389,7 @@ async def graph_stats() -> dict[str, Any]:
     `scan` means counted live. Degree and duplicate counts have no cheap
     equivalent and are `null` whenever the graph is too large to scan."""
     from src.graph import analysis
-    return await analysis.graph_stats(await _gs())
+    return await analysis.graph_stats(await _gs(transitional_default_graph()))
 
 
 # ── ingest statistics (Postgres `documents` pipeline) ──────────────
@@ -605,9 +614,8 @@ async def topic_trend(
     as "this topic was never mentioned".
     NOT FOR: ingest volume (use `channel_message_timeline`) or message
     content (use `vector_search`)."""
-    await _init()
     return await _topic_trend(
-        _deps.get("graph_store"), topic, granularity, since, until,
+        await _gs(transitional_default_graph()), topic, granularity, since, until,
     )
 
 
@@ -635,9 +643,8 @@ async def polarity_evolution(
     value}` points yourself.
     NOT FOR: mention counts (use `topic_trend`, whose rows DO feed
     `stat_align` unchanged)."""
-    await _init()
     return await _polarity_evolution(
-        _deps.get("graph_store"), name, rel_type,
+        await _gs(transitional_default_graph()), name, rel_type,
     )
 
 

@@ -24,13 +24,13 @@ def _stub_activity_ctx(monkeypatch):
 def test_group_filter_pushed_into_vector_retriever(monkeypatch):
     seen = {}
 
-    async def _vret(top_k, filters=None):
+    async def _vret(graph, top_k, filters=None):
         seen["top_k"] = top_k
         seen["filters"] = filters
         async def _retrieve(q): return []
         return SimpleNamespace(aretrieve=_retrieve)
 
-    async def _greter():  # graph retriever unused here
+    async def _greter(graph):  # graph retriever unused here
         return None
 
     monkeypatch.setattr(R, "get_vector_retriever", _vret)

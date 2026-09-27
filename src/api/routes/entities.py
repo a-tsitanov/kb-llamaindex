@@ -11,7 +11,6 @@ ninety-second search.
 
 from __future__ import annotations
 
-import functools
 import json
 from typing import Any
 
@@ -20,26 +19,34 @@ from fastapi import APIRouter, Depends, Query
 from src.api.auth import require_api_key
 from src.config import settings
 from src.retrieval import atomic_tools
+from src.tenancy.context import GraphContext, transitional_default_graph
 
 router = APIRouter(prefix="/entities", tags=["entities"])
 
 
-@functools.cache
-def _retriever() -> Any:
-    """Store-only graph retriever, built once.
+# Retrievers keyed by ``graph.id``.  ``_retriever`` is sync (no await
+# between the lookup and the insert), so the event loop cannot interleave
+# two builds.
+_retrievers: dict[str, Any] = {}
 
-    Mirrors `tools_server._init` and `_search_deps._get_graph_retriever`
+
+def _retriever(graph: GraphContext) -> Any:
+    """Store-only graph retriever, built once per graph.
+
+    Mirrors `tools_server._init` and `_search_deps.get_graph_retriever`
     for the nebula backend: no LlamaIndex PropertyGraphStore exists for
     it, so the nGQL-only retriever is the whole thing.
     """
-    from src.graph.retriever import GraphRetriever
-    from src.graph.store import build_graph_store
-    from src.tenancy.context import transitional_default_graph
+    retriever = _retrievers.get(graph.id)
+    if retriever is None:
+        from src.graph.retriever import GraphRetriever
+        from src.graph.store import build_graph_store
 
-    return GraphRetriever.for_store(
-        build_graph_store(transitional_default_graph()),
-        similarity_top_k=settings.agent.graph_similarity_top_k,
-    )
+        retriever = _retrievers[graph.id] = GraphRetriever.for_store(
+            build_graph_store(graph),
+            similarity_top_k=settings.agent.graph_similarity_top_k,
+        )
+    return retriever
 
 
 @router.get("", dependencies=[Depends(require_api_key)])
@@ -59,6 +66,6 @@ async def find_entities(
     built for it.
     """
     result = await atomic_tools.find_entity_by_name(
-        _retriever(), query=query, limit=limit,
+        _retriever(transitional_default_graph()), query=query, limit=limit,
     )
     return json.loads(result.observation)

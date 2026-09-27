@@ -7,6 +7,11 @@ scratch on every ReAct step would multiply latency.  We memoise per
 worker process — first activity in this worker builds them, all
 subsequent calls reuse.
 
+Graph-agnostic deps (LLMs, synthesizers, embed model, reranker) are cached
+once per process in ``_global``; graph-scoped deps (vector index/retriever,
+graph retriever, chunk repository) are cached per ``graph.id`` in
+``_per_graph`` — every graph-scoped getter takes a ``GraphContext``.
+
 Lock-protected so concurrent activity workers don't race the lazy
 init.  Reset hooks left out — workers restart cleanly enough; if
 the underlying store config changes the operator restarts the
@@ -29,7 +34,7 @@ from src.retrieval.atomic_tools import (
     GraphRetrieverProtocol,
     RetrieverProtocol,
 )
-from src.tenancy.context import transitional_default_graph
+from src.tenancy.context import GraphContext
 
 # The unified rerank now owns the top_n cut (after group weighting), so the
 # cached cross-encoder is built as a pure SCORER that never truncates below
@@ -38,27 +43,56 @@ from src.tenancy.context import transitional_default_graph
 _RERANK_SCORE_CAP = 256
 
 _lock = asyncio.Lock()
-_state: dict[str, Any] = {
-    "llm": None, "retriever": None, "graph_retriever": None,
-    "chunk_repository": None, "synthesizer": None,
-    "synthesis_llm": None, "synthesis_synthesizer": None,
-    "reranker": None,
-}
+
+# Graph-agnostic deps — one per worker process: LLMs, synthesizers, the
+# embed model, the reranker (and its ``reranker_failed`` fail-soft flag).
+_GLOBAL_KEYS = (
+    "llm", "synthesizer", "synthesis_llm", "synthesis_synthesizer",
+    "reranker", "_embed_model",
+)
+_global: dict[str, Any] = dict.fromkeys(_GLOBAL_KEYS)
+
+# Graph-scoped deps keyed by ``graph.id``: retriever, ``_vector_index``,
+# ``graph_retriever`` (+ its per-graph ``graph_retriever_attempted`` flag),
+# ``chunk_repository``.  Each inner dict is created lazily by ``_slot``.
+_per_graph: dict[str, dict[str, Any]] = {}
 
 
-async def _build_retriever_once():
-    from src.ingestion.embeddings import build_embedding_model
+def _slot(graph: GraphContext) -> dict[str, Any]:
+    """The per-graph cache dict for ``graph`` (created on first touch).
+    Plain dict ops, no await — safe to call with or without ``_lock``."""
+    slot = _per_graph.get(graph.id)
+    if slot is None:
+        slot = _per_graph[graph.id] = {
+            "retriever": None, "_vector_index": None,
+            "graph_retriever": None, "chunk_repository": None,
+        }
+    return slot
+
+
+def _get_embed_model():
+    """Process-global embed model (graph-agnostic).  Caller holds ``_lock``."""
+    if _global["_embed_model"] is None:
+        from src.ingestion.embeddings import build_embedding_model
+        _global["_embed_model"] = build_embedding_model()
+    return _global["_embed_model"]
+
+
+async def _build_retriever_once(graph: GraphContext):
+    """Build ``graph``'s vector index + default retriever.  Caller holds
+    ``_lock``.  The index is stashed so per-request retrievers at a custom
+    top_k (the date over-fetch path) reuse it without rebuilding the Milvus
+    client."""
     from src.retrieval.vector_index import build_vector_index, build_vector_store
-    embed = build_embedding_model()
-    store = build_vector_store(transitional_default_graph())
+    embed = _get_embed_model()
+    store = build_vector_store(graph)
     index = build_vector_index(store, embed)
-    # Stash the index so per-request retrievers at a custom top_k (the date
-    # over-fetch path) can reuse it without rebuilding the Milvus client.
-    _state["_vector_index"] = index
+    slot = _slot(graph)
+    slot["_vector_index"] = index
     return index.as_retriever(similarity_top_k=10), embed
 
 
-async def _build_graph_retriever_once(embed_model, llm):
+async def _build_graph_retriever_once(graph: GraphContext, embed_model, llm):
     """Returns None when the graph store is unreachable — graph-tools handle this.
 
     ``embed_model`` / ``llm`` are unused: Nebula has no LlamaIndex
@@ -67,7 +101,7 @@ async def _build_graph_retriever_once(embed_model, llm):
         from src.config import settings
         from src.graph.retriever import GraphRetriever
         from src.graph.store import build_graph_store
-        gs = build_graph_store(transitional_default_graph())
+        gs = build_graph_store(graph)
         return GraphRetriever.for_store(
             gs,
             similarity_top_k=settings.agent.graph_similarity_top_k,
@@ -77,19 +111,17 @@ async def _build_graph_retriever_once(embed_model, llm):
         )
     except Exception as exc:
         logger.warning(
-            "search_deps: graph_retriever disabled (graph store unreachable?): {e}",
-            e=exc,
+            "search_deps: graph_retriever disabled for graph {g} "
+            "(graph store unreachable?): {e}",
+            g=graph.id, e=exc,
         )
         return None
 
 
-async def _build_chunk_repo_once():
+async def _build_chunk_repo_once(graph: GraphContext):
     from src.storage.chunk_repository import ChunkRepository
     from src.storage.postgres import AsyncPostgres
-    return ChunkRepository(
-        graph=transitional_default_graph(),
-        pg=AsyncPostgres(graph=transitional_default_graph()),
-    )
+    return ChunkRepository(graph=graph, pg=AsyncPostgres(graph=graph))
 
 
 async def _build_synthesizer_once(llm):
@@ -101,24 +133,30 @@ async def _build_synthesizer_once(llm):
 
 
 async def get_search_llm() -> LLM:
-    """Project search-role LLM from the shared per-process LLM pool."""
-    from src.retrieval.llm_pool import get_llm_pool
-    return get_llm_pool().get("search")
+    """Project search-role LLM from the shared per-process LLM pool.
+
+    Process-global (graph-agnostic); memoised here — ``pool.get`` is a
+    synchronous dict lookup, so no lock/await is needed."""
+    if _global["llm"] is None:
+        from src.retrieval.llm_pool import get_llm_pool
+        _global["llm"] = get_llm_pool().get("search")
+    return _global["llm"]
 
 
-async def get_retriever() -> RetrieverProtocol:
+async def get_retriever(graph: GraphContext) -> RetrieverProtocol:
     async with _lock:
-        if _state["retriever"] is None:
-            ret, embed = await _build_retriever_once()
-            _state["retriever"] = ret
-            _state["_embed_model"] = embed
-    return _state["retriever"]
+        slot = _slot(graph)
+        if slot["retriever"] is None:
+            ret, _ = await _build_retriever_once(graph)
+            slot["retriever"] = ret
+    return slot["retriever"]
 
 
 async def get_vector_retriever(
-    top_k: int, filters: Any | None = None,
+    graph: GraphContext, top_k: int, filters: Any | None = None,
 ) -> RetrieverProtocol:
-    """Per-request vector retriever at a custom ``similarity_top_k``.
+    """Per-request vector retriever at a custom ``similarity_top_k`` over
+    ``graph``'s chunk collection.
 
     Used by the date-filter path (``retrieve_subquestion``). ``filters`` is
     a Milvus ``MetadataFilters`` push-down: WITHOUT it the vector search
@@ -128,52 +166,53 @@ async def get_vector_retriever(
     top-k). Pushing the date bound INTO the Milvus search makes it rank the
     top-k among only in-range chunks. Over-fetch still applies so the merged
     pool (vector + graph + walk) has candidates for rerank. Reuses the
-    cached vector index — ``as_retriever`` is an in-memory wrap (no Milvus
-    rebuild), so building one per request is cheap."""
+    cached per-graph vector index — ``as_retriever`` is an in-memory wrap
+    (no Milvus rebuild), so building one per request is cheap."""
     async with _lock:
-        if _state.get("_vector_index") is None:
-            ret, embed = await _build_retriever_once()
-            if _state["retriever"] is None:
-                _state["retriever"] = ret
-            _state["_embed_model"] = embed
-        index = _state["_vector_index"]
+        slot = _slot(graph)
+        if slot["_vector_index"] is None:
+            ret, _ = await _build_retriever_once(graph)
+            if slot["retriever"] is None:
+                slot["retriever"] = ret
+        index = slot["_vector_index"]
     return index.as_retriever(similarity_top_k=top_k, filters=filters)
 
 
-async def get_graph_retriever() -> GraphRetrieverProtocol | None:
-    if _state["graph_retriever"] is not None or "graph_retriever_attempted" in _state:
-        return _state["graph_retriever"]
+async def get_graph_retriever(graph: GraphContext) -> GraphRetrieverProtocol | None:
+    """Per-graph graph retriever.  The build is attempted ONCE per graph
+    (``graph_retriever_attempted`` lives in the graph's slot): an
+    unreachable store for one graph caches ``None`` for that graph only."""
+    slot = _slot(graph)
+    if slot["graph_retriever"] is not None or "graph_retriever_attempted" in slot:
+        return slot["graph_retriever"]
+    # Resolve the (process-global) LLM before taking _lock.
+    llm = await get_search_llm()
     async with _lock:
-        if "graph_retriever_attempted" in _state:
-            return _state["graph_retriever"]
-        # Need embed model + llm built first.
-        if "_embed_model" not in _state:
-            _, embed = await _build_retriever_once()
-            _state["_embed_model"] = embed
-        from src.retrieval.llm_pool import get_llm_pool
-        llm = _state["llm"] or get_llm_pool().get("search")
-        _state["llm"] = llm
-        _state["graph_retriever"] = await _build_graph_retriever_once(
-            _state["_embed_model"], llm,
+        if "graph_retriever_attempted" in slot:
+            return slot["graph_retriever"]
+        embed = _get_embed_model()
+        slot["graph_retriever"] = await _build_graph_retriever_once(
+            graph, embed, llm,
         )
-        _state["graph_retriever_attempted"] = True
-    return _state["graph_retriever"]
+        slot["graph_retriever_attempted"] = True
+    return slot["graph_retriever"]
 
 
-async def get_chunk_repository():
+async def get_chunk_repository(graph: GraphContext):
     async with _lock:
-        if _state["chunk_repository"] is None:
-            _state["chunk_repository"] = await _build_chunk_repo_once()
-    return _state["chunk_repository"]
+        slot = _slot(graph)
+        if slot["chunk_repository"] is None:
+            slot["chunk_repository"] = await _build_chunk_repo_once(graph)
+    return slot["chunk_repository"]
 
 
 async def get_synthesizer():
     # Resolve the LLM before taking _lock (pool.get is non-blocking).
     llm = await get_search_llm()
     async with _lock:
-        if _state["synthesizer"] is None:
-            _state["synthesizer"] = await _build_synthesizer_once(llm)
-    return _state["synthesizer"]
+        if _global["synthesizer"] is None:
+            _global["synthesizer"] = await _build_synthesizer_once(llm)
+    return _global["synthesizer"]
 
 
 async def get_synthesis_llm() -> LLM:
@@ -187,9 +226,9 @@ async def get_synthesis_synthesizer():
     # Resolve the LLM before taking _lock (pool.get is non-blocking).
     llm = await get_synthesis_llm()
     async with _lock:
-        if _state["synthesis_synthesizer"] is None:
-            _state["synthesis_synthesizer"] = await _build_synthesizer_once(llm)
-    return _state["synthesis_synthesizer"]
+        if _global["synthesis_synthesizer"] is None:
+            _global["synthesis_synthesizer"] = await _build_synthesizer_once(llm)
+    return _global["synthesis_synthesizer"]
 
 
 async def get_reranker(top_n: int | None = None):
@@ -209,31 +248,25 @@ async def get_reranker(top_n: int | None = None):
         # torch wheel). Rerank is OPTIONAL — on a missing dep, cache the failure
         # (so we don't re-attempt the import every call) and return None; the
         # rerank activity then skips reranking and returns the pool as-is.
-        if _state.get("reranker_failed"):
+        if _global.get("reranker_failed"):
             return None
-        if _state["reranker"] is None:
+        if _global["reranker"] is None:
             from src.retrieval.reranker import build_reranker
             try:
-                _state["reranker"] = build_reranker(top_n=_RERANK_SCORE_CAP)
+                _global["reranker"] = build_reranker(top_n=_RERANK_SCORE_CAP)
             except Exception as exc:  # ImportError (no torch) or model-load failure
                 from loguru import logger
                 logger.warning(
                     "reranker unavailable — search continues WITHOUT rerank: {e}", e=exc,
                 )
-                _state["reranker_failed"] = True
+                _global["reranker_failed"] = True
                 return None
-    return _state["reranker"]
+    return _global["reranker"]
 
 
 def reset_for_tests() -> None:
-    """Test hook — clear all caches.  Production code never calls."""
-    for k in list(_state):
-        _state[k] = None if k in (
-            "llm", "retriever", "graph_retriever", "chunk_repository",
-            "synthesizer", "synthesis_llm", "synthesis_synthesizer",
-            "reranker",
-        ) else _state[k]
-    _state.pop("graph_retriever_attempted", None)
-    _state.pop("reranker_failed", None)
-    _state.pop("_embed_model", None)
-    _state.pop("_vector_index", None)
+    """Test hook — clear the global AND per-graph caches.  Production code
+    never calls."""
+    _global.clear()
+    _global.update(dict.fromkeys(_GLOBAL_KEYS))
+    _per_graph.clear()

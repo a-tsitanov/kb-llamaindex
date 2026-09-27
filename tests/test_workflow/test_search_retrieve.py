@@ -120,10 +120,10 @@ def _stub_activity_ctx(monkeypatch):
 @pytest.fixture
 def _patch_deps(monkeypatch):
     """Stub retriever / graph_retriever DI so the activity runs offline."""
-    async def _ret():
+    async def _ret(graph):
         return object()
 
-    async def _gret():
+    async def _gret(graph):
         return object()
 
     monkeypatch.setattr(retrieve_mod, "get_retriever", _ret)
@@ -224,12 +224,12 @@ async def test_date_bounds_overfetch_and_postfilter(monkeypatch):
     the over-fetched top_k WITH the Milvus date push-down filter, and the
     merged pool is post-filtered — chunks out of range OR missing the epoch
     field are dropped (vector + graph)."""
-    async def _gret():
+    async def _gret(graph):
         return object()
 
     seen: dict = {}
 
-    async def _vret(top_k, filters=None):
+    async def _vret(graph, top_k, filters=None):
         seen["top_k"] = top_k
         seen["filters"] = filters
         return object()
@@ -272,7 +272,7 @@ async def test_date_bounds_overfetch_and_postfilter(monkeypatch):
 async def test_no_date_bounds_uses_cached_retriever(_patch_deps, monkeypatch):
     """No date bound → cached retriever (never the over-fetch path) and no
     post-filter (every source survives, behaviour unchanged)."""
-    def _boom(_top_k, filters=None):
+    def _boom(_graph, _top_k, filters=None):
         raise AssertionError("get_vector_retriever must not be called unfiltered")
 
     monkeypatch.setattr(retrieve_mod, "get_vector_retriever", _boom)
