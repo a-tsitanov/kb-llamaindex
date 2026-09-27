@@ -66,7 +66,7 @@
 | Хранилище | Что хранит | Подключение (по умолчанию) |
 |---|---|---|
 | **Milvus** | Векторный индекс чанков — одна запись на чанк (`id, text, embedding, metadata`). `text` — это чанк **на языке оригинала**; эмбеддинги получены из многоязычной embed-модели через LiteLLM. ANN-индекс — **HNSW** (`MILVUS_INDEX_TYPE`, `FLAT` для точного). | `MILVUS_HOST:MILVUS_PORT` (`localhost:19530`); коллекция `MILVUS_COLLECTION` |
-| **NebulaGraph** | Property-граф: вершины с тегом `Entity` (тип сущности — свойство `label`) + типизированные рёбра (имена/описания **на русском** после слияния; рёбра несут осмысленный `weight` = счётчик co-occurrence + дискретные `tags` + логическую полярность `polarity` (`affirmed`/`negated`/`uncertain`) + окно валидности `valid_from`/`valid_to`), плюс иерархия `Community` (чанки — не вершины графа: тексты в Postgres, векторы в Milvus). Nebula **не имеет** in-graph векторного индекса, поэтому эмбеддинги сущностей (`graph_search` kNN), ER-kNN-вектора (`er_vec`) и `community_report_vec` живут в **Milvus** (отдельные коллекции — см. `src/graph/entity_vector_store_milvus.py` / `community_vector_store_milvus.py`); по имени сущности (`find_entity_by_name`) — префиксный LOOKUP по нативному Nebula-индексу `entity_name_idx`, не full-text. | `NEBULA_HOST:NEBULA_PORT` (`localhost:9669`), space `NEBULA_SPACE` (`kb`) |
+| **NebulaGraph** | Property-граф: вершины с тегом `Entity` (тип сущности — свойство `label`) + типизированные рёбра (имена/описания **на русском** после слияния; рёбра несут осмысленный `weight` = счётчик co-occurrence + дискретные `tags` + логическую полярность `polarity` (`affirmed`/`negated`/`uncertain`) + окно валидности `valid_from`/`valid_to`), плюс иерархия `Community` (чанки — не вершины графа: тексты в Postgres, векторы в Milvus). Nebula **не имеет** in-graph векторного индекса, поэтому эмбеддинги сущностей (`graph_search` kNN), ER-kNN-вектора (`er_vec`) и `community_report_vec` живут в **Milvus** (отдельные коллекции — см. `src/graph/entity_vector_store_milvus.py` / `community_vector_store_milvus.py`); по имени сущности (`find_entity_by_name`) — префиксный LOOKUP по нативному Nebula-индексу `entity_name_idx`, не full-text. | `NEBULA_HOST:NEBULA_PORT` (`localhost:9669`), space — свой у каждого графа (`GraphContext.nebula_space`: `kb` у `default`, `g_<id>` у остальных) |
 | **Postgres** | Таблица заданий/статусов `documents` (doc_id → статус → метаданные) и `ingest_metrics` (длительности по каждой активности + теги моделей по ролям для аналитики). | `POSTGRES_*` |
 | **MinIO** | Загруженные исходные файлы (отдаются обратно через `GET /documents/{id}`) **и** staging-блобы по схеме claim-check — тяжёлое состояние приёма (распарсенные узлы, KG, слитые сущности), сериализованное через pickle и передаваемое между активностями по URI. | `MINIO_*` (консоль `:9001`, S3 API `:9000`) |
 | **Wikibase / MediaWiki** | Курируемый **канонический якорь**: self-hosted Wikibase Item на каждую сущность (`push_wikibase`, opt-in) + страницы статей MediaWiki на каждую сущность, создаваемые непрерывным редактором wiki. WDQS предоставляет SPARQL-эндпоинт. | контейнеры `wikibase` / `wdqs` |
@@ -83,6 +83,86 @@
 `LITELLM_BASE_URL`. Wikibase прячется за `--profile wikibase`.
 
 Сбросить всё: `uv run python -m scripts.wipe_db --yes`.
+
+---
+
+## 2a. Графы и изоляция
+
+Все данные принадлежат **графу** — изолированной базе знаний со своими
+физическими хранилищами. Сейчас развёрнут один граф, `default` (прежние
+имена хранилищ, без миграции данных); код уже везде адресует хранилища
+через граф. Создание/удаление графов и управление ключами через API **пока
+недоступны**.
+
+**`GraphContext`** ([`src/tenancy/context.py`](../src/tenancy/context.py)) —
+единственное, что нужно коду хранения, чтобы знать, какой граф он трогает.
+Физические имена живут только в нём (и в строке реестра), никогда — в
+Temporal-payload'ах:
+
+| Поле | `default` | прочие графы (`<id>`) |
+|---|---|---|
+| `nebula_space` | `kb` | `g_<id>` |
+| `chunks_collection` (Milvus) | `MILVUS_COLLECTION` | `g_<id>_chunks` |
+| `er_vec_collection` / `report_vec_collection` (Milvus) | `entity_er_vec` / `community_report_vec` | `g_<id>_er_vec` / `g_<id>_report_vec` |
+| `pg_schema` (Postgres) | `public` | `g_<id>` |
+| `minio_prefix` (ключи объектов в upload-bucket'е) | `""` | `<id>/` |
+
+Id графа — slug `^[a-z][a-z0-9_]{1,30}$` (он подставляется в DDL);
+`default` зарезервирован.
+
+**Реестр** ([`src/tenancy/registry.py`](../src/tenancy/registry.py)) —
+таблица `public.graphs` (id → статус + физические имена), TTL-кэш 30 с в
+каждом процессе. `get(id)` отдаёт `GraphContext` только для графа в статусе
+`ready`; иначе `GraphNotFound` / `GraphNotReady`. Если строки `default` нет
+(или PG недоступен при запросе `default`), используется встроенный контекст
+`default` с предупреждением в логе.
+
+**API-ключи** ([`src/tenancy/api_keys.py`](../src/tenancy/api_keys.py)) —
+`public.api_keys`: sha256-хэш ключа → `owner`, `graph_ids`, `is_admin`
+(кэш 30 с). Ключ, которого нет в таблице, но есть в env `API_KEYS`, считается
+admin-ключом графа `default`.
+
+**Как граф доходит до хранилищ:**
+
+1. **HTTP** — `resolve_graph` ([`src/api/graph_dep.py`](../src/api/graph_dep.py)):
+   каждый запрос с `X-API-Key` привязан ровно к одному графу. Без заголовка
+   `X-Graph` берётся единственный граф ключа (у ключа несколько графов → 400);
+   `X-Graph: <id>` должен входить в `graph_ids` ключа (admin — любой), иначе
+   403; неизвестный граф → 404, не-`ready` → 409.
+2. **MCP** — `current_graph()` ([`src/mcp/_shared.py`](../src/mcp/_shared.py)):
+   с Bearer-токеном — те же правила (`RegistryTokenVerifier` кладёт графы
+   ключа в claims, `X-Graph` из заголовков); без токена (stdio / auth
+   выключен) — env `KB_MCP_GRAPH` (по умолчанию `default`). Отказ → `ToolError`.
+3. **Temporal** — входы workflow и storage-активностей несут `graph_id`
+   (не физические имена; старые payload'ы без поля читаются как `default`),
+   дочерние workflow наследуют его. Активность резолвит граф сама —
+   `resolve_graph_for_activity` ([`src/tenancy/activity.py`](../src/tenancy/activity.py));
+   неизвестный/не-`ready` граф → `ApplicationError(type="GraphUnavailable",
+   non_retryable=True)`, даже у fail-safe активностей. Id workflow —
+   `graph_scoped_id`: у `default` они прежние (`<prefix>-<suffix>`), у прочих
+   `<prefix>-<graph>-<suffix>`.
+4. **Ingest-очередь** — ключ допуска в scheduler'е и `message_id` в RabbitMQ
+   = `<graph>:<doc_id>` (у `default` — голый `doc_id`), так что одинаковые
+   `doc_id` разных графов не схлопываются.
+5. **Хранилища** — билдеры принимают граф обязательным аргументом
+   (`build_graph_store(graph)` → одна Nebula-сессия на space, `USE` +
+   идемпотентный DDL на каждой новой сессии; Milvus-сторы по коллекциям графа;
+   Postgres — `graph_connection(graph)` ставит `search_path` `<pg_schema>,
+   public`, пул сбрасывает его при возврате соединения). Глобальные таблицы
+   (`graphs`, `api_keys`, таблицы бота) живут в `public`.
+6. **CLI/скрипты** — `--graph` (по умолчанию `default`) через
+   `cli_graph_context` (без PG: `default` → встроенный контекст, иначе имена
+   по соглашению). Бот шлёт `X-Graph: $BOT_GRAPH` в каждом запросе к API.
+
+**Только `default`:** wiki (`/admin/wiki/*`, `WikiSweepWorkflow`) и
+мониторинг (`/admin/monitor/*`, `MonitorSweepWorkflow`) — для другого графа
+API отвечает 409, активность пометки wiki-сущностей пропускает не-`default`.
+
+Инварианты зафиксированы тестом `tests/test_tenancy/test_guards.py`: в
+`src/` нет переходного `transitional_default_graph` вне `src/tenancy/context.py`,
+`settings.milvus.collection` и захардкоженные имена space/коллекций
+(`SPACE_NAME`, `entity_er_vec`, `community_report_vec`, `` USE `kb` ``) читаются
+только там, а `build_graph_store` / `build_nebula_graph_store` требуют граф.
 
 ---
 

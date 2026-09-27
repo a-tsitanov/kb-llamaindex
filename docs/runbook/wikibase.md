@@ -68,7 +68,8 @@ Verify cache rows were written to the graph store (the populator queries these o
 ```bash
 uv run python -c "
 from src.graph.store import build_graph_store
-gs = build_graph_store()
+from src.tenancy.context import default_graph_context
+gs = build_graph_store(default_graph_context())
 rows = gs.structured_query('MATCH (b:WikibaseBaseClass) RETURN count(b) AS n')
 print('base classes cached:', rows[0]['n'])  # expect 10
 rows = gs.structured_query('MATCH (p:WikibaseProperty) RETURN count(p) AS n')
@@ -129,7 +130,8 @@ Verify the graph has QIDs on every canonical entity from this run:
 ```bash
 uv run python -c "
 from src.graph.store import build_graph_store
-gs = build_graph_store()
+from src.tenancy.context import default_graph_context
+gs = build_graph_store(default_graph_context())
 rows = gs.structured_query(
     'MATCH (e:Entity) WHERE e.Entity.wikibase_qid != \"\" RETURN count(e) AS n;'
 )
@@ -248,7 +250,8 @@ docker volume rm \
 # WikibaseBaseClass/WikibaseProperty caches — fails on NebulaGraph, see §1):
 uv run python -c "
 from src.graph.store import build_graph_store
-gs = build_graph_store()
+from src.tenancy.context import default_graph_context
+gs = build_graph_store(default_graph_context())
 gs.structured_query('MATCH (n:WikibaseBaseClass) DELETE n')
 gs.structured_query('MATCH (n:WikibaseProperty) DELETE n')
 # entity QIDs (nGQL): per entity, UPDATE VERTEX ON Entity "<vid>" SET wikibase_qid = ""

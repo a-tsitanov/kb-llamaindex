@@ -33,7 +33,7 @@ async def inject_canonical(parsed: Parsed) -> Injected:
     # write slow, and without an internal heartbeat a stuck connection
     # would outrun the heartbeat_timeout and tie up the admission slot.
     # BOTH the store construction AND the upsert run off the event loop
-    # via to_thread: build_graph_store() does blocking driver I/O
+    # via to_thread: build_graph_store(graph) does blocking driver I/O
     # (schema refresh + index DDL) and takes a process-global lock — doing
     # that ON the loop froze the heartbeater under contention, so the
     # pulse stopped and the activity hit timeout_type_heartbeat.

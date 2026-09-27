@@ -381,16 +381,66 @@ uv run python -m scripts.setup_db
 > Повторный `up -d` безопасен: `setup_db` идемпотентен.
 
 Что делает `setup_db`:
-* Создаёт таблицу `documents` (+ индексы по status / department) и таблицу
-  `ingest_metrics` в Postgres.
+* Создаёт глобальные таблицы в `public`: реестр графов `public.graphs`,
+  API-ключи `public.api_keys` (sha256-хэши), таблицы Telegram-бота, расширение
+  `pg_trgm`.
+* Регистрирует граф `default` (статус `ready`, прежние физические имена: space
+  `kb`, схема `public`, коллекции `MILVUS_COLLECTION` / `entity_er_vec` /
+  `community_report_vec`) и заносит каждый ключ из env `API_KEYS` в
+  `public.api_keys` как admin-ключ графа `default`. Оба шага идемпотентны
+  (`ON CONFLICT DO NOTHING`) — существующие строки не перезаписываются.
+* Для каждого графа в статусе `ready` мигрирует его схему: создаёт схему (кроме
+  `public`) и под `search_path` этой схемы — таблицы `documents` (+ индексы по
+  status / department), `ingest_metrics`, `stat_*`, ER-verdict-кэш, зеркало
+  сущностей. Для `default` это `public`, т.е. таблицы остаются там же, где были.
 * Пингует Milvus (коллекция создаётся лениво `MilvusVectorStore`
   при первом insert'е).
 * Обеспечивает существование upload-bucket'а MinIO (`MINIO_BUCKET`, default `kb-uploads`).
 * Регистрирует кастомные Search Attributes Temporal, используемые слоем аналитики
   (no-op / предупреждение, если Postgres visibility-store их не поддерживает).
-* Графу (NebulaGraph) не нужна отдельная миграция — space/tags/edges/индексы
-  создаются лениво (`IF NOT EXISTS`) через `nebula_schema.ensure_schema` при
-  первой записи.
+* Графу (NebulaGraph) не нужна отдельная миграция — space графа (`kb` у
+  `default`) и его tags/edges/индексы создаются лениво (`IF NOT EXISTS`) через
+  `nebula_schema.ensure_schema` на каждой новой сессии, которую открывает
+  `build_graph_store(graph)`.
+
+### 5a. Графы, ключи и заголовок `X-Graph`
+
+Все данные адресуются через граф (см. [`ARCHITECTURE.md` §2a](ARCHITECTURE.md#2a-графы-и-изоляция)).
+Сейчас есть только `default`; **создание/удаление графов и управление ключами
+через API пока недоступны**.
+
+**Проверка перед деплоем.** Pool сбрасывает `search_path` к значению по
+умолчанию (`"$user", public`), поэтому схема с именем PG-пользователя
+перехватила бы неквалифицированные таблицы. Запрос должен вернуть **пустой**
+результат:
+
+```sql
+SELECT nspname FROM pg_namespace WHERE nspname = current_user;
+```
+
+**Что изменилось для клиентов:**
+
+| Что | Поведение |
+|---|---|
+| `X-Graph: <id>` (HTTP API и MCP по HTTP/SSE) | Выбирает граф запроса. Без заголовка — единственный граф ключа; ключу с несколькими графами заголовок обязателен (иначе 400). Граф не из `graph_ids` ключа → 403 (admin-ключ может выбрать любой); неизвестный → 404; не `ready` → 409. Env-ключи из `API_KEYS` привязаны к `default`, так что существующим клиентам заголовок не нужен. |
+| `/admin/wiki/*`, `/admin/monitor/*` | Теперь требуют **admin** `X-API-Key` (раньше были без аутентификации). Работают только для `default`, для другого графа — 409. |
+| `/admin/graph/*`, `POST /api/v1/admin/communities/rebuild` | Требуют **admin**-ключ (раньше хватало любого валидного). |
+| Env-ключи `API_KEYS` | По-прежнему работают: ключ, которого нет в `public.api_keys`, но есть в `API_KEYS`, = admin графа `default`. |
+
+**Новые env-переменные:**
+
+* `BOT_GRAPH` (по умолчанию `default`) — граф Telegram-бота; уходит заголовком
+  `X-Graph` в каждом запросе бота к API. Ключ бота должен иметь доступ к этому
+  графу.
+* `KB_MCP_GRAPH` (по умолчанию `default`) — граф MCP-сервера, когда токена нет
+  (stdio или `KB_MCP_REQUIRE_AUTH=false`). Читается напрямую из окружения
+  процесса (как `KB_MCP_REQUIRE_AUTH`), не через settings — поэтому его нет в
+  `.env.reference`. См. [`runbook/mcp.md` §6.1](runbook/mcp.md#61-граф-вызова-x-graph--kb_mcp_graph).
+
+`NEBULA_SPACE` больше не используется (space задаёт граф) — уберите его из env.
+
+CLI-скрипты (`scripts/*`, `python -m src.ingestion.run`) принимают `--graph`
+(по умолчанию `default`).
 
 ### 5b. (Опционально) Бутстрап Wikibase + wiki-расписания
 

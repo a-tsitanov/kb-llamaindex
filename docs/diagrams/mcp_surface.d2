@@ -14,7 +14,7 @@ classes: {
 
 hermes: "Hermes Agent\n~/.hermes/config.yaml\nmcp_servers: kbtools + kbsearch\nAuthorization: Bearer ${KB_API_KEY}\ntimeout 1800000ms" { class: ext }
 
-kbtools: "MCP-2  kbtools  :9002/sse  (mcp_kbtools_*)\nStaticTokenVerifier · @mcp.tool(timeout=1800)" {
+kbtools: "MCP-2  kbtools  :9002/sse  (mcp_kbtools_*)\nRegistryTokenVerifier (graph via claims + X-Graph) · @mcp.tool(timeout=1800)" {
   class: srv
   vs: "vector_search(query, top_k)" { class: tool }
   gs: "graph_search(query, depth)" { class: tool }
@@ -26,7 +26,7 @@ kbtools: "MCP-2  kbtools  :9002/sse  (mcp_kbtools_*)\nStaticTokenVerifier · @mc
   rd: "read_full_document(doc_id)" { class: tool }
 }
 
-kbsearch: "MCP-1  kbsearch  :9001/sse  (mcp_kbsearch_*)\nStaticTokenVerifier · @mcp.tool(timeout=1800)" {
+kbsearch: "MCP-1  kbsearch  :9001/sse  (mcp_kbsearch_*)\nRegistryTokenVerifier (graph via claims + X-Graph) · @mcp.tool(timeout=1800)" {
   class: srv
   ks: "kb_search (local)" { class: search }
   kg: "kb_global_search" { class: search }
@@ -40,16 +40,16 @@ hermes -> kbsearch: "SSE"
 retr: "in-process retrievers\nGraphRetriever · vector · ChunkRepository\n(BoundedLLM semaphore)" { class: back }
 kbtools -> retr
 retr -> milvus { class: thin }
-retr -> neo4j { class: thin }
+retr -> nebula { class: thin }
 retr -> pg { class: thin }
 
 orch: "Temporal search workflows\nOrchestrator / Global / Drift / Auto\nqueue: kb-search-small (+ large for synth)" { class: back }
 kbsearch -> orch: "submit + poll get_state"
 orch -> milvus { class: thin }
-orch -> neo4j { class: thin }
+orch -> nebula { class: thin }
 
 milvus: "Milvus" { class: store }
-neo4j: "Neo4j" { class: store }
+nebula: "NebulaGraph" { class: store }
 pg: "Postgres" { class: store }
 
 note: "Skill `knowledge-base` (SKILL.md) teaches Hermes\nWHEN to pick each tool + response templates +\nmemory + follow-up reformulation." { class: note }

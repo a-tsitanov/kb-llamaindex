@@ -34,8 +34,9 @@ curl -s -X POST -H "X-API-Key: $API_KEY" http://localhost:8000/admin/graph/compo
 # 3. Run Leiden directly to see the real community count + any error
 uv run python -c "
 from src.graph.store import build_graph_store
+from src.tenancy.context import default_graph_context
 from src.graph.community_leiden import extract_entity_edges, single_level_rows
-edges, names = extract_entity_edges(build_graph_store())
+edges, names = extract_entity_edges(build_graph_store(default_graph_context()))
 rows = single_level_rows(edges, names, gamma=1.0)
 print('edges', len(edges), 'entities', len(names),
       'communities', len({r['communityId'] for r in rows}))

@@ -341,7 +341,7 @@ NebulaGraph — распределённая графовая база на эт
 
 **В нашем коде.**
 - Весь DDL идемпотентен (`IF NOT EXISTS`): `src/graph/nebula_schema.py` → `SCHEMA_DDL` + `ensure_schema` (вызывается при каждом `build_graph_store`, включая миграции существующего space, например `ALTER` колонок).
-- Фабрика хранилища: `src/graph/store.py` → `build_graph_store()` возвращает `NebulaGraphStore` (`src/graph/nebula_store.py`); тесты используют фейковые хранилища. Общая точка входа запросов — `store.structured_query(ngql)`; непустой `param_map` она отвергает (`NotImplementedError`), поэтому доменные чтения/записи идут через `*_graph_ops` модули с инлайн-экранированием.
+- Фабрика хранилища: `src/graph/store.py` → `build_graph_store(graph)` возвращает `NebulaGraphStore` space'а графа (`GraphContext.nebula_space`) (`src/graph/nebula_store.py`); тесты используют фейковые хранилища. Общая точка входа запросов — `store.structured_query(ngql)`; непустой `param_map` она отвергает (`NotImplementedError`), поэтому доменные чтения/записи идут через `*_graph_ops` модули с инлайн-экранированием.
 
 ---
 

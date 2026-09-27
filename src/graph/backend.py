@@ -1,8 +1,8 @@
 """The graph-store surface the app actually uses.
 
 A narrow subset of LlamaIndex's ``PropertyGraphStore`` — the three methods
-every graph caller funnels through.  ``src.graph.store.build_graph_store()``
-returns the NebulaGraph store, which structurally satisfies this Protocol.
+every graph caller funnels through.  ``src.graph.store.build_graph_store(graph)``
+returns the NebulaGraph store for that graph's space, which structurally satisfies this Protocol.
 Keeping the seam this small keeps callers independent of the store class.
 """
 

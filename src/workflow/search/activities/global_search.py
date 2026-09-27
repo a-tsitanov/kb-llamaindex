@@ -18,6 +18,8 @@ pinned to the large tier (the orchestrator's R5 pattern).
 Both activities are fail-safe by construction (store / LLM error → empty
 result, never raised through the Temporal boundary) so a partial graph or
 flaky proxy degrades gracefully rather than failing the whole search.
+An unknown/not-ready graph is the exception: ``map_communities`` fails with
+a non-retryable ``GraphUnavailable`` ``ApplicationError``.
 """
 
 from __future__ import annotations
@@ -346,7 +348,8 @@ async def map_communities(params: MapCommunitiesParams) -> MapCommunitiesResult:
       * anything else — the lexical word-overlap path.
     Both vector strategies fall back to lexical on an empty result or any
     error.  Fail-safe → empty list on any store error (never raises
-    through the Temporal boundary)."""
+    through the Temporal boundary); an unknown/not-ready graph raises a
+    non-retryable ``GraphUnavailable`` ``ApplicationError``."""
     activity.heartbeat({"stage": "map_communities", "level": params.level})
     graph = await resolve_graph_for_activity(params.graph_id)
     store = _get_store(graph)

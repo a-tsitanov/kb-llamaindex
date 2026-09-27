@@ -120,7 +120,7 @@ SCHEMA_DDL: list[str] = [
     # by VID (`FETCH PROP ON ERVerdict "<vid>"`). It was maintained on every write for no
     # reader. Do not add it back without a query that uses it — and note
     # that re-adding it here is what silently undid the first attempt to
-    # DROP it, because `ensure_schema` runs on every `build_graph_store`.
+    # DROP it, because `ensure_schema` runs on every new session `build_graph_store(graph)` opens.
     # Arc-2 monitor findings (`Alert {alert_key,...}`). VID =
     # alert_vid(key). score/updated_at are 0 for unscored (new_connection) alerts.
     "CREATE TAG IF NOT EXISTS `Alert` ("

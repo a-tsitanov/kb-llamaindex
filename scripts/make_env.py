@@ -335,7 +335,6 @@ _ENV_DESCRIPTIONS: dict[str, str] = {
         "до перезапуска процесса. >= 1."
     ),
     "NEBULA_PORT": "Порт NebulaGraph graphd (по умолчанию 9669).",
-    "NEBULA_SPACE": "Имя графового space в NebulaGraph.",
     "NEBULA_USER": "Пользователь NebulaGraph.",
     "NEBULA_WRITE_BATCH_SIZE": "Число строк на один INSERT VERTEX/EDGE (батчинг multi-VALUES). >= 1.",
     "INGEST_QUEUE_BACKEND": "Бэкенд очереди ингеста: temporal (singleton IngestSchedulerWorkflow) | rabbitmq (брокер + ingest-consumer, допуск prefetch=K). Дефолтный путь — rabbitmq.",

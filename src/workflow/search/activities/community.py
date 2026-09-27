@@ -19,7 +19,9 @@ on the query hot path:
 Both are fail-safe by construction — a store/LLM error is logged and
 returns an empty/non-persisted result rather than raising through the
 Temporal boundary (the offline build must never crash; a partial rebuild
-is fine and the next run reconciles).
+is fine and the next run reconciles).  The one exception: a graph that is
+unknown or not ready fails the activity with a non-retryable
+``GraphUnavailable`` ``ApplicationError`` (``resolve_graph_for_activity``).
 """
 
 from __future__ import annotations
@@ -302,7 +304,8 @@ async def detect_communities_activity(
 
     ``max_levels == 1`` (default) → single-level/back-compat
     (``detect_communities``); ``max_levels > 1`` → the full dendrogram
-    HIERARCHY (``detect_hierarchy``)."""
+    HIERARCHY (``detect_hierarchy``).  An unknown/not-ready graph raises
+    a non-retryable ``GraphUnavailable`` ``ApplicationError``."""
     activity.heartbeat({
         "stage": "detect",
         "min_size": params.min_size,
@@ -413,7 +416,9 @@ async def summarize_community_activity(
     """Generate a STRUCTURED REPORT for ONE community via the small LLM,
     embed it, and persist report/title/summary/report_vec on the
     ``:Community`` node (idempotent).  Fail-safe — any error returns a
-    non-persisted result (never raises through the Temporal boundary)."""
+    non-persisted result (never raises through the Temporal boundary), except
+    that an unknown/not-ready graph raises a non-retryable
+    ``GraphUnavailable`` ``ApplicationError``."""
     activity.heartbeat({
         "stage": "summarize",
         "community_id": params.community_id,

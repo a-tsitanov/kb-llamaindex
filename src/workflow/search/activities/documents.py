@@ -6,7 +6,9 @@ Graph path: (:Community {level:0}) <-IN_COMMUNITY- members → ``first_doc_id``
 level 0: member links exist at every hierarchy level, but community ``id``
 is unique only per level, so the lookup must be scoped to one level to
 avoid collisions.  Fail-open: a missing store or any query error → empty
-list (the answer is never blocked on document provenance).
+list (the answer is never blocked on document provenance).  An unknown or
+not-ready graph is not fail-open: it raises a non-retryable
+``GraphUnavailable`` ``ApplicationError`` (``resolve_graph_for_activity``).
 """
 
 from __future__ import annotations

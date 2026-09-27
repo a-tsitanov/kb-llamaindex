@@ -245,6 +245,6 @@ curl -s http://localhost:8000/api/v1/analyze \
 | `answer` противоречит цифрам | Слабая модель синтеза (e2b) | Верить `provenance.steps[].rows`; поднять tier до e4b |
 | `top_central_entities` / `link_prediction` пусто или устарело | Материализация не гонялась | §5 `POST /admin/graph/materialize` |
 | 500 `Analyze failed` | Search-пул воркера не поднят / Temporal недоступен | `docker logs kb-llamaindex-worker-1`, пул `search` в `WORKER_GROUPS` |
-| Всё по нулям при живом графе | Приложение смотрит не в тот граф (env) | Сверить `NEBULA_HOST`/`NEBULA_PORT`/`NEBULA_SPACE` контейнера с ожидаемым |
+| Всё по нулям при живом графе | Приложение смотрит не в тот граф (env) | Сверить `NEBULA_HOST`/`NEBULA_PORT` контейнера с ожидаемым и граф запроса (`X-Graph` / `KB_MCP_GRAPH`; space графа — `kb` у `default`, `g_<id>` у остальных) |
 | `kb_analyze` не виден в MCP-клиенте | Старый образ mcp-search / клиент не переподключился | Пересобрать, `/mcp` reconnect |
 | Алертов нет при включённом мониторе | `MONITOR_ENABLED` не дошёл до воркера (env только в `.env`, не в compose-anchor) | Проверить `docker exec worker env \| grep MONITOR_`; пересоздать worker |

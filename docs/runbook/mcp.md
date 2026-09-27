@@ -278,13 +278,25 @@ uv run python -m src.mcp.stats_server --transport http --port 9003
 
 ## 6. Auth
 
-Все три сервера используют тот же `API_KEYS` env что и FastAPI route handlers (см. [`src/api/auth.py`](../../src/api/auth.py) и [`src/config.py:ApiSettings.keys_list`](../../src/config.py)).
+Все три сервера используют тот же реестр API-ключей, что и FastAPI route handlers (см. [`src/api/auth.py`](../../src/api/auth.py), [`src/tenancy/api_keys.py`](../../src/tenancy/api_keys.py)): ключ ищется по sha256-хэшу в `public.api_keys`; если строки нет — фолбэк на env `API_KEYS` (такой ключ = admin, граф `default`). Результат lookup'а кэшируется в процессе на 30 с.
 
 **Stdio**: env-vars передаются через конфиг клиента (Claude Desktop "env" поле). API_KEYS не нужен если `KB_MCP_REQUIRE_AUTH=false`.
 
-**HTTP/SSE**: header `Authorization: Bearer <token>` ожидается, token проверяется в `is_valid_key()` ([`src/mcp/_shared.py`](../../src/mcp/_shared.py)).
+**HTTP/SSE**: header `Authorization: Bearer <token>` ожидается; токен проверяет `RegistryTokenVerifier` ([`src/mcp/_shared.py`](../../src/mcp/_shared.py)) через тот же реестр ключей и кладёт в claims токена `owner`, `graph_ids`, `is_admin`. Auth-провайдер строится один раз при импорте модуля сервера (`build_sse_auth()`); он включён, только если `KB_MCP_REQUIRE_AUTH=true` и env `API_KEYS` непуст.
 
 **Strict mode**: при boot'е (`assert_api_key_env_set()`) сервер падает если `KB_MCP_REQUIRE_AUTH=true` (default) И `API_KEYS` пуст — защита от случайно-открытых портов.
+
+### 6.1 Граф вызова: `X-Graph` / `KB_MCP_GRAPH`
+
+Каждый вызов тула привязан ровно к одному графу — `current_graph()` в [`src/mcp/_shared.py`](../../src/mcp/_shared.py). Тихого фолбэка на `default` нет: любой отказ — `ToolError`.
+
+- **HTTP/SSE с токеном** — те же правила, что у REST API (`choose_graph_id`, [`src/api/graph_dep.py`](../../src/api/graph_dep.py)):
+  - без заголовка `X-Graph` — единственный граф ключа; если у ключа графов несколько → ошибка «X-Graph header required for this key»;
+  - с `X-Graph: <id>` — граф должен быть в `graph_ids` ключа (admin-ключ может выбрать любой), иначе «graph not allowed for this key».
+- **Без токена** (stdio, или auth выключен `KB_MCP_REQUIRE_AUTH=false`) — граф берётся из env `KB_MCP_GRAPH` (обычная env-переменная процесса, не поле settings; по умолчанию `default`). Заголовок `X-Graph` в этом режиме не читается.
+- Выбранный id всегда резолвится через реестр графов (`public.graphs`): неизвестный граф → `graph '<id>' not found`, граф не в статусе `ready` → `graph '<id>' is <status>`.
+
+Env-ключи из `API_KEYS` привязаны к `default`, поэтому существующим клиентам `X-Graph` не нужен. Создание/удаление графов и выдача ключей через API пока недоступны.
 
 ```bash
 # Development без auth:
@@ -295,6 +307,15 @@ uv run python -m src.mcp.tools_server --transport http --port 9002
 export KB_MCP_REQUIRE_AUTH=true
 export API_KEYS=dev-local-key,prod-key-2
 uv run python -m src.mcp.tools_server --transport http --port 9002
+```
+
+```bash
+# Stdio, привязка к конкретному графу (без токена граф задаёт env):
+KB_MCP_GRAPH=default KB_MCP_REQUIRE_AUTH=false uv run python -m src.mcp.tools_server --transport stdio
+
+# HTTP-клиент с ключом на несколько графов выбирает граф заголовком:
+#   Authorization: Bearer <key>
+#   X-Graph: <graph_id>
 ```
 
 ---
