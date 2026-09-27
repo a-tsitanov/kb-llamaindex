@@ -176,21 +176,21 @@ async def test_map_communities_reads_summaries(monkeypatch):
     store = _lexical_store([
         {"community_id": 7, "level": 0, "summary": "строители", "member_count": 5},
     ])
-    monkeypatch.setattr(gs_mod, "_get_store", lambda: store)
+    monkeypatch.setattr(gs_mod, "_get_store", lambda graph: store)
     out = await map_communities(MapCommunitiesParams(query="строители", limit=10))
     assert [c.community_id for c in out.communities] == ["7"]
 
 
 @pytest.mark.asyncio
 async def test_map_communities_failsafe_on_store_error(monkeypatch):
-    monkeypatch.setattr(gs_mod, "_get_store", lambda: _FakeStore(raise_=True))
+    monkeypatch.setattr(gs_mod, "_get_store", lambda graph: _FakeStore(raise_=True))
     out = await map_communities(MapCommunitiesParams(query="q"))
     assert out.communities == []
 
 
 @pytest.mark.asyncio
 async def test_map_communities_no_store(monkeypatch):
-    monkeypatch.setattr(gs_mod, "_get_store", lambda: None)
+    monkeypatch.setattr(gs_mod, "_get_store", lambda graph: None)
     out = await map_communities(MapCommunitiesParams(query="q"))
     assert out.communities == []
 
@@ -434,7 +434,7 @@ async def test_map_communities_semantic_uses_knn(monkeypatch):
     ])
     report_store = _FakeReportStore(refs=rows)
     _patch_report_store(monkeypatch, report_store)
-    monkeypatch.setattr(gs_mod, "_get_store", lambda: store)
+    monkeypatch.setattr(gs_mod, "_get_store", lambda graph: store)
     monkeypatch.setattr(gs_mod, "_get_embed_model", lambda: _FakeEmbed())
     out = await map_communities(MapCommunitiesParams(
         query="строители", selection="semantic",
@@ -453,7 +453,7 @@ async def test_map_communities_semantic_empty_falls_back_to_lexical(monkeypatch)
     store = _lexical_store([
         {"community_id": 1, "level": 0, "summary": "строители", "member_count": 3},
     ])
-    monkeypatch.setattr(gs_mod, "_get_store", lambda: store)
+    monkeypatch.setattr(gs_mod, "_get_store", lambda graph: store)
     monkeypatch.setattr(gs_mod, "_get_embed_model", lambda: _FakeEmbed())
     out = await map_communities(MapCommunitiesParams(
         query="строители", selection="semantic",
@@ -469,7 +469,7 @@ async def test_map_communities_semantic_embed_error_falls_back(monkeypatch):
     store = _lexical_store([
         {"community_id": 2, "level": 0, "summary": "строители", "member_count": 1},
     ])
-    monkeypatch.setattr(gs_mod, "_get_store", lambda: store)
+    monkeypatch.setattr(gs_mod, "_get_store", lambda graph: store)
     monkeypatch.setattr(
         gs_mod, "_get_embed_model", lambda: _FakeEmbed(raise_=True),
     )
@@ -485,7 +485,7 @@ async def test_map_communities_descent_uses_descent(monkeypatch):
     children = {1: [_row(11, 1, [1.0, 0.0])]}
     store, vecs = _FakeTreeStore(roots=roots, children=children)
     _patch_report_store(monkeypatch, vecs)
-    monkeypatch.setattr(gs_mod, "_get_store", lambda: store)
+    monkeypatch.setattr(gs_mod, "_get_store", lambda graph: store)
     monkeypatch.setattr(gs_mod, "_get_embed_model", lambda: _FakeEmbed([1.0, 0.0]))
     out = await map_communities(MapCommunitiesParams(
         query="строители", selection="descent", limit=5,
@@ -503,7 +503,7 @@ async def test_map_communities_descent_empty_falls_back_to_lexical(monkeypatch):
         {"community_id": 1, "level": 0, "summary": "строители", "member_count": 3},
     ])
     _patch_report_store(monkeypatch, _TreeVecStore({}))
-    monkeypatch.setattr(gs_mod, "_get_store", lambda: store)
+    monkeypatch.setattr(gs_mod, "_get_store", lambda graph: store)
     monkeypatch.setattr(gs_mod, "_get_embed_model", lambda: _FakeEmbed([1.0, 0.0]))
     out = await map_communities(MapCommunitiesParams(
         query="строители", selection="descent",
@@ -519,7 +519,7 @@ async def test_map_communities_lexical_default_unchanged(monkeypatch):
     store = _lexical_store([
         {"community_id": 7, "level": 0, "summary": "строители", "member_count": 5},
     ])
-    monkeypatch.setattr(gs_mod, "_get_store", lambda: store)
+    monkeypatch.setattr(gs_mod, "_get_store", lambda graph: store)
 
     def _boom_embed():
         raise AssertionError("lexical path must not embed")

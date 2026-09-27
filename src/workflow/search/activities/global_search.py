@@ -31,6 +31,8 @@ from temporalio import activity
 
 from src.graph.community_read import build_community_read
 from src.graph.community_vector_store import build_community_report_vector_store
+from src.tenancy.activity import resolve_graph_for_activity
+from src.tenancy.context import GraphContext
 from src.workflow.contracts import (
     CommunitySummaryRef,
     MapCommunitiesParams,
@@ -61,15 +63,13 @@ _PARTIAL_SYSTEM = (
 )
 
 
-def _get_store() -> Any | None:
+def _get_store(graph: GraphContext) -> Any | None:
     """Build the Nebula graph store (or ``None`` when unreachable).
 
     Indirected for monkeypatching (mirrors ``community._get_store``)."""
     try:
         from src.graph.store import build_graph_store
-        from src.tenancy.context import transitional_default_graph
-
-        return build_graph_store(transitional_default_graph())
+        return build_graph_store(graph)
     except Exception as exc:
         activity.logger.warning("global_search: graph store unavailable: %s", exc)
         return None
@@ -348,7 +348,8 @@ async def map_communities(params: MapCommunitiesParams) -> MapCommunitiesResult:
     error.  Fail-safe → empty list on any store error (never raises
     through the Temporal boundary)."""
     activity.heartbeat({"stage": "map_communities", "level": params.level})
-    store = _get_store()
+    graph = await resolve_graph_for_activity(params.graph_id)
+    store = _get_store(graph)
     if store is None:
         return MapCommunitiesResult(communities=[])
 

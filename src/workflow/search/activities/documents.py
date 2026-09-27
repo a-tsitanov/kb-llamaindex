@@ -16,6 +16,8 @@ from typing import Any
 
 from temporalio import activity
 
+from src.tenancy.activity import resolve_graph_for_activity
+from src.tenancy.context import GraphContext
 from src.workflow.contracts import (
     DocumentsForCommunitiesParams,
     DocumentsForCommunitiesResult,
@@ -56,13 +58,11 @@ def _docs_for_communities_nebula(store: Any, ids: list[str]) -> list[dict]:
     return out
 
 
-def _get_store() -> Any | None:
+def _get_store(graph: GraphContext) -> Any | None:
     """Graph store or None when unreachable (indirected for monkeypatch)."""
     try:
         from src.graph.store import build_graph_store
-        from src.tenancy.context import transitional_default_graph
-
-        return build_graph_store(transitional_default_graph())
+        return build_graph_store(graph)
     except Exception as exc:
         activity.logger.warning("documents_for_communities: store unavailable: %s", exc)
         return None
@@ -76,7 +76,8 @@ async def documents_for_communities(
                         "n_communities": len(params.community_ids)})
     if not params.community_ids:
         return DocumentsForCommunitiesResult(doc_ids=[])
-    store = _get_store()
+    graph = await resolve_graph_for_activity(params.graph_id)
+    store = _get_store(graph)
     if store is None:
         return DocumentsForCommunitiesResult(doc_ids=[])
     try:

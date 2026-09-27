@@ -16,7 +16,8 @@ from temporalio import activity
 from src.observability.ingest_metrics_extractor import parse_activity_timings
 from src.storage.ingest_metrics import build_ingest_metrics_store
 from src.storage.postgres import AsyncPostgres
-from src.tenancy.context import graph_scoped_id, transitional_default_graph
+from src.tenancy.activity import resolve_graph_for_activity
+from src.tenancy.context import GraphContext, graph_scoped_id
 from src.workflow.client import get_temporal_client
 from src.workflow.contracts import (
     FinalizeIn,
@@ -43,7 +44,8 @@ async def finalize(payload: FinalizeIn) -> IngestResult:
     )
     activity.heartbeat({"stage": "init", "status": payload.graph_status})
 
-    pg = AsyncPostgres(graph=transitional_default_graph())
+    graph = await resolve_graph_for_activity(payload.graph_id)
+    pg = AsyncPostgres(graph=graph)
     await pg.update_status(
         uuid.UUID(payload.ctx.doc_id), status=payload.graph_status,
     )
@@ -56,7 +58,7 @@ async def finalize(payload: FinalizeIn) -> IngestResult:
     await asyncio.to_thread(_rmtree, payload.ctx.cleanup_dir)
     activity.heartbeat({"stage": "local_cleaned"})
 
-    await _persist_ingest_metrics(payload)
+    await _persist_ingest_metrics(payload, graph)
     activity.heartbeat({"stage": "metrics_written"})
 
     wikibase_status = (
@@ -80,7 +82,7 @@ async def finalize(payload: FinalizeIn) -> IngestResult:
     )
 
 
-async def _persist_ingest_metrics(payload: FinalizeIn) -> None:
+async def _persist_ingest_metrics(payload: FinalizeIn, graph: GraphContext) -> None:
     """Pull parent + child workflow histories, derive per-activity
     durations, and persist them into ``ingest_metrics``.
 
@@ -150,7 +152,7 @@ async def _persist_ingest_metrics(payload: FinalizeIn) -> None:
         if not rows:
             activity.logger.info("ingest_metrics: no completed activities yet")
             return
-        store = build_ingest_metrics_store()
+        store = build_ingest_metrics_store(graph)
         inserted = await store.insert_metrics(rows)
         activity.logger.info(
             "ingest_metrics  rows=%d  inserted=%d  version_tag=%s  "
@@ -175,7 +177,8 @@ async def mark_skipped(payload: SkipIn) -> IngestResult:
     )
     activity.heartbeat({"stage": "init", "doc_id": payload.ctx.doc_id})
 
-    pg = AsyncPostgres(graph=transitional_default_graph())
+    graph = await resolve_graph_for_activity(payload.graph_id)
+    pg = AsyncPostgres(graph=graph)
     await pg.update_status(
         uuid.UUID(payload.ctx.doc_id), status="skipped", error=payload.reason,
     )
@@ -206,7 +209,8 @@ async def mark_failed(payload: MarkFailedIn) -> None:
     )
     activity.heartbeat({"stage": "init", "doc_id": doc_id})
 
-    pg = AsyncPostgres(graph=transitional_default_graph())
+    graph = await resolve_graph_for_activity(payload.graph_id)
+    pg = AsyncPostgres(graph=graph)
     await pg.update_status(uuid.UUID(doc_id), status="failed", error=payload.error)
     activity.heartbeat({"stage": "pg_failed_written"})
 

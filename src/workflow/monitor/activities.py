@@ -22,15 +22,16 @@ from src.config import settings
 from src.graph.alerts import upsert_alert
 from src.graph.store import build_graph_store
 from src.retrieval.date_filters import today_epoch_days
-from src.tenancy.context import transitional_default_graph
+from src.tenancy.activity import resolve_graph_for_activity
+from src.tenancy.context import GraphContext
 from src.workflow.heartbeat import heartbeat_every
 from src.workflow.monitor.delivery import post_alert
 
 # Maximum rows per sweep pass — keeps a single sweep bounded even on large graphs.
 _TOP_N = 200
 
-def _get_store() -> Any:
-    return build_graph_store(transitional_default_graph())
+def _get_store(graph: GraphContext) -> Any:
+    return build_graph_store(graph)
 
 
 # ── Detection reads ─────────────────────────────────────────────────────────────
@@ -119,8 +120,11 @@ async def detect_alerts(p: MonitorIn) -> MonitorResult:
     Both graph reads and ``upsert_alert`` writes are synchronous store calls
     executed off the event loop via ``asyncio.to_thread``.
     """
+    # Resolved outside the fail-soft try: an unavailable graph fails the
+    # activity non-retryably instead of being reported as a soft error.
+    graph = await resolve_graph_for_activity(p.graph_id)
     try:
-        store = _get_store()
+        store = _get_store(graph)
         today = today_epoch_days()
         since = today - p.window_days
         new_conn_count = 0
@@ -222,8 +226,11 @@ async def deliver_alerts(p: DeliverIn) -> DeliverResult:
     url = settings.monitor.webhook_url
     if not url:
         return DeliverResult(delivered=0)
+    # Resolved outside the fail-soft try: an unavailable graph fails the
+    # activity non-retryably instead of being reported as a soft error.
+    graph = await resolve_graph_for_activity(p.graph_id)
     try:
-        store = _get_store()
+        store = _get_store(graph)
         now = today_epoch_days()
         delivered = 0
         failed = 0

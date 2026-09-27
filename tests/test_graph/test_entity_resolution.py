@@ -523,7 +523,11 @@ async def test_cleanup_stored_losers_safe_on_failure():
 
     calls: list[dict] = []
 
+    from src.tenancy.context import default_graph_context
+
     class _BoomStore:
+        graph = default_graph_context()  # build_er_graph_ops scopes the verdict cache by it
+
         def structured_query(self, query, param_map=None):
             calls.append({"query": query, "param_map": param_map})
             raise RuntimeError("apoc.merge.relationship not found")

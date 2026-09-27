@@ -22,3 +22,21 @@ try:
 except ImportError:
     pass
 
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _offline_graph_registry(monkeypatch):
+    from src.tenancy import registry as reg
+    from src.tenancy.context import default_graph_context, new_graph_context
+
+    class _Stub:
+        async def get(self, gid):
+            return default_graph_context() if gid == "default" else new_graph_context(gid)
+
+        def invalidate(self, gid=None):
+            pass
+    monkeypatch.setattr(reg, "get_graph_registry", lambda: _Stub())
+    import src.tenancy.activity as ta
+    monkeypatch.setattr(ta, "get_graph_registry", lambda: _Stub())

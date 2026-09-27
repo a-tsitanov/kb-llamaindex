@@ -29,7 +29,7 @@ from src.analytics.provenance import step_from_primitive
 from src.analytics.synthesis import build_synthesis_prompt
 from src.graph.store import build_graph_store
 from src.retrieval.llm_pool import get_llm_pool
-from src.tenancy.context import transitional_default_graph
+from src.tenancy.activity import resolve_graph_for_activity
 
 
 @activity.defn
@@ -51,7 +51,8 @@ async def execute_step(p: ExecInput) -> StepResult:
             row_count=0,
         )
 
-    store = build_graph_store(transitional_default_graph())
+    graph = await resolve_graph_for_activity(p.graph_id)
+    store = build_graph_store(graph)
     params = dict(p.call.params)
 
     # Inject default top_n when the primitive accepts it and the planner omitted it.

@@ -232,7 +232,7 @@ async def test_summarize_produces_report_and_persists(monkeypatch):
         findings=[{"statement": "Тесно связаны контрактами.", "importance": 90}],
     ))
     embed = _FakeEmbed()
-    monkeypatch.setattr(community_mod, "_get_store", lambda: store)
+    monkeypatch.setattr(community_mod, "_get_store", lambda graph: store)
     monkeypatch.setattr(community_mod, "_get_summary_llm", lambda: llm)
     monkeypatch.setattr(community_mod, "_get_embed_model", lambda: embed)
 
@@ -273,7 +273,7 @@ async def test_summarize_level_gt0_uses_child_reports(monkeypatch):
         ],
     )
     llm = _FakeLLM()
-    monkeypatch.setattr(community_mod, "_get_store", lambda: store)
+    monkeypatch.setattr(community_mod, "_get_store", lambda graph: store)
     monkeypatch.setattr(community_mod, "_get_summary_llm", lambda: llm)
 
     out = await summarize_community_activity(SummarizeCommunityParams(
@@ -297,7 +297,7 @@ async def test_summarize_level_gt0_falls_back_to_members(monkeypatch):
         children=[],
     )
     llm = _FakeLLM()
-    monkeypatch.setattr(community_mod, "_get_store", lambda: store)
+    monkeypatch.setattr(community_mod, "_get_store", lambda graph: store)
     monkeypatch.setattr(community_mod, "_get_summary_llm", lambda: llm)
 
     await summarize_community_activity(SummarizeCommunityParams(
@@ -315,7 +315,7 @@ async def test_summarize_persists_without_vec_on_embed_failure(monkeypatch):
     monkeypatch.setattr(
         community_mod, "build_community_report_vector_store", lambda s: report_store,
     )
-    monkeypatch.setattr(community_mod, "_get_store", lambda: store)
+    monkeypatch.setattr(community_mod, "_get_store", lambda graph: store)
     monkeypatch.setattr(community_mod, "_get_summary_llm", lambda: _FakeLLM())
 
     class _BoomEmbed:
@@ -355,7 +355,7 @@ class _FakeReportStore:
 async def test_summarize_upserts_report_vec_through_store(monkeypatch):
     store = _FakeStore(member_rows=[{"name": "A", "description": "x"}])
     report_store = _FakeReportStore()
-    monkeypatch.setattr(community_mod, "_get_store", lambda: store)
+    monkeypatch.setattr(community_mod, "_get_store", lambda graph: store)
     monkeypatch.setattr(community_mod, "_get_summary_llm", lambda: _FakeLLM())
     monkeypatch.setattr(
         community_mod, "build_community_report_vector_store", lambda s: report_store,
@@ -378,7 +378,7 @@ async def test_summarize_upserts_report_vec_through_store(monkeypatch):
 async def test_summarize_upsert_failopen_on_store_error(monkeypatch):
     store = _FakeStore(member_rows=[{"name": "A", "description": "x"}])
     report_store = _FakeReportStore(raise_=True)
-    monkeypatch.setattr(community_mod, "_get_store", lambda: store)
+    monkeypatch.setattr(community_mod, "_get_store", lambda graph: store)
     monkeypatch.setattr(community_mod, "_get_summary_llm", lambda: _FakeLLM())
     monkeypatch.setattr(
         community_mod, "build_community_report_vector_store", lambda s: report_store,
@@ -397,7 +397,7 @@ async def test_summarize_upsert_failopen_on_store_error(monkeypatch):
 async def test_summarize_skips_upsert_when_embed_failed(monkeypatch):
     store = _FakeStore(member_rows=[{"name": "A", "description": "x"}])
     report_store = _FakeReportStore()
-    monkeypatch.setattr(community_mod, "_get_store", lambda: store)
+    monkeypatch.setattr(community_mod, "_get_store", lambda graph: store)
     monkeypatch.setattr(community_mod, "_get_summary_llm", lambda: _FakeLLM())
     monkeypatch.setattr(
         community_mod, "build_community_report_vector_store", lambda s: report_store,
@@ -424,7 +424,7 @@ async def test_summarize_failsafe_on_llm_error(monkeypatch):
         async def acomplete(self, *_a, **_k):
             raise RuntimeError("llm down")
 
-    monkeypatch.setattr(community_mod, "_get_store", lambda: store)
+    monkeypatch.setattr(community_mod, "_get_store", lambda graph: store)
     monkeypatch.setattr(community_mod, "_get_summary_llm", lambda: _BoomLLM())
 
     out = await summarize_community_activity(SummarizeCommunityParams(
@@ -462,7 +462,7 @@ async def test_summarize_map_reduce_on_large_member_context(monkeypatch):
     members = [{"name": f"E{i}", "description": "d" * 50} for i in range(6)]
     store = _summ_store("0", 0, members=members)
     llm = _FakeLLM(_report_json(title="Итог", summary="Сводная сводка."))
-    monkeypatch.setattr(community_mod, "_get_store", lambda: store)
+    monkeypatch.setattr(community_mod, "_get_store", lambda graph: store)
     monkeypatch.setattr(community_mod, "_get_summary_llm", lambda: llm)
 
     out = await summarize_community_activity(SummarizeCommunityParams(
@@ -488,7 +488,7 @@ async def test_summarize_single_call_when_context_fits(monkeypatch):
         {"name": "A", "description": "x"}, {"name": "B", "description": "y"},
     ])
     llm = _FakeLLM()
-    monkeypatch.setattr(community_mod, "_get_store", lambda: store)
+    monkeypatch.setattr(community_mod, "_get_store", lambda graph: store)
     monkeypatch.setattr(community_mod, "_get_summary_llm", lambda: llm)
 
     out = await summarize_community_activity(SummarizeCommunityParams(
@@ -529,7 +529,7 @@ async def test_detect_activity_strips_members_from_result(monkeypatch):
         return [CommunityRef(
             community_id="9", level=0, members=["a", "b", "c", "d"])]
 
-    monkeypatch.setattr(community_mod, "_get_store", lambda: object())
+    monkeypatch.setattr(community_mod, "_get_store", lambda graph: object())
     monkeypatch.setattr(communities_mod, "detect_communities", fake_single)
 
     out = await detect_communities_activity(DetectCommunitiesParams(min_size=1))
@@ -549,7 +549,7 @@ async def test_summarize_reads_members_from_graph_by_community_id(monkeypatch):
         {"name": "Ромашка", "description": "Поставщик."},
     ])
     llm = _FakeLLM()
-    monkeypatch.setattr(community_mod, "_get_store", lambda: store)
+    monkeypatch.setattr(community_mod, "_get_store", lambda graph: store)
     monkeypatch.setattr(community_mod, "_get_summary_llm", lambda: llm)
 
     out = await summarize_community_activity(
@@ -570,7 +570,7 @@ async def test_summarize_zero_member_count_skips_llm(monkeypatch):
     def _llm():
         raise AssertionError("must not build LLM for an empty community")
 
-    monkeypatch.setattr(community_mod, "_get_store", lambda: _FakeStore())
+    monkeypatch.setattr(community_mod, "_get_store", lambda graph: _FakeStore())
     monkeypatch.setattr(community_mod, "_get_summary_llm", _llm)
 
     out = await summarize_community_activity(
@@ -707,7 +707,7 @@ async def test_detect_activity_hierarchy_branch(monkeypatch):
         calls["single"] += 1
         return []
 
-    monkeypatch.setattr(community_mod, "_get_store", lambda: object())
+    monkeypatch.setattr(community_mod, "_get_store", lambda graph: object())
     monkeypatch.setattr(communities_mod, "detect_hierarchy", fake_hierarchy)
     monkeypatch.setattr(communities_mod, "detect_communities", fake_single)
 

@@ -81,3 +81,79 @@ def test_community_summarize_specs_carry_graph_id():
     detect = DetectCommunitiesResult(communities=[DetectedCommunity(community_id="c1")])
     assert build_summarize_specs(detect)[0].graph_id == DEFAULT_GRAPH_ID
     assert build_summarize_specs(detect, "acme")[0].graph_id == "acme"
+
+
+# ── R-P3: wrapper graph_id must agree with its nested ctx/params ──────
+
+
+def _ctx(gid=None):
+    data = {"doc_id": "d", "local_path": "/x", "cleanup_dir": None, "workflow_run_id": "r"}
+    if gid is not None:
+        data["graph_id"] = gid
+    return data
+
+
+def _wrapper_payloads(ctx, **extra):
+    """Minimal dict payloads for SkipIn / FinalizeIn / MarkFailedIn."""
+    params = extra.pop("params", {"doc_id": "d", "path": "s3://b/k"})
+    return {
+        "SkipIn": {"ctx": ctx, **extra},
+        "FinalizeIn": {"ctx": ctx, "indexed": {"node_ids": [], "count": 0},
+                       "graph_status": "completed", **extra},
+        "MarkFailedIn": {"ctx": ctx, "params": params, "error": "e", **extra},
+    }
+
+
+@pytest.mark.parametrize("name", ["SkipIn", "FinalizeIn", "MarkFailedIn"])
+def test_wrapper_graph_id_mismatching_nested_ctx_is_rejected(name):
+    from pydantic import ValidationError
+
+    from src.workflow import contracts as c
+
+    payload = _wrapper_payloads(_ctx("acme"), graph_id="other")[name]
+    with pytest.raises(ValidationError, match="graph_id"):
+        getattr(c, name).model_validate(payload)
+
+
+def test_mark_failed_wrapper_mismatching_params_is_rejected():
+    from pydantic import ValidationError
+
+    from src.workflow.contracts import MarkFailedIn
+
+    with pytest.raises(ValidationError, match="graph_id"):
+        MarkFailedIn.model_validate({
+            "ctx": None,
+            "params": {"doc_id": "d", "path": "s3://b/k", "graph_id": "acme"},
+            "error": "e",
+            "graph_id": "other",
+        })
+
+
+@pytest.mark.parametrize("name", ["SkipIn", "FinalizeIn", "MarkFailedIn"])
+def test_wrapper_graph_id_omitted_is_filled_from_nested(name):
+    from src.workflow import contracts as c
+
+    params = {"doc_id": "d", "path": "s3://b/k", "graph_id": "acme"}
+    payload = _wrapper_payloads(_ctx("acme"), params=params)[name]
+    assert getattr(c, name).model_validate(payload).graph_id == "acme"
+
+
+def test_mark_failed_without_ctx_takes_graph_id_from_params():
+    from src.workflow.contracts import MarkFailedIn
+
+    m = MarkFailedIn.model_validate({
+        "ctx": None,
+        "params": {"doc_id": "d", "path": "s3://b/k", "graph_id": "acme"},
+        "error": "e",
+    })
+    assert m.graph_id == "acme"
+
+
+@pytest.mark.parametrize("name", ["SkipIn", "FinalizeIn", "MarkFailedIn"])
+def test_wrapper_legacy_payload_without_any_graph_id_is_default(name):
+    from src.workflow import contracts as c
+
+    payload = _wrapper_payloads(_ctx())[name]
+    m = getattr(c, name).model_validate(payload)
+    assert m.graph_id == DEFAULT_GRAPH_ID
+    assert m.ctx.graph_id == DEFAULT_GRAPH_ID

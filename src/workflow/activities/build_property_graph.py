@@ -9,7 +9,7 @@ from loguru import logger
 from temporalio import activity
 
 from src.graph.store import build_graph_store
-from src.tenancy.context import transitional_default_graph
+from src.tenancy.activity import resolve_graph_for_activity
 from src.workflow.contracts import GraphBuilt, Merged
 from src.workflow.heartbeat import heartbeat_every
 from src.workflow.staging import build_staging_store
@@ -63,6 +63,7 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
     )
     activity.heartbeat({"stage": "init"})
 
+    graph = await resolve_graph_for_activity(merged.graph_id)
     staging = build_staging_store()
     entities, relations, nodes = await asyncio.to_thread(
         staging.read_pickle,
@@ -85,7 +86,7 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
     # enough — a single step can outrun heartbeat_timeout. heartbeat_every
     # keeps a progressing-but-slow build from being mistaken for a dead one.
     async with heartbeat_every(_HEARTBEAT_INTERVAL_S, {"stage": "writing"}):
-        graph_store = await asyncio.to_thread(build_graph_store, transitional_default_graph())
+        graph_store = await asyncio.to_thread(build_graph_store, graph)
 
         _strip_graph_unsafe_metadata(nodes)
         activity.heartbeat({"stage": "scrubbed"})
@@ -144,7 +145,7 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
             try:
                 from src.storage.postgres import AsyncPostgres
 
-                pg = AsyncPostgres(graph=transitional_default_graph())
+                pg = AsyncPostgres(graph=graph)
                 await pg.record_fact_conflicts(edge_conflicts)
             except Exception as exc:
                 logger.warning("fact_supersede log skipped (non-fatal): {e}", e=exc)

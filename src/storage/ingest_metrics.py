@@ -116,6 +116,7 @@ class AsyncIngestMetrics:
                 yield conn
 
 
-def build_ingest_metrics_store() -> AsyncIngestMetrics:
-    """Factory consistent with the rest of ``src/storage/``."""
-    return AsyncIngestMetrics(graph=transitional_default_graph())
+def build_ingest_metrics_store(graph: GraphContext | None = None) -> AsyncIngestMetrics:
+    """Factory consistent with the rest of ``src/storage/``.  Activities pass
+    their resolved graph; ``None`` keeps the default graph for legacy callers."""
+    return AsyncIngestMetrics(graph=graph or transitional_default_graph())

@@ -71,7 +71,7 @@ async def test_detect_alerts_writes_both_kinds(monkeypatch: pytest.MonkeyPatch) 
         _fetch_names([_B]): [{"vid": _B, "name": "Bob"}],
         _RISK_LOOKUP: [{"name": "Alice", "score": 0.8, "prev": None}],
     })
-    monkeypatch.setattr(ma, "_get_store", lambda: store)
+    monkeypatch.setattr(ma, "_get_store", lambda graph: store)
 
     result = await ma.detect_alerts(MonitorIn(window_days=7, risk_rise_delta=0.1))
 
@@ -110,7 +110,7 @@ async def test_detect_alerts_both_watched_emits_two_connection_alerts(
         _go(_A, out=True): [{"other": _B, "rel": "KNOWS", "ca": ca}],
         _go(_B, out=False): [{"other": _A, "rel": "KNOWS", "ca": ca}],
     })
-    monkeypatch.setattr(ma, "_get_store", lambda: store)
+    monkeypatch.setattr(ma, "_get_store", lambda graph: store)
     result = await ma.detect_alerts(MonitorIn(window_days=7, risk_rise_delta=0.1))
     assert result.new_connection_alerts == 2
     assert result.risk_rise_alerts == 0
@@ -120,7 +120,7 @@ async def test_detect_alerts_both_watched_emits_two_connection_alerts(
 async def test_detect_alerts_failsoft(monkeypatch: pytest.MonkeyPatch) -> None:
     """If _get_store raises, detect_alerts must return error and not propagate."""
 
-    def _boom() -> None:
+    def _boom(graph) -> None:
         raise RuntimeError("neo4j gone")
 
     monkeypatch.setattr(ma, "_get_store", _boom)
@@ -181,7 +181,7 @@ class _NebulaBurstStore:
 @pytest.mark.asyncio
 async def test_detect_alerts_burst_gated_on(monkeypatch: pytest.MonkeyPatch) -> None:
     store = _NebulaBurstStore()
-    monkeypatch.setattr(ma, "_get_store", lambda: store)
+    monkeypatch.setattr(ma, "_get_store", lambda graph: store)
     monkeypatch.setattr(ma.settings.monitor, "burst_enabled", True, raising=False)
     result = await ma.detect_alerts(MonitorIn(window_days=7, risk_rise_delta=0.1))
     assert result.burst_alerts == 1
@@ -192,7 +192,7 @@ async def test_detect_alerts_burst_gated_on(monkeypatch: pytest.MonkeyPatch) -> 
 @pytest.mark.asyncio
 async def test_detect_alerts_burst_gated_off(monkeypatch: pytest.MonkeyPatch) -> None:
     store = _NebulaBurstStore()
-    monkeypatch.setattr(ma, "_get_store", lambda: store)
+    monkeypatch.setattr(ma, "_get_store", lambda graph: store)
     monkeypatch.setattr(ma.settings.monitor, "burst_enabled", False, raising=False)
     result = await ma.detect_alerts(MonitorIn())
     assert result.burst_alerts == 0

@@ -51,6 +51,20 @@ def _inherit_graph_id(data: Any, *parents: str) -> Any:
     return data
 
 
+def _check_graph_id_agrees(model: Any, *parents: str) -> None:
+    """R-P3: a wrapper's ``graph_id`` must match every nested non-null
+    ``ctx`` / ``params`` graph_id — a mismatch means the activity would
+    write one graph's rows under another graph's storage."""
+    for name in parents:
+        nested = getattr(model, name, None)
+        gid = getattr(nested, "graph_id", None) if nested is not None else None
+        if gid is not None and gid != model.graph_id:
+            raise ValueError(
+                f"graph_id mismatch: {type(model).__name__}.graph_id="
+                f"{model.graph_id!r} but {name}.graph_id={gid!r}"
+            )
+
+
 class WikibasePushed(_Frozen):
     status: WikibaseStatus
     created_items: int = 0
@@ -157,6 +171,11 @@ class SkipIn(_Frozen):
     @classmethod
     def _graph_id_from_parent(cls, data: Any) -> Any:
         return _inherit_graph_id(data, "ctx")
+
+    @model_validator(mode="after")
+    def _graph_id_agrees_with_nested(self) -> SkipIn:
+        _check_graph_id_agrees(self, "ctx")
+        return self
 
 
 class Parsed(_Frozen):
@@ -281,6 +300,11 @@ class FinalizeIn(_Frozen):
     def _graph_id_from_parent(cls, data: Any) -> Any:
         return _inherit_graph_id(data, "ctx")
 
+    @model_validator(mode="after")
+    def _graph_id_agrees_with_nested(self) -> FinalizeIn:
+        _check_graph_id_agrees(self, "ctx")
+        return self
+
 
 class MarkFailedIn(_Frozen):
     ctx: Ctx | None
@@ -292,6 +316,11 @@ class MarkFailedIn(_Frozen):
     @classmethod
     def _graph_id_from_parent(cls, data: Any) -> Any:
         return _inherit_graph_id(data, "ctx", "params")
+
+    @model_validator(mode="after")
+    def _graph_id_agrees_with_nested(self) -> MarkFailedIn:
+        _check_graph_id_agrees(self, "ctx", "params")
+        return self
 
 
 class MarkDirtyIn(_Frozen):

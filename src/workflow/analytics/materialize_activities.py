@@ -20,19 +20,23 @@ from src.analytics.risk import compute_risk
 from src.config import settings
 from src.graph.store import build_graph_store
 from src.retrieval.date_filters import today_epoch_days
-from src.tenancy.context import transitional_default_graph
+from src.tenancy.activity import resolve_graph_for_activity
+from src.tenancy.context import GraphContext
 from src.workflow.heartbeat import heartbeat_every
 
 
-def _get_store() -> Any:
-    return build_graph_store(transitional_default_graph())
+def _get_store(graph: GraphContext) -> Any:
+    return build_graph_store(graph)
 
 
 @activity.defn
 async def materialize_centrality(p: CentralityIn) -> StageResult:
     """Compute centrality in-worker and write scores for every metric."""
+    # Resolved outside the fail-soft try: an unavailable graph fails the
+    # activity non-retryably instead of being reported as a soft error.
+    graph = await resolve_graph_for_activity(p.graph_id)
     try:
-        store = _get_store()
+        store = _get_store(graph)
         async with heartbeat_every(30.0, {"stage": "centrality"}):
             # Centrality is computed in-worker (igraph over the edge-export
             # seam).  ONE call for ALL metrics — looping per metric recomputed
@@ -139,8 +143,11 @@ def _write_risk_nebula(store: Any, rows: list[dict]) -> int:
 @activity.defn
 async def materialize_risk(p: RiskIn) -> StageResult:
     """Gather per-entity risk components, compute risk score, write back."""
+    # Resolved outside the fail-soft try: an unavailable graph fails the
+    # activity non-retryably instead of being reported as a soft error.
+    graph = await resolve_graph_for_activity(p.graph_id)
     try:
-        store = _get_store()
+        store = _get_store(graph)
         since = today_epoch_days() - settings.events.new_window_days
         async with heartbeat_every(30.0, {"stage": "risk"}):
             raws = await asyncio.to_thread(_gather_risk_nebula, store, since)

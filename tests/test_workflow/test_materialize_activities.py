@@ -55,7 +55,7 @@ async def test_materialize_centrality_runs_each_metric(monkeypatch):
 
     monkeypatch.setattr(cc, "compute_all", _fake_compute_all)
     store = _NebulaStmtStore()
-    monkeypatch.setattr(ma, "_get_store", lambda: store)
+    monkeypatch.setattr(ma, "_get_store", lambda graph: store)
     res = await ma.materialize_centrality(CentralityIn(metrics=["pagerank", "betweenness"]))
     assert res.written == 2 and res.error == ""  # 1 row each
     assert computed == [1]
@@ -67,7 +67,7 @@ async def test_materialize_centrality_runs_each_metric(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_materialize_centrality_failsoft(monkeypatch):
-    def _boom():
+    def _boom(graph):
         raise RuntimeError("neo4j down")
 
     monkeypatch.setattr(ma, "_get_store", _boom)
@@ -77,7 +77,7 @@ async def test_materialize_centrality_failsoft(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_materialize_link_prediction_runs(monkeypatch):
-    monkeypatch.setattr(ma, "_get_store", lambda: _Store())
+    monkeypatch.setattr(ma, "_get_store", lambda graph: _Store())
     res = await ma.materialize_link_prediction(LinkPredictionIn())
     # Documented no-op on NebulaGraph (no link-prediction port): nothing written.
     assert res.error == ""
@@ -133,7 +133,7 @@ async def test_materialize_risk_writes_scores(monkeypatch):
         _RISK_ENTS_NGQL: [{"name": "Shell", "betweenness": 1.0}],
         _RISK_EDGES_NGQL: edges,
     })
-    monkeypatch.setattr(ma, "_get_store", lambda: store)
+    monkeypatch.setattr(ma, "_get_store", lambda graph: store)
     res = await ma.materialize_risk(RiskIn())
     assert res.written == 1 and res.error == ""
     writes = [c for c in store.calls if c.startswith("UPDATE VERTEX")]
@@ -154,14 +154,14 @@ async def test_materialize_risk_writes_scores(monkeypatch):
 @pytest.mark.asyncio
 async def test_materialize_risk_empty_returns_zero(monkeypatch):
     store = _RiskStore([])
-    monkeypatch.setattr(ma, "_get_store", lambda: store)
+    monkeypatch.setattr(ma, "_get_store", lambda graph: store)
     res = await ma.materialize_risk(RiskIn())
     assert res.written == 0 and res.error == ""
 
 
 @pytest.mark.asyncio
 async def test_materialize_risk_failsoft(monkeypatch):
-    def _boom():
+    def _boom(graph):
         raise RuntimeError("risk db down")
 
     monkeypatch.setattr(ma, "_get_store", _boom)

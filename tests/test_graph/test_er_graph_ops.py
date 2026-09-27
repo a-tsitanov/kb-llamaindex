@@ -4,6 +4,7 @@ import re
 
 from src.graph import er_graph_ops as ego
 from src.graph.nebula_store import _q, entity_vid
+from src.tenancy.context import default_graph_context
 
 
 class _RecStore:
@@ -13,6 +14,7 @@ class _RecStore:
     def __init__(self, rows=None):
         self.calls: list[tuple[str, dict | None]] = []
         self._rows = list(rows or [])
+        self.graph = default_graph_context()
 
     def structured_query(self, cypher, param_map=None):
         self.calls.append((cypher, param_map))

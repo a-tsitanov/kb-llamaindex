@@ -33,6 +33,8 @@ from temporalio import activity
 
 from src.graph.community_summarize import build_community_summarize
 from src.graph.community_vector_store import build_community_report_vector_store
+from src.tenancy.activity import resolve_graph_for_activity
+from src.tenancy.context import GraphContext
 from src.workflow.contracts import (
     DetectCommunitiesParams,
     DetectCommunitiesResult,
@@ -134,16 +136,14 @@ def _parse_report(text: str) -> dict:
     }
 
 
-def _get_store() -> Any | None:
+def _get_store(graph: GraphContext) -> Any | None:
     """Build the Nebula graph store (or ``None`` when unreachable).
 
     Indirected through a module-level fn so tests can monkeypatch it
     without touching the heavy graph-store factory."""
     try:
         from src.graph.store import build_graph_store
-        from src.tenancy.context import transitional_default_graph
-
-        return build_graph_store(transitional_default_graph())
+        return build_graph_store(graph)
     except Exception as exc:
         activity.logger.warning("community: graph store unavailable: %s", exc)
         return None
@@ -311,7 +311,8 @@ async def detect_communities_activity(
 
     from src.workflow.heartbeat import heartbeat_every
 
-    store = _get_store()
+    graph = await resolve_graph_for_activity(params.graph_id)
+    store = _get_store(graph)
     async with heartbeat_every(30.0, {"stage": "detect"}):
         if params.max_levels > 1:
             from src.graph.communities import detect_hierarchy
@@ -424,7 +425,8 @@ async def summarize_community_activity(
             community_id=params.community_id, summary="", persisted=False,
         )
 
-    store = _get_store()
+    graph = await resolve_graph_for_activity(params.graph_id)
+    store = _get_store(graph)
     if store is None:
         return SummarizeCommunityResult(
             community_id=params.community_id, summary="", persisted=False,

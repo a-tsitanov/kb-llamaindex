@@ -24,7 +24,7 @@ def _stub_activity_ctx(monkeypatch):
 @pytest.mark.asyncio
 async def test_documents_for_communities_failopen(monkeypatch):
     import src.workflow.search.activities.documents as mod
-    monkeypatch.setattr(mod, "_get_store", lambda: None)
+    monkeypatch.setattr(mod, "_get_store", lambda graph: None)
     res = await mod.documents_for_communities(
         DocumentsForCommunitiesParams(community_ids=["1"]))
     assert res.doc_ids == []
@@ -64,7 +64,7 @@ async def test_documents_for_communities_nebula_member_first_doc(monkeypatch):
         ("OVER `IN_COMMUNITY` REVERSELY", [{"ent": "e1"}, {"ent": "e2"}]),
         ("FETCH PROP ON `Entity`", [{"doc_id": "dA"}, {"doc_id": "dB"}, {"doc_id": None}]),
     ])
-    monkeypatch.setattr(mod, "_get_store", lambda: store)
+    monkeypatch.setattr(mod, "_get_store", lambda graph: store)
     res = await mod.documents_for_communities(
         DocumentsForCommunitiesParams(community_ids=["1"]))
     # member first_doc_ids surfaced (None dropped by the downstream de-dup)
@@ -84,7 +84,7 @@ async def test_docs_for_communities_scoped_to_level0(monkeypatch):
         ("OVER `IN_COMMUNITY` REVERSELY", [{"ent": "e1"}]),
         ("FETCH PROP ON `Entity`", [{"doc_id": "dA"}]),
     ])
-    monkeypatch.setattr(mod, "_get_store", lambda: store)
+    monkeypatch.setattr(mod, "_get_store", lambda graph: store)
     await mod.documents_for_communities(
         DocumentsForCommunitiesParams(community_ids=["1"]))
     assert store.calls[0] == (

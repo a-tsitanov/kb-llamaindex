@@ -25,7 +25,6 @@ from loguru import logger
 
 from src.graph.nebula_store import _q as _nebula_q
 from src.graph.nebula_store import entity_vid
-from src.tenancy.context import transitional_default_graph
 
 # ── bounded multi-hop walk caps (R3) ─────────────────────────────────
 # Hard ceilings so a deep/dense traversal can never blow up the agent's
@@ -221,7 +220,7 @@ class GraphRetriever:
         outage here just means the vector path stands alone."""
         try:
             from src.storage.entity_search import EntitySearchRepository
-            return await EntitySearchRepository(graph=transitional_default_graph()).search(
+            return await EntitySearchRepository(graph=self._graph_store.graph).search(
                 query, mode="substring", limit=self._similarity_top_k,
             )
         except Exception as exc:

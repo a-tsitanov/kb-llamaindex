@@ -31,7 +31,7 @@ from src.retrieval.group_filter import (
     combined_metadata_filters,
     filter_nodes_by_group,
 )
-from src.tenancy.context import transitional_default_graph
+from src.tenancy.activity import resolve_graph_for_activity
 from src.workflow._search_deps import (
     get_graph_retriever,
     get_retriever,
@@ -131,7 +131,7 @@ async def retrieve_subquestion(params: RetrieveParams) -> RetrieveResult:
         include=tuple(params.groups),
         exclude=tuple(params.exclude_groups),
     )
-    graph = transitional_default_graph()
+    graph = await resolve_graph_for_activity(params.graph_id)
     if bounds.any_set or gf.any_set:
         # Push date AND group INTO the Milvus vector search (not just the
         # post-filter below): otherwise the vector top-k is chosen across

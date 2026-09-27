@@ -220,11 +220,30 @@ def test_composite_splits_cache_from_graph_merge():
     assert cache.merges == []
 
 
+class _GraphStore:
+    """Minimal graph store: build_er_graph_ops only reads ``.graph``."""
+
+    def __init__(self, graph=None):
+        self.graph = graph or default_graph_context()
+
+
 def test_factory_returns_the_composite_by_default(monkeypatch):
     monkeypatch.setattr(
         ops_mod.settings.agent, "er_verdict_cache_backend", "postgres", raising=False,
     )
-    assert isinstance(build_er_graph_ops(object()), _CompositeERGraphOps)
+    assert isinstance(build_er_graph_ops(_GraphStore()), _CompositeERGraphOps)
+
+
+def test_factory_verdict_cache_follows_the_store_graph(monkeypatch):
+    """The Postgres verdict cache is scoped to the graph the store belongs
+    to — never silently to the default graph."""
+    monkeypatch.setattr(
+        ops_mod.settings.agent, "er_verdict_cache_backend", "postgres", raising=False,
+    )
+    acme = new_graph_context("acme")
+    ops = build_er_graph_ops(_GraphStore(acme))
+    assert isinstance(ops, _CompositeERGraphOps)
+    assert ops._cache._graph == acme
 
 
 def test_factory_graph_backend_setting_restores_the_old_path(monkeypatch):
@@ -233,7 +252,7 @@ def test_factory_graph_backend_setting_restores_the_old_path(monkeypatch):
     monkeypatch.setattr(
         ops_mod.settings.agent, "er_verdict_cache_backend", "graph", raising=False,
     )
-    ops = build_er_graph_ops(object())
+    ops = build_er_graph_ops(_GraphStore())
     assert not isinstance(ops, _CompositeERGraphOps)
     assert isinstance(ops, ops_mod.NebulaERGraphOps)
 

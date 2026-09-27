@@ -64,7 +64,7 @@ async def test_deliver_alerts_pushes_unpushed_and_marks(monkeypatch):
             return []
 
     store = _Store()
-    monkeypatch.setattr(act, "_get_store", lambda: store)
+    monkeypatch.setattr(act, "_get_store", lambda graph: store)
     monkeypatch.setattr(act.settings.monitor, "webhook_url", "http://hook", raising=False)
 
     async def _fake_post(url, payload, *, timeout_s=5.0):

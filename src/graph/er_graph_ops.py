@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from typing import Any, Protocol
 
 from src.config import settings
-from src.tenancy.context import GraphContext, transitional_default_graph
+from src.tenancy.context import GraphContext
 
 
 def verdict_vid(key: str) -> str:
@@ -278,9 +278,11 @@ class _CompositeERGraphOps:
 
 
 def build_er_graph_ops(store: Any) -> ERGraphOps:
+    """The verdict cache lives in the same graph as ``store`` (the store
+    carries its ``GraphContext`` as ``store.graph``)."""
     graph_ops: ERGraphOps = NebulaERGraphOps(store)
     if settings.agent.er_verdict_cache_backend == "postgres":
         return _CompositeERGraphOps(
-            PostgresERVerdictCache(graph=transitional_default_graph()), graph_ops,
+            PostgresERVerdictCache(graph=store.graph), graph_ops,
         )
     return graph_ops

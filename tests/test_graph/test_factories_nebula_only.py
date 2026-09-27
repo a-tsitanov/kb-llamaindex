@@ -69,7 +69,11 @@ def test_er_composite_wraps_nebula_graph_ops(monkeypatch):
     from src.graph import er_graph_ops as eg
 
     monkeypatch.setattr(settings.agent, "er_verdict_cache_backend", "postgres")
-    ops = eg.build_er_graph_ops(object())
+    from types import SimpleNamespace
+
+    from src.tenancy.context import default_graph_context
+
+    ops = eg.build_er_graph_ops(SimpleNamespace(graph=default_graph_context()))
     assert isinstance(ops, eg._CompositeERGraphOps)
     assert isinstance(ops._cache, eg.PostgresERVerdictCache)
     assert isinstance(ops._graph, eg.NebulaERGraphOps)
