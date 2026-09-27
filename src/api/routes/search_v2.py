@@ -20,12 +20,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 from temporalio.common import WorkflowIDReusePolicy
 
-from src.api.auth import require_api_key
+from src.api.auth import require_admin
+from src.api.graph_dep import resolve_graph
 from src.config import settings
 from src.models.search import DocumentRef, SearchRequest, SearchResponse, SourceCitation
 from src.observability.trace import trace_request
 from src.retrieval.date_filters import bounds_from_iso
-from src.tenancy.context import graph_scoped_id
+from src.tenancy.context import DEFAULT_GRAPH_ID, GraphContext, graph_scoped_id
 from src.workflow.client import get_temporal_client
 from src.workflow.contracts import (
     ConversationTurnDict,
@@ -62,7 +63,9 @@ def _warn_reserved_filters(req: SearchRequest) -> None:
         )
 
 
-def _local_params(req: SearchRequest) -> OrchestratorParams:
+def _local_params(
+    req: SearchRequest, *, graph_id: str = DEFAULT_GRAPH_ID,
+) -> OrchestratorParams:
     """Build the local plan-execute workflow input from the request.
 
     ISO date bounds are converted to epoch-days here (outside the Temporal
@@ -92,10 +95,13 @@ def _local_params(req: SearchRequest) -> OrchestratorParams:
         groups=req.groups or [],
         exclude_groups=req.exclude_groups or [],
         synthesize=req.synthesize,
+        graph_id=graph_id,
     )
 
 
-def _global_params(req: SearchRequest, *, drift_mode: bool = False) -> GlobalSearchParams:
+def _global_params(
+    req: SearchRequest, *, drift_mode: bool = False, graph_id: str = DEFAULT_GRAPH_ID,
+) -> GlobalSearchParams:
     """Build the GraphRAG global map-reduce workflow input."""
     _warn_reserved_filters(req)
     return GlobalSearchParams(
@@ -111,6 +117,7 @@ def _global_params(req: SearchRequest, *, drift_mode: bool = False) -> GlobalSea
         community_selection=settings.agent.community_dynamic_selection,
         answer_template=req.answer_template or "",
         synthesize=req.synthesize,
+        graph_id=graph_id,
     )
 
 
@@ -144,15 +151,16 @@ def _outcome_to_response(outcome: SearchOutcome) -> SearchResponse:
 @router.post(
     "/search/local",
     response_model=SearchResponse,
-    dependencies=[Depends(require_api_key)],
     summary="Plan-execute-synthesize search (decompose → parallel retrieve → synth)",
 )
-async def search_local(req: SearchRequest) -> SearchResponse:
+async def search_local(
+    req: SearchRequest, graph: GraphContext = Depends(resolve_graph),
+) -> SearchResponse:
     request_id = uuid.uuid4().hex
     try:
         with trace_request("search_local", req.query):
             client = await get_temporal_client()
-            params = _local_params(req)
+            params = _local_params(req, graph_id=graph.id)
             handle = await client.start_workflow(
                 SearchOrchestratorWorkflow.run,
                 params,
@@ -175,10 +183,11 @@ async def search_local(req: SearchRequest) -> SearchResponse:
 @router.post(
     "/search/global",
     response_model=SearchResponse,
-    dependencies=[Depends(require_api_key)],
     summary="GraphRAG global search (map-reduce over community summaries)",
 )
-async def search_global(req: SearchRequest) -> SearchResponse:
+async def search_global(
+    req: SearchRequest, graph: GraphContext = Depends(resolve_graph),
+) -> SearchResponse:
     """Run ``GlobalSearchWorkflow`` — map-reduce over the R6 community
     summaries for corpus-level / thematic questions.  Orchestration runs
     on ``kb-search-small``; the REDUCE synthesis is pinned to the large
@@ -187,7 +196,7 @@ async def search_global(req: SearchRequest) -> SearchResponse:
     try:
         with trace_request("search_global", req.query):
             client = await get_temporal_client()
-            params = _global_params(req)
+            params = _global_params(req, graph_id=graph.id)
             handle = await client.start_workflow(
                 GlobalSearchWorkflow.run,
                 params,
@@ -210,10 +219,11 @@ async def search_global(req: SearchRequest) -> SearchResponse:
 @router.post(
     "/search/drift",
     response_model=SearchResponse,
-    dependencies=[Depends(require_api_key)],
     summary="Drift search (local plan-execute, then global community expansion)",
 )
-async def search_drift(req: SearchRequest) -> SearchResponse:
+async def search_drift(
+    req: SearchRequest, graph: GraphContext = Depends(resolve_graph),
+) -> SearchResponse:
     """Run ``DriftSearchWorkflow`` — local plan-execute pass first, then
     expand with community context via a drift-mode global map-reduce
     (local sources seed the REDUCE).  Both passes orchestrate on
@@ -222,10 +232,10 @@ async def search_drift(req: SearchRequest) -> SearchResponse:
     try:
         with trace_request("search_drift", req.query):
             client = await get_temporal_client()
-            local = _local_params(req)
+            local = _local_params(req, graph_id=graph.id)
             handle = await client.start_workflow(
                 DriftSearchWorkflow.run,
-                args=[local, _global_params(req, drift_mode=True)],
+                args=[local, _global_params(req, drift_mode=True, graph_id=graph.id)],
                 id=graph_scoped_id("search-drift", local.graph_id, request_id),
                 task_queue=settings.temporal.search_task_queue,
                 id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
@@ -245,10 +255,11 @@ async def search_drift(req: SearchRequest) -> SearchResponse:
 @router.post(
     "/search/auto",
     response_model=SearchResponse,
-    dependencies=[Depends(require_api_key)],
     summary="Auto search (route_query → dispatch local/global/drift)",
 )
-async def search_auto(req: SearchRequest) -> SearchResponse:
+async def search_auto(
+    req: SearchRequest, graph: GraphContext = Depends(resolve_graph),
+) -> SearchResponse:
     """Run ``AutoSearchWorkflow`` — ``route_query`` (small tier) classifies
     the question, then dispatches to the local / global / drift flow.
     Fail-safe: a flaky router defaults to the local flow.  Orchestration
@@ -257,10 +268,10 @@ async def search_auto(req: SearchRequest) -> SearchResponse:
     try:
         with trace_request("search_auto", req.query):
             client = await get_temporal_client()
-            local = _local_params(req)
+            local = _local_params(req, graph_id=graph.id)
             handle = await client.start_workflow(
                 AutoSearchWorkflow.run,
-                args=[local, _global_params(req)],
+                args=[local, _global_params(req, graph_id=graph.id)],
                 id=graph_scoped_id("search-auto", local.graph_id, request_id),
                 task_queue=settings.temporal.search_task_queue,
                 id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
@@ -279,11 +290,11 @@ async def search_auto(req: SearchRequest) -> SearchResponse:
 
 @router.post(
     "/admin/communities/rebuild",
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(require_admin)],
     status_code=status.HTTP_202_ACCEPTED,
     summary="Trigger offline graph-community build (GDS Leiden + summaries)",
 )
-async def rebuild_communities() -> dict[str, str]:
+async def rebuild_communities(graph: GraphContext = Depends(resolve_graph)) -> dict[str, str]:
     """Start the OFFLINE ``CommunityBuildWorkflow`` on ``kb-graph-build``.
 
     Fully decoupled from the query path: detects graph communities (GDS
@@ -300,6 +311,7 @@ async def rebuild_communities() -> dict[str, str]:
             level=0,
             max_levels=settings.agent.community_max_levels,
             gamma=settings.temporal.community_leiden_gamma,
+            graph_id=graph.id,
         )
         handle = await client.start_workflow(
             CommunityBuildWorkflow.run,

@@ -16,10 +16,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from src.api.auth import require_api_key
+from src.api.graph_dep import resolve_graph
 from src.config import settings
 from src.retrieval import atomic_tools
-from src.tenancy.context import GraphContext, transitional_default_graph
+from src.tenancy.context import GraphContext
 
 router = APIRouter(prefix="/entities", tags=["entities"])
 
@@ -49,10 +49,11 @@ def _retriever(graph: GraphContext) -> Any:
     return retriever
 
 
-@router.get("", dependencies=[Depends(require_api_key)])
+@router.get("")
 async def find_entities(
     query: str = Query(..., min_length=1),
     limit: int = Query(10, ge=1, le=50),
+    graph: GraphContext = Depends(resolve_graph),
 ) -> dict[str, Any]:
     """Entities whose name starts with any token of `query`.
 
@@ -66,6 +67,6 @@ async def find_entities(
     built for it.
     """
     result = await atomic_tools.find_entity_by_name(
-        _retriever(transitional_default_graph()), query=query, limit=limit,
+        _retriever(graph), query=query, limit=limit,
     )
     return json.loads(result.observation)

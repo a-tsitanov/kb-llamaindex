@@ -21,14 +21,14 @@ from pydantic import BaseModel
 from temporalio.exceptions import WorkflowAlreadyStartedError
 from urllib3.exceptions import MaxRetryError
 
-from src.api.auth import require_api_key
+from src.api.graph_dep import resolve_graph
 from src.config import settings
 from src.ingest_queue.priorities import PRIO_LIVE
 from src.retrieval.date_filters import iso_to_epoch_days, today_epoch_days
 from src.retrieval.groups import GROUP_SET
 from src.storage.minio import S3Error, build_minio_storage, graph_object_key
 from src.storage.postgres import AsyncPostgres
-from src.tenancy.context import transitional_default_graph
+from src.tenancy.context import GraphContext
 from src.workflow.client import get_temporal_client
 from src.workflow.contracts import IngestParams
 from src.workflow.ingest_submit import submit_document
@@ -53,7 +53,6 @@ class JobProgressResponse(BaseModel):
 @router.post(
     "/ingest",
     response_model=IngestEnqueuedResponse,
-    dependencies=[Depends(require_api_key)],
     status_code=status.HTTP_202_ACCEPTED,
     summary="Upload a document and enqueue it for ingestion",
 )
@@ -67,9 +66,9 @@ async def upload_document(
     channel: str = Form(default=""),
     priority: int | None = Form(default=None),
     x_version_tag: str | None = Header(default=None, alias="X-Version-Tag"),
+    graph: GraphContext = Depends(resolve_graph),
 ) -> IngestEnqueuedResponse:
-    # Task 9 replaces this with the request's graph.
-    pg = AsyncPostgres(graph=transitional_default_graph())
+    pg = AsyncPostgres(graph=graph)
     if not file.filename:
         raise HTTPException(400, "filename required")
 
@@ -122,7 +121,7 @@ async def upload_document(
     doc_id = uuid.uuid4()
     # Object key keeps the original filename so the worker can pick the
     # right SimpleDirectoryReader extension handler after download.
-    object_key = graph_object_key(transitional_default_graph(), f"{doc_id}/{file.filename}")
+    object_key = graph_object_key(graph, f"{doc_id}/{file.filename}")
 
     # Read the full body into memory.  Large PDFs (~hundreds of MB)
     # should arrive via presigned URLs in a future iteration; the
@@ -200,6 +199,7 @@ async def upload_document(
         doc_date_epoch=doc_date_epoch,
         inserted_at_epoch=inserted_at_epoch,
         group=group,
+        graph_id=graph.id,
     )
     # Admission is always on: hand the document to the configured backlog
     # backend (INGEST_QUEUE_BACKEND).  Default `temporal` = signal-with-start
@@ -237,14 +237,13 @@ async def upload_document(
 @router.get(
     "/ingest/{job_id}",
     response_model=JobProgressResponse,
-    dependencies=[Depends(require_api_key)],
     summary="Get ingestion job status",
 )
 async def job_status(
     job_id: uuid.UUID,
+    graph: GraphContext = Depends(resolve_graph),
 ) -> JobProgressResponse:
-    # Task 9 replaces this with the request's graph.
-    pg = AsyncPostgres(graph=transitional_default_graph())
+    pg = AsyncPostgres(graph=graph)
     row = await pg.get(job_id)
     if row is None:
         raise HTTPException(404, f"job {job_id} not found")

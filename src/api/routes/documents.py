@@ -15,22 +15,20 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 
-from src.api.auth import require_api_key
+from src.api.graph_dep import resolve_graph
 from src.storage.minio import S3Error, build_minio_storage
 from src.storage.postgres import AsyncPostgres
-from src.tenancy.context import transitional_default_graph
+from src.tenancy.context import GraphContext
 
 router = APIRouter(tags=["documents"])
 
 
 @router.get(
     "/documents/{doc_id}",
-    dependencies=[Depends(require_api_key)],
     summary="Download the original source file of an ingested document",
 )
-async def download_document(doc_id: str):
-    # Task 9 replaces this with the request's graph.
-    pg = AsyncPostgres(graph=transitional_default_graph())
+async def download_document(doc_id: str, graph: GraphContext = Depends(resolve_graph)):
+    pg = AsyncPostgres(graph=graph)
     try:
         row = await pg.get(uuid.UUID(doc_id))
     except (ValueError, TypeError):

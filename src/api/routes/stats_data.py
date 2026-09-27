@@ -23,15 +23,15 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from src.api.auth import require_api_key
+from src.api.graph_dep import resolve_graph
 from src.stats.align import GRANULARITIES, VALUE_KINDS
 from src.storage.stats import StatsRepository
-from src.tenancy.context import transitional_default_graph
+from src.tenancy.context import GraphContext
 
 router = APIRouter(
     prefix="/statistics",
     tags=["statistics"],
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(resolve_graph)],
 )
 
 # Small by design: the subsystem takes curated series, not bulk dumps.
@@ -176,14 +176,16 @@ class LoadResponse(BaseModel):
     status_code=status.HTTP_200_OK,
     summary="Upsert one indicator and its observations",
 )
-async def load_statistics(req: LoadRequest) -> LoadResponse:
+async def load_statistics(
+    req: LoadRequest, graph: GraphContext = Depends(resolve_graph),
+) -> LoadResponse:
     """Idempotent: re-posting the same payload changes nothing.
 
     Values are stored exactly as supplied — alignment and normalisation
     are computed on read, so changing the normalisation method never
     requires reloading a source.
     """
-    repo = StatsRepository(graph=transitional_default_graph())
+    repo = StatsRepository(graph=graph)
     ind = req.indicator
     try:
         indicator_id = await repo.upsert_indicator(

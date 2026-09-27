@@ -12,6 +12,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from src.config import settings
+
+
+def _auth() -> dict[str, str]:
+    # Admin routes require an admin key; env API_KEYS resolve to one (R-A3).
+    return {"X-API-Key": settings.api.keys_list[0]}
+
 
 @pytest.mark.asyncio
 async def test_monitor_sweep_returns_disabled_when_off():
@@ -20,7 +27,7 @@ async def test_monitor_sweep_returns_disabled_when_off():
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        r = await ac.post("/admin/monitor/sweep")
+        r = await ac.post("/admin/monitor/sweep", headers=_auth())
     assert r.status_code == 200
     assert r.json()["status"] == "disabled"
 
@@ -43,6 +50,7 @@ async def test_monitor_watch_calls_mark_watched():
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             r = await ac.post(
                 "/admin/monitor/watch",
+                headers=_auth(),
                 json=["Alpha", "Beta"],
                 params={"watched": "true"},
             )

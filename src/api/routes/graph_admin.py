@@ -16,12 +16,15 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from src.api.auth import require_api_key
+from src.api.auth import require_admin
+from src.api.graph_dep import resolve_graph
 from src.config import settings
 from src.graph import analysis
-from src.tenancy.context import GraphContext, graph_scoped_id, transitional_default_graph
+from src.tenancy.context import GraphContext, graph_scoped_id
 
-router = APIRouter(prefix="/admin/graph", tags=["admin"])
+router = APIRouter(
+    prefix="/admin/graph", tags=["admin"], dependencies=[Depends(require_admin)],
+)
 
 
 # Graph stores keyed by ``graph.id``.  ``_store`` is sync (no await between
@@ -38,18 +41,18 @@ def _store(graph: GraphContext) -> Any:
     return store
 
 
-@router.post("/stats", dependencies=[Depends(require_api_key)])
-async def graph_stats() -> dict:
+@router.post("/stats")
+async def graph_stats(graph: GraphContext = Depends(resolve_graph)) -> dict:
     """Operational snapshot: entity/relationship counts, degree
     distribution, duplicate-name groups, community count.
 
     An unmeasurable field is `null` with the reason under `errors` — it
     is never reported as 0."""
-    return await analysis.graph_stats(_store(transitional_default_graph()))
+    return await analysis.graph_stats(_store(graph))
 
 
-@router.post("/refresh-stats", dependencies=[Depends(require_api_key)])
-async def graph_refresh_stats() -> dict:
+@router.post("/refresh-stats")
+async def graph_refresh_stats(graph: GraphContext = Depends(resolve_graph)) -> dict:
     """Recompute Nebula's tag/edge counts (`SUBMIT JOB STATS`).
 
     `/admin/graph/stats` serves those counts rather than scanning — the
@@ -57,48 +60,50 @@ async def graph_refresh_stats() -> dict:
     last job. This is the refresh, wired into `scripts/graph_refresh.sh`.
     Takes about a second and does not spike memory: the work happens in
     storaged, not as a graphd query."""
-    return await analysis.refresh_nebula_stats(_store(transitional_default_graph()))
+    return await analysis.refresh_nebula_stats(_store(graph))
 
 
-@router.post("/pagerank", dependencies=[Depends(require_api_key)])
-async def graph_pagerank(top_n: int = 20) -> dict:
+@router.post("/pagerank")
+async def graph_pagerank(top_n: int = 20, graph: GraphContext = Depends(resolve_graph)) -> dict:
     """Top-N most central entities by weighted PageRank."""
     return {"top": await analysis.pagerank(
-        _store(transitional_default_graph()), top_n=top_n,
+        _store(graph), top_n=top_n,
     )}
 
 
-@router.post("/personalized-pagerank", dependencies=[Depends(require_api_key)])
+@router.post("/personalized-pagerank")
 async def graph_personalized_pagerank(
     seeds: list[str],
     top_n: int = 20,
+    graph: GraphContext = Depends(resolve_graph),
 ) -> dict:
     """Top-N entities by PageRank biased toward the given seed entities
     (relevance/centrality *relative to* the seeds)."""
     return {
         "top": await analysis.personalized_pagerank(
-            _store(transitional_default_graph()),
+            _store(graph),
             seeds,
             top_n=top_n,
         )
     }
 
 
-@router.post("/components", dependencies=[Depends(require_api_key)])
-async def graph_components() -> dict:
+@router.post("/components")
+async def graph_components(graph: GraphContext = Depends(resolve_graph)) -> dict:
     """Weakly-connected-component count + size distribution."""
-    return await analysis.components(_store(transitional_default_graph()))
+    return await analysis.components(_store(graph))
 
 
-@router.post("/shortest-path", dependencies=[Depends(require_api_key)])
+@router.post("/shortest-path")
 async def graph_shortest_path(
     source: str,
     target: str,
     max_hops: int = 6,
+    graph: GraphContext = Depends(resolve_graph),
 ) -> dict:
     """Shortest path between two entities by exact name."""
     return await analysis.shortest_path(
-        _store(transitional_default_graph()),
+        _store(graph),
         source,
         target,
         max_hops=max_hops,
@@ -107,11 +112,10 @@ async def graph_shortest_path(
 
 @router.post(
     "/materialize",
-    dependencies=[Depends(require_api_key)],
     status_code=status.HTTP_202_ACCEPTED,
     summary="Trigger offline analytics materialization (GDS centrality + link-prediction + risk)",
 )
-async def materialize() -> dict[str, str]:
+async def materialize(graph: GraphContext = Depends(resolve_graph)) -> dict[str, str]:
     """Fire-and-forget: start AnalyticsMaterializeWorkflow on the graph-build queue."""
     from temporalio.common import WorkflowIDReusePolicy
 
@@ -122,7 +126,7 @@ async def materialize() -> dict[str, str]:
     request_id = uuid.uuid4().hex
     try:
         client = await get_temporal_client()
-        params = MaterializeParams()
+        params = MaterializeParams(graph_id=graph.id)
         handle = await client.start_workflow(
             AnalyticsMaterializeWorkflow.run,
             params,

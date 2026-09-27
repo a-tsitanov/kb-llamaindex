@@ -12,6 +12,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from src.config import settings
+
+
+def _auth() -> dict[str, str]:
+    # Admin routes require an admin key; env API_KEYS resolve to one (R-A3).
+    return {"X-API-Key": settings.api.keys_list[0]}
+
 
 @pytest.mark.asyncio
 async def test_wiki_rebuild_returns_disabled_when_off():
@@ -20,7 +27,7 @@ async def test_wiki_rebuild_returns_disabled_when_off():
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        r = await ac.post("/admin/wiki/rebuild")
+        r = await ac.post("/admin/wiki/rebuild", headers=_auth())
     assert r.status_code == 200
     assert r.json()["status"] == "disabled"
 
@@ -51,7 +58,7 @@ async def test_wiki_rebuild_all_routes_mark_all_dirty_through_seam(monkeypatch):
     ):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            r = await ac.post("/admin/wiki/rebuild", params={"all": "true"})
+            r = await ac.post("/admin/wiki/rebuild", headers=_auth(), params={"all": "true"})
 
     assert r.status_code == 200
     assert r.json()["status"] == "started"
