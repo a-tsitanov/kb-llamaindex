@@ -26,7 +26,7 @@ from src.config import settings
 from src.models.search import DocumentRef, SearchRequest, SearchResponse, SourceCitation
 from src.observability.trace import trace_request
 from src.retrieval.date_filters import bounds_from_iso
-from src.tenancy.context import DEFAULT_GRAPH_ID, GraphContext, graph_scoped_id
+from src.tenancy.context import GraphContext, graph_scoped_id
 from src.workflow.client import get_temporal_client
 from src.workflow.contracts import (
     ConversationTurnDict,
@@ -64,7 +64,7 @@ def _warn_reserved_filters(req: SearchRequest) -> None:
 
 
 def _local_params(
-    req: SearchRequest, *, graph_id: str = DEFAULT_GRAPH_ID,
+    req: SearchRequest, *, graph_id: str,
 ) -> OrchestratorParams:
     """Build the local plan-execute workflow input from the request.
 
@@ -100,7 +100,7 @@ def _local_params(
 
 
 def _global_params(
-    req: SearchRequest, *, drift_mode: bool = False, graph_id: str = DEFAULT_GRAPH_ID,
+    req: SearchRequest, *, graph_id: str, drift_mode: bool = False,
 ) -> GlobalSearchParams:
     """Build the GraphRAG global map-reduce workflow input."""
     _warn_reserved_filters(req)

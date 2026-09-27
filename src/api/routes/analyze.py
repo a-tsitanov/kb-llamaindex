@@ -11,14 +11,14 @@ from src.analytics.contracts import AnalyzeParams
 from src.api.graph_dep import resolve_graph
 from src.config import settings
 from src.models.analyze import AnalyzeRequest, AnalyzeResponse
-from src.tenancy.context import DEFAULT_GRAPH_ID, GraphContext, graph_scoped_id
+from src.tenancy.context import GraphContext, graph_scoped_id
 from src.workflow.analytics.workflow import AnalyticalQueryWorkflow
 from src.workflow.client import get_temporal_client
 
 router = APIRouter(tags=["analytics"])
 
 
-def _to_params(req: AnalyzeRequest, *, graph_id: str = DEFAULT_GRAPH_ID) -> AnalyzeParams:
+def _to_params(req: AnalyzeRequest, *, graph_id: str) -> AnalyzeParams:
     """Map AnalyzeRequest → AnalyzeParams."""
     # request-level date filtering deferred (no Wave-0 primitive consumes request bounds; planner sets per-primitive dates).
     return AnalyzeParams(query=req.query, top_n=req.top_n, graph_id=graph_id)

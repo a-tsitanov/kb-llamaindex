@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import asyncio
 
+from loguru import logger
 from temporalio import activity
 
 from src.config import settings
 from src.graph.store import build_graph_store
 from src.storage.wikibase import AsyncWikibase, push_entities
 from src.tenancy.activity import resolve_graph_for_activity
+from src.tenancy.context import DEFAULT_GRAPH_ID
 from src.workflow.contracts import Merged, WikibasePushed
 from src.workflow.heartbeat import heartbeat_every
 from src.workflow.staging import build_staging_store
@@ -42,6 +44,15 @@ async def push_wikibase(merged: Merged) -> WikibasePushed:
     activity.heartbeat({"stage": "init", "enabled": settings.wikibase.enabled})
 
     if not settings.wikibase.enabled:
+        return WikibasePushed(status="skipped")
+
+    if merged.graph_id != DEFAULT_GRAPH_ID:
+        # D6 / Plan A: Wikibase is a single artifact of the default graph;
+        # other graphs never resolve a store nor touch the Wikibase client.
+        logger.info(
+            "push_wikibase skipped: wikibase is default-graph-only (graph={})",
+            merged.graph_id,
+        )
         return WikibasePushed(status="skipped")
 
     # Resolved outside the try: an unavailable graph must fail the activity

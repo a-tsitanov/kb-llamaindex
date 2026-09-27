@@ -58,6 +58,16 @@ async def test_current_graph_stdio_uses_configured_graph(monkeypatch):
     assert (await sh.current_graph()).id == "default"
 
 
+
+async def test_current_graph_ignores_x_graph_without_access_token(monkeypatch):
+    """No key → X-Graph is NOT honoured: the tool call stays on the
+    configured KB_MCP_GRAPH graph (here unset → "default")."""
+    monkeypatch.delenv("KB_MCP_GRAPH", raising=False)
+    monkeypatch.setattr(sh, "get_graph_registry", lambda: _Reg())
+    monkeypatch.setattr(sh, "get_access_token", lambda: None)
+    monkeypatch.setattr(sh, "get_http_headers", lambda **kw: {"x-graph": "other"})
+    assert (await sh.current_graph()).id == "default"
+
 # ── servers: every tool call is bound via current_graph ────────────
 
 

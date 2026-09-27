@@ -26,7 +26,7 @@ from src.workflow.analytics.workflow import AnalyticalQueryWorkflow
 
 def test_request_to_params_maps_query_and_top_n():
     req = AnalyzeRequest(query="trend analysis", top_n=10)
-    p = _to_params(req)
+    p = _to_params(req, graph_id="default")
     assert p.query == "trend analysis"
     assert p.top_n == 10
     assert p.date_from_epoch is None
@@ -103,3 +103,9 @@ async def test_analyze_returns_200_with_valid_request():
 async def test_analyze_requires_api_key():
     resp = await _post_analyze({"query": "q"})  # no header
     assert resp.status_code == 401
+
+
+def test_to_params_requires_explicit_graph_id():
+    with pytest.raises(TypeError):
+        _to_params(AnalyzeRequest(query="q"))
+    assert _to_params(AnalyzeRequest(query="q"), graph_id="acme").graph_id == "acme"

@@ -6,6 +6,8 @@ while the user query itself is passed through verbatim (contextualisation
 happens later, inside the workflow — not in the route).
 """
 
+import pytest
+
 from src.api.routes.search_v2 import _global_params, _local_params
 from src.models.search import ConversationTurn, SearchRequest
 
@@ -15,7 +17,7 @@ def test_local_params_carries_history():
         query="а что по цене?",
         history=[ConversationTurn(role="user", content="про Продукт X")],
     )
-    p = _local_params(req)
+    p = _local_params(req, graph_id="default")
     assert p.query == "а что по цене?"
     assert [t.content for t in p.history] == ["про Продукт X"]
     assert [t.role for t in p.history] == ["user"]
@@ -26,14 +28,14 @@ def test_global_params_carries_history():
         query="а что по цене?",
         history=[ConversationTurn(role="user", content="про Продукт X")],
     )
-    p = _global_params(req)
+    p = _global_params(req, graph_id="default")
     assert p.query == "а что по цене?"
     assert [t.content for t in p.history] == ["про Продукт X"]
 
 
 def test_local_params_empty_history_default():
     """Back-compat: no history on the request ⇒ empty history on params."""
-    p = _local_params(SearchRequest(query="hi"))
+    p = _local_params(SearchRequest(query="hi"), graph_id="default")
     assert list(p.history) == []
 
 
@@ -43,7 +45,7 @@ def test_local_params_resolves_contextualize_flag_at_submit_time():
     from src.api.routes.search_v2 import _local_params
     from src.config import settings
     from src.models.search import SearchRequest
-    p = _local_params(SearchRequest(query="q"))
+    p = _local_params(SearchRequest(query="q"), graph_id="default")
     assert p.contextualize_enabled == settings.agent.conversation_history_enabled
 
 
@@ -52,7 +54,7 @@ def test_global_params_resolves_community_selection_at_submit_time():
     # resolved from settings at submit time into GlobalSearchParams, never
     # read live inside the workflow.  Default = lexical (unchanged today).
     from src.config import settings
-    p = _global_params(SearchRequest(query="q"))
+    p = _global_params(SearchRequest(query="q"), graph_id="default")
     assert p.community_selection == settings.agent.community_dynamic_selection
 
 
@@ -69,3 +71,13 @@ def test_detect_params_threads_max_levels_from_config():
     )
     assert p.max_levels == settings.agent.community_max_levels
     assert p.max_levels == 1  # back-compat default
+
+
+def test_param_builders_require_explicit_graph_id():
+    """Plan A: no silent fallback to `default` — the route must bind the graph."""
+    with pytest.raises(TypeError):
+        _local_params(SearchRequest(query="q"))
+    with pytest.raises(TypeError):
+        _global_params(SearchRequest(query="q"))
+    assert _local_params(SearchRequest(query="q"), graph_id="acme").graph_id == "acme"
+    assert _global_params(SearchRequest(query="q"), graph_id="acme").graph_id == "acme"

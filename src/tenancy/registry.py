@@ -39,7 +39,9 @@ async def _load_row_from_pg(graph_id: str) -> dict | None:
     from src.storage.pg_pool import get_pg_pool
 
     pool = await get_pg_pool()
-    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+    # R-P8: fail fast (1 s) on a saturated/unreachable pool instead of
+    # blocking the request for the pool's default wait.
+    async with pool.connection(timeout=1) as conn, conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(f"SELECT {_COLS} FROM public.graphs WHERE id = %s", (graph_id,))
         return await cur.fetchone()
 
@@ -93,9 +95,14 @@ class GraphRegistry:
             raise GraphNotFound(graph_id) from None
         try:
             row = await self.get_row(graph_id)
-        except Exception:
+        except Exception as exc:
             if graph_id != DEFAULT_GRAPH_ID:
-                raise
+                raise  # non-default errors propagate and are NOT cached
+            # R-P8: cache the built-in-default fallback for the TTL so a PG
+            # outage doesn't make every default request re-hit PG.
+            logger.warning("graph registry: loading 'default' failed ({e}); "
+                           "using built-in default context", e=exc)
+            self._cache[graph_id] = (self._clock(), None)
             row = None
         if row is None:
             if graph_id == DEFAULT_GRAPH_ID:

@@ -47,7 +47,7 @@ def test_local_params_converts_iso_dates_to_epoch_bounds():
         doc_date_before="2024-12-31",
         created_after="2025-03-01",
     )
-    params = _local_params(req)
+    params = _local_params(req, graph_id="default")
 
     assert params.doc_date_after_epoch == iso_to_epoch_days("2024-01-01")
     assert params.doc_date_before_epoch == iso_to_epoch_days("2024-12-31")
@@ -58,7 +58,7 @@ def test_local_params_converts_iso_dates_to_epoch_bounds():
 def test_local_params_no_dates_leaves_bounds_none():
     from src.api.routes.search_v2 import _local_params
 
-    params = _local_params(SearchRequest(query="q"))
+    params = _local_params(SearchRequest(query="q"), graph_id="default")
     assert params.doc_date_after_epoch is None
     assert params.doc_date_before_epoch is None
     assert params.inserted_after_epoch is None

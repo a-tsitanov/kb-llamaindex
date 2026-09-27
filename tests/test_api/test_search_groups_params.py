@@ -7,7 +7,7 @@ from src.models.search import SearchRequest
 
 def test_valid_groups_accepted_and_threaded():
     req = SearchRequest(query="q", groups=["official", "data"])
-    p = _local_params(req)
+    p = _local_params(req, graph_id="default")
     assert p.groups == ["official", "data"]
     assert p.exclude_groups == []
 

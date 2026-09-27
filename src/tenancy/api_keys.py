@@ -30,7 +30,9 @@ async def _load_key_row(key_hash: str) -> dict | None:
     from src.storage.pg_pool import get_pg_pool
 
     pool = await get_pg_pool()
-    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+    # R-P8: fail fast (1 s) on a saturated/unreachable pool instead of
+    # blocking the request for the pool's default wait.
+    async with pool.connection(timeout=1) as conn, conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(
             "SELECT owner, graph_ids, is_admin FROM public.api_keys WHERE key_hash = %s",
             (key_hash,),

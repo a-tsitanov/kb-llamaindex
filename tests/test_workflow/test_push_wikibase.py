@@ -294,3 +294,88 @@ async def test_exception_returns_failed_not_raise(monkeypatch):
 
     assert out.status == "failed"
     # No raise -- workflow goes on.
+
+
+def _fake_merged_for_graph(graph_id: str):
+    ctx = Ctx(doc_id="d", local_path="/x", cleanup_dir=None,
+              workflow_run_id="r", graph_id=graph_id)
+    parsed = Parsed(ctx=ctx, nodes_uri="s3://kb-staging/r/parsed.pkl",
+                    chunk_count=1)
+    kg = KGExtracted(parsed=parsed,
+                     nodes_with_kg_uri="s3://kb-staging/r/kg.pkl")
+    return Merged(kg=kg, merged_entities_uri="s3://kb-staging/r/merged.pkl")
+
+
+@pytest.mark.asyncio
+async def test_non_default_graph_skipped_before_any_resolution(monkeypatch):
+    """Spec D6: Wikibase is a default-graph-only artifact.  A non-default
+    graph must skip BEFORE graph resolution, staging, graph store or the
+    Wikibase client are touched."""
+    from src.workflow.activities.push_wikibase import push_wikibase, settings
+
+    monkeypatch.setattr(settings.wikibase, "enabled", True, raising=False)
+    merged = _fake_merged_for_graph("other")
+    assert merged.graph_id == "other"
+
+    with patch(
+        "src.workflow.activities.push_wikibase.resolve_graph_for_activity",
+        new=AsyncMock(),
+    ) as mr, patch(
+        "src.workflow.activities.push_wikibase.build_staging_store"
+    ) as ms, patch(
+        "src.workflow.activities.push_wikibase.build_graph_store"
+    ) as mg, patch(
+        "src.workflow.activities.push_wikibase.AsyncWikibase",
+    ) as wb_factory, patch(
+        "src.workflow.activities.push_wikibase.push_entities",
+        new=AsyncMock(),
+    ) as push_fn, patch(
+        "src.workflow.activities.push_wikibase.activity"
+    ):
+        wb_factory.from_settings = AsyncMock()
+        out = await push_wikibase(merged)
+
+    assert out.status == "skipped"
+    mr.assert_not_awaited()
+    ms.assert_not_called()
+    mg.assert_not_called()
+    wb_factory.from_settings.assert_not_awaited()
+    push_fn.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_default_graph_still_resolves_and_pushes(monkeypatch):
+    from src.tenancy.context import DEFAULT_GRAPH_ID
+    from src.workflow.activities.push_wikibase import push_wikibase, settings
+
+    monkeypatch.setattr(settings.wikibase, "enabled", True, raising=False)
+    staging = MagicMock()
+    staging.read_pickle.return_value = ([MagicMock(name="ent-1")], [], [])
+    gs = MagicMock()
+    gs.structured_query.side_effect = [[], []]
+    counts = {"created_items": 1, "updated_items": 0,
+              "external_id_statements": 0, "relation_statements": 0,
+              "new_properties_created": 0}
+    with patch(
+        "src.workflow.activities.push_wikibase.resolve_graph_for_activity",
+        new=AsyncMock(return_value=MagicMock()),
+    ) as mr, patch(
+        "src.workflow.activities.push_wikibase.build_staging_store",
+        return_value=staging,
+    ), patch(
+        "src.workflow.activities.push_wikibase.build_graph_store",
+        return_value=gs,
+    ), patch(
+        "src.workflow.activities.push_wikibase.AsyncWikibase",
+    ) as wb_factory, patch(
+        "src.workflow.activities.push_wikibase.push_entities",
+        new=AsyncMock(return_value=counts),
+    ) as push_fn, patch(
+        "src.workflow.activities.push_wikibase.activity"
+    ):
+        wb_factory.from_settings = AsyncMock(return_value=MagicMock())
+        out = await push_wikibase(_fake_merged_for_graph(DEFAULT_GRAPH_ID))
+
+    assert out.status == "ok"
+    mr.assert_awaited_once_with(DEFAULT_GRAPH_ID)
+    push_fn.assert_awaited_once()

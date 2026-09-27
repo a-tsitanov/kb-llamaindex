@@ -47,5 +47,5 @@ def test_build_synthesize_call_threads_template():
 def test_local_params_maps_answer_template():
     from src.api.routes.search_v2 import _local_params
     from src.models.search import SearchRequest
-    p = _local_params(SearchRequest(query="q", answer_template="dossier"))
+    p = _local_params(SearchRequest(query="q", answer_template="dossier"), graph_id="default")
     assert p.answer_template == "dossier"

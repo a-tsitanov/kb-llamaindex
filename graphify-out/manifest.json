@@ -115,8 +115,8 @@
     "semantic_hash": "a18f9757ac7abaed67db9050e3782cbd"
   },
   "scripts/setup_db.py": {
-    "mtime": 1790515044.180463,
-    "ast_hash": "d413099791a82cc8407f2cf819e7449e",
+    "mtime": 1790521986.1383772,
+    "ast_hash": "8840c6e1fdb6260f611a4ce84e3fb1c6",
     "semantic_hash": ""
   },
   "scripts/setup_monitor_schedule.py": {
@@ -335,8 +335,8 @@
     "semantic_hash": ""
   },
   "src/api/routes/analyze.py": {
-    "mtime": 1790518462.4398298,
-    "ast_hash": "dd009c0b06c6f13ad86b379b13c0aa0d",
+    "mtime": 1790522073.8067327,
+    "ast_hash": "4e159bb7139304ff2f622a52fd2ff21c",
     "semantic_hash": ""
   },
   "src/api/routes/documents.py": {
@@ -360,8 +360,8 @@
     "semantic_hash": ""
   },
   "src/api/routes/search_v2.py": {
-    "mtime": 1790518462.4391906,
-    "ast_hash": "5799128f6c5a55cf4436b63df69b3d1a",
+    "mtime": 1790522073.806427,
+    "ast_hash": "f3961228161afae62e5bb66801413ac2",
     "semantic_hash": ""
   },
   "src/api/routes/stats.py": {
@@ -1025,8 +1025,8 @@
     "semantic_hash": "3efcfaaf79dec443ac20a62a115c259c"
   },
   "src/workflow/activities/push_wikibase.py": {
-    "mtime": 1790517874.1855838,
-    "ast_hash": "c1c52716250b5d39743a4ad19d1de671",
+    "mtime": 1790521897.929383,
+    "ast_hash": "d58f112cd0c608a2a43aef9e8a17ae29",
     "semantic_hash": ""
   },
   "src/workflow/activities/synthesize_answer.py": {
@@ -1875,9 +1875,9 @@
     "semantic_hash": ""
   },
   "tests/test_api/test_analyze_route.py": {
-    "mtime": 1790270342.2071283,
-    "ast_hash": "53fd58bd4f7419be66f8dc01d726b8f8",
-    "semantic_hash": "53fd58bd4f7419be66f8dc01d726b8f8"
+    "mtime": 1790522052.89551,
+    "ast_hash": "50f3783aa9b5cd530d67da32fb9f6bc4",
+    "semantic_hash": ""
   },
   "tests/test_api/test_auth.py": {
     "mtime": 1790518369.4816055,
@@ -1945,19 +1945,19 @@
     "semantic_hash": "a48ed9df1165c066cff23e3edde122a3"
   },
   "tests/test_api/test_search_date_filters.py": {
-    "mtime": 1790270342.208625,
-    "ast_hash": "58c26f6af23ea5f0a65f1307d191984c",
-    "semantic_hash": "58c26f6af23ea5f0a65f1307d191984c"
+    "mtime": 1790522062.969013,
+    "ast_hash": "b2b91377d470594e3afefdf576f15eb4",
+    "semantic_hash": ""
   },
   "tests/test_api/test_search_groups_params.py": {
-    "mtime": 1790270342.2086945,
-    "ast_hash": "945af023e7a75cf4a19d0e630f790bf8",
-    "semantic_hash": "945af023e7a75cf4a19d0e630f790bf8"
+    "mtime": 1790522062.9683301,
+    "ast_hash": "02d8dc7f63a373e58fa92a7e0129b29f",
+    "semantic_hash": ""
   },
   "tests/test_api/test_search_history.py": {
-    "mtime": 1790270342.2088866,
-    "ast_hash": "2a9856d150fc6c5d6e5587d49e4f1c43",
-    "semantic_hash": "2a9856d150fc6c5d6e5587d49e4f1c43"
+    "mtime": 1790522068.180361,
+    "ast_hash": "9e76f3d9513eb7dc416a535291ce7275",
+    "semantic_hash": ""
   },
   "tests/test_api/test_search_v2_routes.py": {
     "mtime": 1790270342.2090878,
@@ -2460,9 +2460,9 @@
     "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "tests/test_retrieval/test_answer_template.py": {
-    "mtime": 1790270342.2304416,
-    "ast_hash": "acce905c92f0567923baec030150dcef",
-    "semantic_hash": "acce905c92f0567923baec030150dcef"
+    "mtime": 1790522062.9677713,
+    "ast_hash": "fbae7b333d43b32683563ed7d55de1e7",
+    "semantic_hash": ""
   },
   "tests/test_retrieval/test_atomic_tools.py": {
     "mtime": 1790270342.2305374,
@@ -2830,8 +2830,8 @@
     "semantic_hash": "6aa0b8800bfb78684c210a648b05cab0"
   },
   "tests/test_workflow/test_push_wikibase.py": {
-    "mtime": 1790279417.5938072,
-    "ast_hash": "7d96e03790922a1fec08957127826cd5",
+    "mtime": 1790521876.0186028,
+    "ast_hash": "005a3f49b808646788a5a2116db2a0bb",
     "semantic_hash": ""
   },
   "tests/test_workflow/test_rerank_group_weights.py": {
@@ -3065,8 +3065,8 @@
     "semantic_hash": ""
   },
   "docs/DEPLOYMENT.md": {
-    "mtime": 1790520913.238779,
-    "ast_hash": "26dbe06751d00cee6a5bdac4a14e0129",
+    "mtime": 1790521999.0797715,
+    "ast_hash": "098f6e9211d79ed4fc58b8ec094467dd",
     "semantic_hash": ""
   },
   "docs/FEATURES.md": {
@@ -3970,8 +3970,8 @@
     "semantic_hash": ""
   },
   "tests/test_api/test_search_v2_synthesize.py": {
-    "mtime": 1790270342.2091568,
-    "ast_hash": "42bbdfcc3b2ac3276e19ba1bd2587443",
+    "mtime": 1790522073.8062131,
+    "ast_hash": "dba41e66e5919f5a009f013eb034cd21",
     "semantic_hash": ""
   },
   "tests/test_api/test_stats_data.py": {
@@ -4260,8 +4260,8 @@
     "semantic_hash": ""
   },
   "src/tenancy/api_keys.py": {
-    "mtime": 1790514181.2706716,
-    "ast_hash": "c4ed81af64181488942b922693e075de",
+    "mtime": 1790522031.703131,
+    "ast_hash": "368fd06b7502b8d508fc874ea824a2ae",
     "semantic_hash": ""
   },
   "src/tenancy/context.py": {
@@ -4270,8 +4270,8 @@
     "semantic_hash": ""
   },
   "src/tenancy/registry.py": {
-    "mtime": 1790514177.490216,
-    "ast_hash": "1ae8d14f3dbb30bdd1cb83b0a4e288e7",
+    "mtime": 1790522031.7031972,
+    "ast_hash": "852075be0d425ccf842ce4555e669444",
     "semantic_hash": ""
   },
   "src/workflow/activity_inputs.py": {
@@ -4310,8 +4310,8 @@
     "semantic_hash": ""
   },
   "tests/test_mcp/test_current_graph.py": {
-    "mtime": 1790519448.7179198,
-    "ast_hash": "1379fd82014083cb281d424abfbd7b74",
+    "mtime": 1790522092.7505276,
+    "ast_hash": "47aeea2e716298c4c1e75c29ddb14229",
     "semantic_hash": ""
   },
   "tests/test_scripts/test_setup_db_graph_schema.py": {
@@ -4320,8 +4320,8 @@
     "semantic_hash": ""
   },
   "tests/test_scripts/test_setup_db_registry.py": {
-    "mtime": 1790514137.9116824,
-    "ast_hash": "483156baeb76374a56faa8a436800cdd",
+    "mtime": 1790521975.6325893,
+    "ast_hash": "adbb128b393935dac8f367b13e149926",
     "semantic_hash": ""
   },
   "tests/test_storage/test_pg_scope.py": {
@@ -4355,8 +4355,8 @@
     "semantic_hash": ""
   },
   "tests/test_tenancy/test_registry.py": {
-    "mtime": 1790514216.5409815,
-    "ast_hash": "0fc3ff53cd5d5142bbec023a90110c75",
+    "mtime": 1790522024.044553,
+    "ast_hash": "ba273b9ec5f9565635ffc028b1d30776",
     "semantic_hash": ""
   },
   "tests/test_tenancy/test_storage_names.py": {

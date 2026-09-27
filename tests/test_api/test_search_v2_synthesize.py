@@ -15,22 +15,22 @@ def test_synthesize_defaults_to_true():
 
 
 def test_local_params_carry_the_flag():
-    assert _local_params(SearchRequest(query="q")).synthesize is True
-    assert _local_params(SearchRequest(query="q", synthesize=False)).synthesize is False
+    assert _local_params(SearchRequest(query="q"), graph_id="default").synthesize is True
+    assert _local_params(SearchRequest(query="q", synthesize=False), graph_id="default").synthesize is False
 
 
 def test_global_params_carry_the_flag():
     from src.api.routes.search_v2 import _global_params
 
-    assert _global_params(SearchRequest(query="q")).synthesize is True
+    assert _global_params(SearchRequest(query="q"), graph_id="default").synthesize is True
     assert _global_params(
-        SearchRequest(query="q", synthesize=False),
+        SearchRequest(query="q", synthesize=False), graph_id="default",
     ).synthesize is False
 
 
 def test_drift_params_carry_the_flag():
     from src.api.routes.search_v2 import _global_params
 
-    p = _global_params(SearchRequest(query="q", synthesize=False), drift_mode=True)
+    p = _global_params(SearchRequest(query="q", synthesize=False), drift_mode=True, graph_id="default")
     assert p.synthesize is False
     assert p.drift_mode is True

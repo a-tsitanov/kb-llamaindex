@@ -389,7 +389,13 @@ uv run python -m scripts.setup_db
   `community_report_vec`) и заносит каждый ключ из env `API_KEYS` в
   `public.api_keys` как admin-ключ графа `default`. Оба шага идемпотентны
   (`ON CONFLICT DO NOTHING`) — существующие строки не перезаписываются.
-* Для каждого графа в статусе `ready` мигрирует его схему: создаёт схему (кроме
+  Затем удаляет из `public.api_keys` строки `owner = 'legacy-env'`, хэша
+  которых больше нет в `API_KEYS`: ротация или удаление ключа в `API_KEYS`
+  вступает в силу **после следующего запуска `setup_db`** (плюс ≤30 с TTL
+  кэша реестра в процессах API/MCP). Пустой `API_KEYS` удаляет все
+  `legacy-env`-строки.
+* Для каждого графа в статусе `ready` (и всегда для `default`, даже если его
+  строка отсутствует или не `ready`) мигрирует его схему: создаёт схему (кроме
   `public`) и под `search_path` этой схемы — таблицы `documents` (+ индексы по
   status / department), `ingest_metrics`, `stat_*`, ER-verdict-кэш, зеркало
   сущностей. Для `default` это `public`, т.е. таблицы остаются там же, где были.
@@ -425,7 +431,7 @@ SELECT nspname FROM pg_namespace WHERE nspname = current_user;
 | `X-Graph: <id>` (HTTP API и MCP по HTTP/SSE) | Выбирает граф запроса. Без заголовка — единственный граф ключа; ключу с несколькими графами заголовок обязателен (иначе 400). Граф не из `graph_ids` ключа → 403 (admin-ключ может выбрать любой); неизвестный → 404; не `ready` → 409. Env-ключи из `API_KEYS` привязаны к `default`, так что существующим клиентам заголовок не нужен. |
 | `/admin/wiki/*`, `/admin/monitor/*` | Теперь требуют **admin** `X-API-Key` (раньше были без аутентификации). Работают только для `default`, для другого графа — 409. |
 | `/admin/graph/*`, `POST /api/v1/admin/communities/rebuild` | Требуют **admin**-ключ (раньше хватало любого валидного). |
-| Env-ключи `API_KEYS` | По-прежнему работают: ключ, которого нет в `public.api_keys`, но есть в `API_KEYS`, = admin графа `default`. |
+| Env-ключи `API_KEYS` | По-прежнему работают: ключ, которого нет в `public.api_keys`, но есть в `API_KEYS`, = admin графа `default`. Отзыв/ротация ключа — убрать его из `API_KEYS` и перезапустить `setup_db` (строка `legacy-env` удаляется; кэш ≤30 с). |
 
 **Новые env-переменные:**
 

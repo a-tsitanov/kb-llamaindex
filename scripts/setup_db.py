@@ -338,12 +338,25 @@ def _bootstrap_registry(cur) -> None:
         (d.id, "system", d.nebula_space, d.nebula_partition_num, d.chunks_collection,
          d.er_vec_collection, d.report_vec_collection, d.pg_schema),
     )
-    for raw in [k.strip() for k in settings.api.keys.split(",") if k.strip()]:
+    env_hashes = [
+        hash_api_key(k.strip()) for k in settings.api.keys.split(",") if k.strip()
+    ]
+    for key_hash in env_hashes:
         cur.execute(
             "INSERT INTO public.api_keys (key_hash, owner, graph_ids, is_admin) "
             "VALUES (%s, 'legacy-env', ARRAY['default'], true) ON CONFLICT (key_hash) DO NOTHING",
-            (hash_api_key(raw),),
+            (key_hash,),
         )
+    # R-P7: API_KEYS is the source of truth for legacy-env rows — a key
+    # rotated out of / removed from the env is revoked on this run.
+    if env_hashes:
+        cur.execute(
+            "DELETE FROM public.api_keys WHERE owner = 'legacy-env' "
+            "AND NOT (key_hash = ANY(%s))",
+            (env_hashes,),
+        )
+    else:
+        cur.execute("DELETE FROM public.api_keys WHERE owner = 'legacy-env'")
 
 # Search mirror of the graph's entities. NOT a second source of truth —
 # the graph stays canonical; this is a trigram-indexed flat copy so name
@@ -536,6 +549,7 @@ def setup_postgres() -> None:
 
 
 def _ready_graphs(cur) -> list:
+    from src.tenancy.context import DEFAULT_GRAPH_ID, default_graph_context
     from src.tenancy.registry import _context_from_row
 
     cur.execute(
@@ -544,7 +558,12 @@ def _ready_graphs(cur) -> list:
         "FROM public.graphs WHERE status = 'ready' ORDER BY id"
     )
     cols = [d.name for d in cur.description]
-    return [_context_from_row(dict(zip(cols, r, strict=True))) for r in cur.fetchall()]
+    graphs = [_context_from_row(dict(zip(cols, r, strict=True))) for r in cur.fetchall()]
+    # The legacy public tables must always be migrated, even if the
+    # `default` registry row is missing or not 'ready'.
+    if not any(g.id == DEFAULT_GRAPH_ID for g in graphs):
+        graphs.insert(0, default_graph_context())
+    return graphs
 
 
 # ── Milvus ───────────────────────────────────────────────────────────
