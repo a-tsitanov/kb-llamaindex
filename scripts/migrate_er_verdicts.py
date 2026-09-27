@@ -168,7 +168,7 @@ def main() -> None:
     from src.graph.store import build_graph_store
     from src.tenancy.context import default_graph_context
 
-    store = build_graph_store()
+    store = build_graph_store(default_graph_context())
     cache = PostgresERVerdictCache(graph=default_graph_context())
     if not args.dry_run:
         cache.ensure_verdict_schema()

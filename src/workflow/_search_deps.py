@@ -67,7 +67,7 @@ async def _build_graph_retriever_once(embed_model, llm):
         from src.config import settings
         from src.graph.retriever import GraphRetriever
         from src.graph.store import build_graph_store
-        gs = build_graph_store()
+        gs = build_graph_store(transitional_default_graph())
         return GraphRetriever.for_store(
             gs,
             similarity_top_k=settings.agent.graph_similarity_top_k,

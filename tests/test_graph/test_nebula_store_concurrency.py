@@ -8,6 +8,7 @@ import threading
 import time
 
 from src.graph.nebula_store import NebulaGraphStore
+from src.tenancy.context import default_graph_context
 
 
 class _FakeResp:
@@ -42,7 +43,7 @@ class _ConcurrencyDetectingSession:
 
 def test_exec_is_serialized_across_threads():
     sess = _ConcurrencyDetectingSession()
-    store = NebulaGraphStore(sess)
+    store = NebulaGraphStore(sess, graph=default_graph_context())
     threads = [threading.Thread(target=lambda: store._exec("INSERT ...")) for _ in range(12)]
     for t in threads:
         t.start()

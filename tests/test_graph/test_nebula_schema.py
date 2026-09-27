@@ -1,7 +1,12 @@
 # tests/test_graph/test_nebula_schema.py
 from __future__ import annotations
 
-from src.graph.nebula_schema import SCHEMA_DDL, SPACE_DDL, SPACE_NAME, ensure_schema
+from src.graph.nebula_schema import SCHEMA_DDL, ensure_schema, space_ddl
+from src.tenancy.context import default_graph_context
+
+_G = default_graph_context()
+SPACE_NAME = _G.nebula_space
+SPACE_DDL = space_ddl(_G)
 
 
 def test_space_and_core_schema_present():
@@ -100,7 +105,7 @@ def test_ensure_schema_selects_space_before_creates(monkeypatch):
     monkeypatch.setattr("src.graph.nebula_schema.time.sleep", _no_sleep)
 
     fake = _FakeSession()
-    ensure_schema(fake)
+    ensure_schema(fake, _G)
 
     assert fake.statements, "ensure_schema executed no statements"
 
@@ -129,7 +134,7 @@ def test_ensure_schema_probes_both_entity_and_community():
     # a sentinel for BOTH `Entity` (ingest) and `Community` (community BUILD) so
     # the first post-DDL write to EITHER doesn't race "Schema not exist".
     fake = _FakeSession()
-    ensure_schema(fake)
+    ensure_schema(fake, _G)
     joined = "\n".join(fake.statements)
     assert "INSERT VERTEX `Entity` " in joined, "Entity write-readiness probe missing"
     assert "INSERT VERTEX `Community` " in joined, "Community write-readiness probe missing"
@@ -164,7 +169,7 @@ def test_ensure_schema_alters_related_edge_to_add_weight():
     # real fail-open behaviour is covered by _execute_with_retry's own
     # tests/usage elsewhere).
     fake = _FakeSession()
-    ensure_schema(fake)
+    ensure_schema(fake, _G)
     assert "ALTER EDGE `RELATED` ADD (weight double DEFAULT 1.0);" in fake.statements
 
 
@@ -173,7 +178,7 @@ def test_ensure_schema_alters_entity_to_add_er_canonical_name():
     # Entity had er_canonical_name). Fail-open, same pattern as the RELATED
     # weight ALTER.
     fake = _FakeSession()
-    ensure_schema(fake)
+    ensure_schema(fake, _G)
     assert "ALTER TAG `Entity` ADD (er_canonical_name string DEFAULT '');" in fake.statements
 
 
@@ -183,7 +188,7 @@ def test_ensure_schema_entity_probe_includes_er_canonical_name():
     # ingest write touches er_canonical_name (same propagation-lag class
     # already handled for RELATED.weight).
     fake = _FakeSession()
-    ensure_schema(fake)
+    ensure_schema(fake, _G)
     joined = "\n".join(fake.statements)
     assert (
         "INSERT VERTEX `Entity` (name, description, mention_count, created_at, label, "
@@ -196,7 +201,7 @@ def test_ensure_schema_alters_entity_to_add_first_doc_id():
     # Entity had first_doc_id). Fail-open, same pattern as the RELATED
     # weight / er_canonical_name ALTERs.
     fake = _FakeSession()
-    ensure_schema(fake)
+    ensure_schema(fake, _G)
     assert "ALTER TAG `Entity` ADD (first_doc_id string DEFAULT '');" in fake.statements
 
 
@@ -206,7 +211,7 @@ def test_ensure_schema_entity_probe_includes_first_doc_id():
     # ingest write touches it (same propagation-lag class as
     # er_canonical_name/RELATED.weight).
     fake = _FakeSession()
-    ensure_schema(fake)
+    ensure_schema(fake, _G)
     joined = "\n".join(fake.statements)
     assert (
         "INSERT VERTEX `Entity` (name, description, mention_count, created_at, label, "
@@ -220,7 +225,7 @@ def test_ensure_schema_probes_related_weighted_edge_write():
     # weighted edge-write until it lands so the first fail-open ingest batch
     # doesn't silently drop edges ("Unknown column weight").
     fake = _FakeSession()
-    ensure_schema(fake)
+    ensure_schema(fake, _G)
     joined = "\n".join(fake.statements)
     assert ("INSERT EDGE `RELATED` (rel_type, polarity, valid_from, valid_to, weight, "
             "created_at, first_doc_id, source_trust, superseded_at)") in joined
@@ -251,7 +256,7 @@ def test_ensure_schema_alters_entity_to_add_wiki_columns():
     # Entity had the wiki columns). Fail-open, same pattern as the
     # RELATED.weight / er_canonical_name / first_doc_id ALTERs.
     fake = _FakeSession()
-    ensure_schema(fake)
+    ensure_schema(fake, _G)
     assert any(
         s.startswith("ALTER TAG `Entity` ADD (wiki_dirty") for s in fake.statements
     ), "ALTER TAG `Entity` ADD (wiki_dirty... missing from ensure_schema"
@@ -263,7 +268,7 @@ def test_ensure_schema_creates_wiki_dirty_index_after_entity_probe():
     # and fail); ensure_schema creates it AFTER the Entity write-readiness
     # probe. Assert it's issued, and issued AFTER an Entity probe INSERT.
     fake = _FakeSession()
-    ensure_schema(fake)
+    ensure_schema(fake, _G)
     idx_stmt = "CREATE TAG INDEX IF NOT EXISTS `entity_wiki_dirty_idx` ON `Entity`(wiki_dirty);"
     assert idx_stmt in fake.statements, "entity_wiki_dirty_idx not created by ensure_schema"
     idx_i = fake.statements.index(idx_stmt)
@@ -278,7 +283,7 @@ def test_ensure_schema_entity_probe_includes_wiki_columns():
     # columns too, so ensure_schema waits for the ALTER(s) to propagate
     # before the first wiki-sweep write touches them.
     fake = _FakeSession()
-    ensure_schema(fake)
+    ensure_schema(fake, _G)
     joined = "\n".join(fake.statements)
     assert (
         "INSERT VERTEX `Entity` (name, description, mention_count, created_at, label, "
@@ -301,7 +306,7 @@ def test_related_ddl_has_conflict_resolution_columns():
 
 def test_ensure_schema_alters_related_with_conflict_columns():
     fake = _FakeSession()
-    ensure_schema(fake)
+    ensure_schema(fake, _G)
     joined = "\n".join(fake.statements)
     assert ("ALTER EDGE `RELATED` ADD (source_trust double DEFAULT 0.0, "
             "superseded_at int DEFAULT 0);") in joined

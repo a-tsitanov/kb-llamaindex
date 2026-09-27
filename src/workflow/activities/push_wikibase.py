@@ -20,6 +20,7 @@ from temporalio import activity
 from src.config import settings
 from src.graph.store import build_graph_store
 from src.storage.wikibase import AsyncWikibase, push_entities
+from src.tenancy.context import transitional_default_graph
 from src.workflow.contracts import Merged, WikibasePushed
 from src.workflow.heartbeat import heartbeat_every
 from src.workflow.staging import build_staging_store
@@ -48,7 +49,7 @@ async def push_wikibase(merged: Merged) -> WikibasePushed:
         entities, relations, _nodes = await asyncio.to_thread(
             staging.read_pickle, merged.merged_entities_uri,
         )
-        graph_store = build_graph_store()
+        graph_store = build_graph_store(transitional_default_graph())
 
         # Graph-store bootstrap-cache reads are sync — off the loop.
         base_class_qids = await asyncio.to_thread(_load_base_classes, graph_store)

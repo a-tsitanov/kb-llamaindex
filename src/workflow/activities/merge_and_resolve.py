@@ -33,6 +33,7 @@ from src.graph.phone_consolidation import consolidate_phone_entities
 from src.graph.store import build_graph_store
 from src.ingestion.embeddings import build_embedding_model
 from src.retrieval.llm_pool import get_llm_pool
+from src.tenancy.context import transitional_default_graph
 from src.workflow.contracts import DuplicateGroup, KGExtracted, Merged
 from src.workflow.heartbeat import heartbeat_every
 from src.workflow.staging import build_staging_store
@@ -270,7 +271,7 @@ async def merge_and_resolve(kg: KGExtracted) -> Merged:
     if settings.agent.er_enabled:
         activity.logger.info("merge_and_resolve resolving entities (ER)")
         embed_model = build_embedding_model()
-        graph_store = build_graph_store()
+        graph_store = build_graph_store(transitional_default_graph())
         from src.graph.entity_vector_store import build_entity_vector_store
         # ER candidate-kNN + canonical upsert go through the Milvus-backed
         # EntityVectorStore seam.

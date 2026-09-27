@@ -1,8 +1,8 @@
 """NebulaGraph implementation of the KbGraphStore seam (write path).
 
 Schema-aware writes (upsert_nodes/upsert_relations) + a raw nGQL
-passthrough (structured_query).  Process-global cache — one pooled client
-per process, thread-safe session use.
+passthrough (structured_query).  Process-global cache — one shared ConnectionPool
+per process and one store (session) per graph space, thread-safe session use.
 """
 
 from __future__ import annotations
@@ -18,11 +18,14 @@ from loguru import logger
 from src.config import settings
 from src.graph.entity_table import mirror_entities, node_to_row
 from src.graph.nebula_schema import ensure_schema
-from src.tenancy.context import transitional_default_graph
+from src.tenancy.context import GraphContext
 
-_store: NebulaGraphStore | None = None
-# Held at module scope only to keep the ConnectionPool alive for the life of
-# the process (a GC'd pool would close the reconnect path's sockets).
+# One store per graph space (``GraphContext.nebula_space``): ``USE <space>``
+# is per-session state, so each space needs its own session.
+_stores: dict[str, NebulaGraphStore] = {}
+# One ConnectionPool per process, shared by every space's session. Held at
+# module scope also to keep it alive for the life of the process (a GC'd pool
+# would close the reconnect path's sockets).
 _pool: Any = None
 _lock = threading.Lock()
 
@@ -67,7 +70,7 @@ def entity_vid(name: str) -> str:
     of 64-bit so birthday collisions stay negligible at the billions-of-
     entities target — a VID collision silently merges two distinct entities.
     The space is created with vid_type=FIXED_STRING(32) to match (see
-    nebula_schema.SPACE_DDL)."""
+    nebula_schema.space_ddl)."""
     return hashlib.blake2b((name or "").encode("utf-8"), digest_size=16).hexdigest()
 
 
@@ -89,7 +92,10 @@ def _q(value: Any) -> str:
 
 
 class NebulaGraphStore:
-    def __init__(self, session: Any, reconnect: Any = None):
+    def __init__(self, session: Any, reconnect: Any = None, *, graph: GraphContext):
+        # The graph (and therefore the nebula space) this store's session is
+        # bound to.
+        self.graph = graph
         self._session = session
         # Optional zero-arg callable returning a fresh, space-selected
         # session. Set by build_nebula_graph_store so _run can transparently
@@ -194,7 +200,7 @@ class NebulaGraphStore:
 
             # Search mirror (fail-soft). Same nodes, same entity_vid key.
             mirror_entities(
-                transitional_default_graph(),
+                self.graph,
                 [node_to_row(n, entity_vid(getattr(n, "name", ""))) for n in chunk],
             )
 
@@ -379,41 +385,60 @@ def _rows_to_dicts(resp: Any) -> list[dict]:
     return out
 
 
-def build_nebula_graph_store() -> NebulaGraphStore:
-    """Process-global NebulaGraph store (one pool + session per process).
+def _shared_pool() -> Any:
+    """The process-wide nebula3 ConnectionPool (created on first use). Caller
+    must hold ``_lock``."""
+    global _pool
+    if _pool is None:
+        from nebula3.Config import Config
+        from nebula3.gclient.net import ConnectionPool
+
+        cfg = settings.nebula
+        pool_config = Config()
+        # Without this the pool never re-checks a graphd it wrote off.
+        pool_config.interval_check = cfg.pool_health_check_s
+        pool = ConnectionPool()
+        pool.init([(cfg.host, cfg.port)], pool_config)
+        _pool = pool
+    return _pool
+
+
+def build_nebula_graph_store(graph: GraphContext) -> NebulaGraphStore:
+    """One store (session) per graph space; one ConnectionPool per process.
 
     The store is handed a ``reconnect`` closure so it can transparently
     re-acquire a session when graphd expires the cached one (idle timeout) —
-    otherwise the singleton would fail every query with 'Session not existed'
+    otherwise the cached store would fail every query with 'Session not existed'
     for the rest of the process's life (seen on the rarely-used global-search
-    path). A fresh session must re-run ``ensure_schema`` because ``USE
-    <space>`` is per-session state.
+    path). A fresh session must re-run ``ensure_schema`` for the SAME graph
+    because ``USE <space>`` is per-session state.
 
     Session re-acquisition goes through ``_acquire_session`` so a graphd
     *restart* (as opposed to an idle-timeout) also heals: the pool writes the
     address off and, on the library defaults, would never take it back."""
-    global _store, _pool
-    if _store is not None:
-        return _store
+    key = graph.nebula_space
+    store = _stores.get(key)
+    if store is not None:
+        return store
     with _lock:
-        if _store is None:
-            from nebula3.Config import Config
-            from nebula3.gclient.net import ConnectionPool
-
+        store = _stores.get(key)
+        if store is None:
+            pool = _shared_pool()
             cfg = settings.nebula
-            pool_config = Config()
-            # Without this the pool never re-checks a graphd it wrote off.
-            pool_config.interval_check = cfg.pool_health_check_s
-            pool = ConnectionPool()
-            pool.init([(cfg.host, cfg.port)], pool_config)
-            user = cfg.user
-            password = cfg.password.get_secret_value()
+            user, password = cfg.user, cfg.password.get_secret_value()
 
             def _new_session() -> Any:
                 sess = _acquire_session(pool, user, password)
-                ensure_schema(sess)  # selects the space (USE) + idempotent DDL
+                ensure_schema(sess, graph)  # selects the graph's space (USE) + idempotent DDL
                 return sess
 
-            _pool = pool  # keep the pool alive for the reconnect path
-            _store = NebulaGraphStore(_new_session(), reconnect=_new_session)
-    return _store
+            store = NebulaGraphStore(_new_session(), reconnect=_new_session, graph=graph)
+            _stores[key] = store
+    return store
+
+
+def reset_nebula_stores_for_tests() -> None:
+    """Drop every cached store and the shared pool (tests only)."""
+    global _pool
+    _stores.clear()
+    _pool = None

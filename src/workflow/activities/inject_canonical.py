@@ -9,6 +9,7 @@ from temporalio import activity
 
 from src.graph.store import build_graph_store
 from src.ingestion.identifier_transform import inject_canonical_entities
+from src.tenancy.context import transitional_default_graph
 from src.workflow.contracts import Injected, Parsed
 from src.workflow.heartbeat import heartbeat_every
 from src.workflow.staging import build_staging_store
@@ -38,7 +39,7 @@ async def inject_canonical(parsed: Parsed) -> Injected:
     async with heartbeat_every(
         _HEARTBEAT_INTERVAL_S, {"stage": "injecting", "chunks": len(nodes)}
     ):
-        graph_store = await asyncio.to_thread(build_graph_store)
+        graph_store = await asyncio.to_thread(build_graph_store, transitional_default_graph())
         await asyncio.to_thread(inject_canonical_entities, graph_store, nodes)
     activity.heartbeat({"stage": "injected", "chunks": len(nodes)})
 

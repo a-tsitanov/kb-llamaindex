@@ -117,7 +117,8 @@ def main() -> None:
     ap.add_argument("--retries", type=int, default=8)
     args = ap.parse_args()
     from src.graph.store import build_graph_store
-    store = build_graph_store()
+    from src.tenancy.context import default_graph_context
+    store = build_graph_store(default_graph_context())
 
     # Every progress line carries `last=…`; keep the newest so a failure
     # can name the exact resume point instead of the (possibly stale)

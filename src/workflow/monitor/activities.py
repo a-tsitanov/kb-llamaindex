@@ -22,6 +22,7 @@ from src.config import settings
 from src.graph.alerts import upsert_alert
 from src.graph.store import build_graph_store
 from src.retrieval.date_filters import today_epoch_days
+from src.tenancy.context import transitional_default_graph
 from src.workflow.heartbeat import heartbeat_every
 from src.workflow.monitor.delivery import post_alert
 
@@ -29,7 +30,7 @@ from src.workflow.monitor.delivery import post_alert
 _TOP_N = 200
 
 def _get_store() -> Any:
-    return build_graph_store()
+    return build_graph_store(transitional_default_graph())
 
 
 # ── Detection reads ─────────────────────────────────────────────────────────────

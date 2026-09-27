@@ -17,7 +17,6 @@ from __future__ import annotations
 import time
 from typing import Any
 
-SPACE_NAME = "kb"
 
 # 128-bit VID: the 32-hex-char blake2b digest of the entity name
 # (`entity_vid` in nebula_store.py), set at write time. FIXED_STRING(32)
@@ -25,12 +24,18 @@ SPACE_NAME = "kb"
 # non-negligible birthday-collision probability at the billions-of-entities
 # target, and a VID collision silently merges two distinct entities.
 # vid_type is fixed at space creation, so this must be right before any load.
-SPACE_DDL = (
-    f"CREATE SPACE IF NOT EXISTS `{SPACE_NAME}` "
-    "(partition_num=100, replica_factor=1, vid_type=FIXED_STRING(32));"
-)
+#
+# The space name + partition count come from the graph's GraphContext
+# (`kb`/100 for the default graph; `g_<slug>`/10 for others). The name is a
+# validated slug or the literal `kb`, so it is safe to interpolate.
+def space_ddl(graph: Any) -> str:
+    return (
+        f"CREATE SPACE IF NOT EXISTS `{graph.nebula_space}` "
+        f"(partition_num={graph.nebula_partition_num}, replica_factor=1, vid_type=FIXED_STRING(32));"
+    )
 
-# In-space DDL only — requires `USE `{SPACE_NAME}`;` to have already
+
+# In-space DDL only — requires `USE `<graph space>`;` to have already
 # succeeded on the session. Do NOT add CREATE SPACE or USE here.
 SCHEMA_DDL: list[str] = [
     # `label string DEFAULT ''` is intentional: the Phase-1 write adapter
@@ -243,8 +248,11 @@ def _probe_edge_write_ready(
     return False
 
 
-def ensure_schema(session: Any, *, use_attempts: int = 30, use_delay_s: float = 1.0) -> None:
-    """Execute SPACE_DDL then SCHEMA_DDL on an open nebula3 session.
+def ensure_schema(
+    session: Any, graph: Any, *, use_attempts: int = 30, use_delay_s: float = 1.0
+) -> None:
+    """Execute ``space_ddl(graph)`` then SCHEMA_DDL (in that graph's space) on an
+    open nebula3 session.
 
     Fail-open overall (logs warnings, never raises) to match the project's
     `ensure_*` DDL convention. Space creation is async, so the `USE` that
@@ -256,15 +264,15 @@ def ensure_schema(session: Any, *, use_attempts: int = 30, use_delay_s: float = 
 
     # 1. Create the space (fail-open: log and continue regardless — it may
     # already exist, or errors here are surfaced again by the USE retry).
-    _execute_with_retry(session, SPACE_DDL, attempts=1, delay_s=0)
+    _execute_with_retry(session, space_ddl(graph), attempts=1, delay_s=0)
 
     # 2. Select the space, retrying to cover the async creation window.
     if not _execute_with_retry(
-        session, f"USE `{SPACE_NAME}`;", attempts=use_attempts, delay_s=use_delay_s
+        session, f"USE `{graph.nebula_space}`;", attempts=use_attempts, delay_s=use_delay_s
     ):
         logger.warning(
             "nebula ensure_schema: could not USE `{s}`; skipping tag/edge/index DDL",
-            s=SPACE_NAME,
+            s=graph.nebula_space,
         )
         return
 

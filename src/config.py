@@ -111,7 +111,8 @@ class MilvusSettings(BaseSettings):
 
 class NebulaSettings(BaseSettings):
     """Connection to the NebulaGraph cluster — the only graph backend
-    (graphd port 9669, root/nebula, single space "kb")."""
+    (graphd port 9669, root/nebula). The space is per graph — see
+    ``GraphContext.nebula_space`` (``kb`` for the default graph)."""
 
     model_config = SettingsConfigDict(env_prefix="NEBULA_", env_file=".env", extra="ignore")
 
@@ -119,7 +120,6 @@ class NebulaSettings(BaseSettings):
     port: int = 9669
     user: str = "root"
     password: SecretStr = SecretStr("nebula")
-    space: str = "kb"
     # Rows per INSERT VERTEX/EDGE statement (multi-VALUES batching). Higher
     # amortises round-trips at ingest scale; see docs/superpowers/specs/
     # 2026-07-11-nebula-ingest-batch-design.md.

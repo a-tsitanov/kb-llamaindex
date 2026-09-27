@@ -60,8 +60,9 @@ def _get_store() -> Any | None:
     """Graph store or None when unreachable (indirected for monkeypatch)."""
     try:
         from src.graph.store import build_graph_store
+        from src.tenancy.context import transitional_default_graph
 
-        return build_graph_store()
+        return build_graph_store(transitional_default_graph())
     except Exception as exc:
         activity.logger.warning("documents_for_communities: store unavailable: %s", exc)
         return None

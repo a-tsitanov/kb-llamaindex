@@ -57,6 +57,7 @@ load_dotenv()
 from src.config import settings  # noqa: E402
 from src.graph.store import build_graph_store  # noqa: E402
 from src.ingestion.identifiers import IdentifierType  # noqa: E402
+from src.tenancy.context import default_graph_context  # noqa: E402
 from src.utils.logging import configure_logging  # noqa: E402
 
 # ── taxonomy ─────────────────────────────────────────────────────────
@@ -291,7 +292,7 @@ def _persist_cache(
     property_pids: dict[str, tuple[str, str]],
 ) -> None:
     """Upsert ``:WikibaseBaseClass`` and ``:WikibaseProperty`` nodes."""
-    gs = build_graph_store()
+    gs = build_graph_store(default_graph_context())
     for label, qid in base_qids.items():
         if not qid:
             continue

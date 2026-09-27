@@ -27,8 +27,9 @@ router = APIRouter(prefix="/admin/graph", tags=["admin"])
 @functools.cache
 def _store() -> Any:
     from src.graph.store import build_graph_store
+    from src.tenancy.context import transitional_default_graph
 
-    return build_graph_store()
+    return build_graph_store(transitional_default_graph())
 
 
 @router.post("/stats", dependencies=[Depends(require_api_key)])

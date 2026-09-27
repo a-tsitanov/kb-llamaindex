@@ -34,9 +34,10 @@ def _retriever() -> Any:
     """
     from src.graph.retriever import GraphRetriever
     from src.graph.store import build_graph_store
+    from src.tenancy.context import transitional_default_graph
 
     return GraphRetriever.for_store(
-        build_graph_store(),
+        build_graph_store(transitional_default_graph()),
         similarity_top_k=settings.agent.graph_similarity_top_k,
     )
 

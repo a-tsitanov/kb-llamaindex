@@ -85,7 +85,7 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
     # enough — a single step can outrun heartbeat_timeout. heartbeat_every
     # keeps a progressing-but-slow build from being mistaken for a dead one.
     async with heartbeat_every(_HEARTBEAT_INTERVAL_S, {"stage": "writing"}):
-        graph_store = await asyncio.to_thread(build_graph_store)
+        graph_store = await asyncio.to_thread(build_graph_store, transitional_default_graph())
 
         _strip_graph_unsafe_metadata(nodes)
         activity.heartbeat({"stage": "scrubbed"})

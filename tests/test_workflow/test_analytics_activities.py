@@ -26,7 +26,7 @@ class _Store:
 
 @pytest.mark.asyncio
 async def test_execute_step_runs_primitive(monkeypatch):
-    monkeypatch.setattr(act, "build_graph_store", lambda: _Store())
+    monkeypatch.setattr(act, "build_graph_store", lambda graph: _Store())
     p = ExecInput(
         call=PrimitiveCall(primitive="count_entities", params={"type": "Organization"}),
         top_n=20,
@@ -40,7 +40,7 @@ async def test_execute_step_runs_primitive(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_execute_step_unknown_primitive_returns_empty(monkeypatch):
-    monkeypatch.setattr(act, "build_graph_store", lambda: _Store())
+    monkeypatch.setattr(act, "build_graph_store", lambda graph: _Store())
     p = ExecInput(
         call=PrimitiveCall(primitive="nope", params={}),
         top_n=20,
@@ -63,7 +63,7 @@ class _MentionsStore:
 @pytest.mark.asyncio
 async def test_execute_step_injects_top_n_when_omitted(monkeypatch):
     """When the primitive param_model has top_n and caller omits it, default is injected."""
-    monkeypatch.setattr(act, "build_graph_store", lambda: _MentionsStore())
+    monkeypatch.setattr(act, "build_graph_store", lambda graph: _MentionsStore())
     # top_entities_by_mentions has a top_n field; we omit it from params
     p = ExecInput(
         call=PrimitiveCall(
@@ -98,7 +98,7 @@ class _NebulaLikeStore:
 async def test_execute_step_reports_structural_backend_limitation(monkeypatch):
     """topic_trend on a nebula-like backend must report the limitation, not
     a silent empty result indistinguishable from 'no trend'."""
-    monkeypatch.setattr(act, "build_graph_store", lambda: _NebulaLikeStore())
+    monkeypatch.setattr(act, "build_graph_store", lambda graph: _NebulaLikeStore())
     p = ExecInput(
         call=PrimitiveCall(primitive="topic_trend", params={"topic": "x"}),
         top_n=20,
@@ -117,7 +117,7 @@ async def test_execute_step_logs_error_on_structural_backend_limitation(monkeypa
     """The per-request `error` field on StepResult answers "did this fire on my
     request". Operators diagnosing a recurring backend limitation across a week
     of traffic need a grep-able log line — this must not be silent."""
-    monkeypatch.setattr(act, "build_graph_store", lambda: _NebulaLikeStore())
+    monkeypatch.setattr(act, "build_graph_store", lambda graph: _NebulaLikeStore())
     errors: list[str] = []
     monkeypatch.setattr(
         act.activity.logger,
@@ -141,7 +141,7 @@ async def test_execute_step_error_is_short_and_jargon_free(monkeypatch):
     the user-facing answer) — it must not contain internal implementation
     detail (nGQL, param_map, Phase 2). The full exception text still has to go
     somewhere for operators: error_detail."""
-    monkeypatch.setattr(act, "build_graph_store", lambda: _NebulaLikeStore())
+    monkeypatch.setattr(act, "build_graph_store", lambda graph: _NebulaLikeStore())
     monkeypatch.setattr(act.activity.logger, "error", lambda *a, **kw: None)
     p = ExecInput(
         call=PrimitiveCall(primitive="topic_trend", params={"topic": "x"}),
@@ -161,7 +161,7 @@ async def test_execute_step_error_is_short_and_jargon_free(monkeypatch):
 async def test_execute_step_type_error_stays_fail_soft_without_error(monkeypatch):
     """A planner mistake (bad kwarg) is fail-soft with StepResult.error left
     empty — it is not a backend failure."""
-    monkeypatch.setattr(act, "build_graph_store", lambda: _Store())
+    monkeypatch.setattr(act, "build_graph_store", lambda graph: _Store())
     p = ExecInput(
         call=PrimitiveCall(primitive="count_entities", params={"bogus_kwarg": "x"}),
         top_n=20,

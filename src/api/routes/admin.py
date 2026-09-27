@@ -9,6 +9,7 @@ from src.config import settings
 from src.graph.alerts import mark_watched
 from src.graph.store import build_graph_store
 from src.graph.wiki_graph_ops import build_wiki_graph_ops
+from src.tenancy.context import transitional_default_graph
 from src.workflow.client import get_temporal_client
 from src.workflow.monitor.workflow import MonitorSweepWorkflow
 from src.workflow.wiki.wiki_sweep import WikiSweepWorkflow
@@ -21,7 +22,7 @@ async def wiki_rebuild(all: bool = False) -> dict:
     if not settings.wiki.enabled:
         return {"status": "disabled"}
     if all:
-        build_wiki_graph_ops(build_graph_store()).mark_all_dirty()
+        build_wiki_graph_ops(build_graph_store(transitional_default_graph())).mark_all_dirty()
     client = await get_temporal_client()
     handle = await client.start_workflow(
         WikiSweepWorkflow.run,
@@ -55,5 +56,5 @@ async def monitor_watch(names: list[str], watched: bool = True) -> dict:
     # watchlist is the input the sweep consumes, so operators pre-seed it while
     # monitoring is still dark, then flip MONITOR_ENABLED on. `names` binds to
     # the JSON body (a string array); `watched` is a query param.
-    mark_watched(build_graph_store(), names, watched)
+    mark_watched(build_graph_store(transitional_default_graph()), names, watched)
     return {"status": "ok", "count": len(names), "watched": watched}

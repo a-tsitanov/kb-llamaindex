@@ -45,7 +45,7 @@ async def test_store_built_off_the_event_loop():
     loop_thread = threading.get_ident()
     seen: dict[str, int] = {}
 
-    def _build():
+    def _build(graph):
         seen["thread"] = threading.get_ident()
         return MagicMock()
 

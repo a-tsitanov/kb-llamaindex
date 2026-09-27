@@ -13,6 +13,7 @@ from __future__ import annotations
 import pytest
 
 import src.graph.nebula_store as nebula_store
+from src.tenancy.context import default_graph_context
 
 
 class _FakePool:
@@ -78,10 +79,10 @@ def test_pool_is_built_with_a_background_health_check(monkeypatch):
 
     monkeypatch.setattr(nebula_config, "Config", _Cfg)
     monkeypatch.setattr(nebula_net, "ConnectionPool", _Pool)
-    monkeypatch.setattr(nebula_store, "ensure_schema", lambda sess: None)
-    monkeypatch.setattr(nebula_store, "_store", None)
+    monkeypatch.setattr(nebula_store, "ensure_schema", lambda sess, graph: None)
+    monkeypatch.setattr(nebula_store, "_stores", {})
     monkeypatch.setattr(nebula_store, "_pool", None)
 
-    nebula_store.build_nebula_graph_store()
+    nebula_store.build_nebula_graph_store(default_graph_context())
 
     assert captured["interval_check"] > 0

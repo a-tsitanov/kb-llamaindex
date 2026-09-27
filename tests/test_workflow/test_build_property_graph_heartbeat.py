@@ -51,7 +51,7 @@ async def test_pulses_during_graph_upsert(monkeypatch):
     graph_store = types.SimpleNamespace(
         upsert_nodes=slow_write, upsert_relations=slow_write,
     )
-    monkeypatch.setattr(bpg, "build_graph_store", lambda: graph_store)
+    monkeypatch.setattr(bpg, "build_graph_store", lambda graph: graph_store)
 
     beats: list[tuple] = []
     env = ActivityEnvironment()

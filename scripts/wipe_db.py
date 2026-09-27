@@ -56,6 +56,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from loguru import logger
 
 from src.config import settings
+from src.tenancy.context import default_graph_context
 from src.utils.logging import configure_logging
 
 
@@ -145,7 +146,8 @@ def wipe_nebula() -> None:
     from nebula3.gclient.net import ConnectionPool
 
     n = settings.nebula
-    logger.info("nebula wipe  {h}:{p}  space={s}", h=n.host, p=n.port, s=n.space)
+    space = default_graph_context().nebula_space
+    logger.info("nebula wipe  {h}:{p}  space={s}", h=n.host, p=n.port, s=space)
     pool = ConnectionPool()
     if not pool.init([(n.host, n.port)], Config()):
         logger.warning("nebula wipe  pool init failed — skipping graph wipe")
@@ -153,12 +155,12 @@ def wipe_nebula() -> None:
     try:
         sess = pool.get_session(n.user, n.password.get_secret_value())
         try:
-            r = sess.execute(f"DROP SPACE IF EXISTS `{n.space}`;")
+            r = sess.execute(f"DROP SPACE IF EXISTS `{space}`;")
             if r.is_succeeded():
-                logger.info("nebula  dropped space={s}", s=n.space)
+                logger.info("nebula  dropped space={s}", s=space)
             else:
                 logger.warning("nebula  DROP SPACE {s} failed: {e}",
-                               s=n.space, e=r.error_msg())
+                               s=space, e=r.error_msg())
         finally:
             sess.release()
     except Exception as exc:
@@ -377,7 +379,7 @@ def wipe_temporal() -> None:
 
 def confirm() -> bool:
     graph_line = (
-        f"Nebula space `{settings.nebula.space}` @ "
+        f"Nebula space `{default_graph_context().nebula_space}` @ "
         f"{settings.nebula.host}:{settings.nebula.port}"
     )
     print(

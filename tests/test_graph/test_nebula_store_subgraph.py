@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from src.graph.nebula_store import NebulaGraphStore
+from src.tenancy.context import default_graph_context
 
 
 class _VW:  # ValueWrapper stub
@@ -60,7 +61,7 @@ def test_subgraph_maps_to_walk_rows_shape():
                 {"rel_type": "WORKS_AT", "polarity": "pos", "valid_from": 0, "valid_to": 0})
     rs = _ResultSet([(_Cell([ivan], "n"), _Cell([edge], "e")),
                      (_Cell([mosk], "n"), _Cell([], "e"))])
-    store = NebulaGraphStore(_Session(rs))
+    store = NebulaGraphStore(_Session(rs), graph=default_graph_context())
     rows = store.subgraph("v_ivan", 2)
     assert len(rows) == 1
     ents = {e["name"] for e in rows[0]["entities"]}
@@ -79,7 +80,7 @@ def test_subgraph_skips_tagless_frontier_vertex():
     ivan = _Node("v_ivan", {"name": "Иванов", "label": "PERSON", "description": ""})
     ghost = _TaglessNode("v_ghost")
     rs = _ResultSet([(_Cell([ivan, ghost], "n"), _Cell([], "e"))])
-    store = NebulaGraphStore(_Session(rs))
+    store = NebulaGraphStore(_Session(rs), graph=default_graph_context())
     rows = store.subgraph("v_ivan", 1)  # must NOT raise
     ents = {e["name"] for e in rows[0]["entities"]}
     assert ents == {"Иванов"}  # tagless frontier vertex skipped

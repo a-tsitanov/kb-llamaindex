@@ -67,8 +67,9 @@ def _get_store() -> Any | None:
     Indirected for monkeypatching (mirrors ``community._get_store``)."""
     try:
         from src.graph.store import build_graph_store
+        from src.tenancy.context import transitional_default_graph
 
-        return build_graph_store()
+        return build_graph_store(transitional_default_graph())
     except Exception as exc:
         activity.logger.warning("global_search: graph store unavailable: %s", exc)
         return None

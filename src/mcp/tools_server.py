@@ -100,7 +100,7 @@ async def _init() -> None:
         try:
             from src.graph.retriever import GraphRetriever
             from src.graph.store import build_graph_store
-            gs = build_graph_store()
+            gs = build_graph_store(transitional_default_graph())
             # Nebula has no LlamaIndex PropertyGraphStore; use the
             # store-only retriever (nGQL awalk/find). Mirrors
             # _search_deps._get_graph_retriever.

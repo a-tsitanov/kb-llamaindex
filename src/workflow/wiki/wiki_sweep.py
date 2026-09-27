@@ -34,8 +34,9 @@ def _tally(outcomes) -> dict[str, int]:
 async def select_dirty_entities(limit: int) -> list[str]:
     from src.graph.store import build_graph_store
     from src.graph.wiki_dirty import select_dirty
+    from src.tenancy.context import transitional_default_graph
     # sync graph-store call — off the shared loop.
-    return await asyncio.to_thread(select_dirty, build_graph_store(), limit)
+    return await asyncio.to_thread(select_dirty, build_graph_store(transitional_default_graph()), limit)
 
 
 @activity.defn
@@ -50,10 +51,11 @@ async def write_entity_article(name: str) -> str:
     from src.graph.wiki_dirty import clear_dirty
     from src.graph.wiki_graph_ops import build_wiki_graph_ops
     from src.retrieval.llm_pool import get_llm_pool
+    from src.tenancy.context import transitional_default_graph
     from src.workflow.wiki._deps import get_mediawiki
     from src.workflow.wiki.article import render_bot_section, splice_bot_section
 
-    store = build_graph_store()
+    store = build_graph_store(transitional_default_graph())
     ops = build_wiki_graph_ops(store)
     # All graph-store reads/writes here are sync — off the shared loop.
     ctx = await asyncio.to_thread(

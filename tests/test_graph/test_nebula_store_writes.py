@@ -8,6 +8,7 @@ import pytest
 import src.graph.nebula_store as nebula_store_mod
 from src.config import settings
 from src.graph.nebula_store import NebulaGraphStore, entity_vid
+from src.tenancy.context import default_graph_context
 
 
 @pytest.fixture(autouse=True)
@@ -70,7 +71,7 @@ class _FakeSession:
 
 
 def _store_with_session(sess):
-    return NebulaGraphStore(sess)
+    return NebulaGraphStore(sess, graph=default_graph_context())
 
 
 def test_entity_vid_is_stable_fixed_string():

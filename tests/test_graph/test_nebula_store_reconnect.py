@@ -7,6 +7,7 @@ global-search map-reduce. _run now reconnects once and replays."""
 from __future__ import annotations
 
 from src.graph.nebula_store import NebulaGraphStore
+from src.tenancy.context import default_graph_context
 
 
 class _Resp:
@@ -43,7 +44,7 @@ class _LiveSession:
 
 def test_run_reconnects_on_expired_session():
     dead, live = _DeadSession(), _LiveSession()
-    store = NebulaGraphStore(dead, reconnect=lambda: live)
+    store = NebulaGraphStore(dead, reconnect=lambda: live, graph=default_graph_context())
     resp = store._run("MATCH (c:Community) RETURN count(c)")
     assert resp.is_succeeded()      # healed
     assert dead.calls == 1          # stale session tried once
@@ -57,7 +58,7 @@ def test_run_reconnects_on_execute_exception():
             raise RuntimeError("broken pipe")
 
     live = _LiveSession()
-    store = NebulaGraphStore(_RaisingSession(), reconnect=lambda: live)
+    store = NebulaGraphStore(_RaisingSession(), reconnect=lambda: live, graph=default_graph_context())
     resp = store._run("Q")
     assert resp.is_succeeded()
     assert live.calls == 1
@@ -65,7 +66,7 @@ def test_run_reconnects_on_execute_exception():
 
 def test_run_without_reconnect_returns_dead_resp():
     dead = _DeadSession()
-    store = NebulaGraphStore(dead)  # no reconnect → prior behaviour, no retry
+    store = NebulaGraphStore(dead, graph=default_graph_context())  # no reconnect → prior behaviour, no retry
     resp = store._run("Q")
     assert not resp.is_succeeded()
     assert dead.calls == 1
@@ -88,7 +89,7 @@ def test_run_does_not_reconnect_on_ordinary_failure():
         reconnects["n"] += 1
         return _LiveSession()
 
-    store = NebulaGraphStore(sess, reconnect=_rc)
+    store = NebulaGraphStore(sess, reconnect=_rc, graph=default_graph_context())
     resp = store._run("Q")
     assert not resp.is_succeeded()
     assert sess.calls == 1
