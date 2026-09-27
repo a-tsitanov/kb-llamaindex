@@ -44,12 +44,13 @@ from src.config import settings
 from src.mcp._shared import (
     assert_api_key_env_set,
     build_sse_auth,
+    current_graph,
     log_banner,
     parse_args,
 )
 from src.retrieval import atomic_tools
 from src.stats.align import GRANULARITIES
-from src.tenancy.context import GraphContext, transitional_default_graph
+from src.tenancy.context import GraphContext
 
 mcp = FastMCP(
     name="kb-llamaindex-tools",
@@ -165,8 +166,9 @@ async def vector_search(query: str, top_k: int = 10) -> dict[str, Any]:
     NEXT STEP: to read more around a good hit, call `get_chunks_by_doc_id`
     with its `doc_id`.
     """
+    graph = await current_graph()
     r = await atomic_tools.vector_search(
-        await _r(transitional_default_graph()), query=query, top_k=top_k,
+        await _r(graph), query=query, top_k=top_k,
     )
     return {"sources": json.loads(r.observation)}
 
@@ -186,8 +188,9 @@ async def graph_search(query: str, depth: int = 1) -> dict[str, Any]:
     `find_entity_by_name` (you have a partial name), `find_neighbours`
     (you have a known entity, want 1 hop), `graph_walk` (known entity,
     multi-hop chains). Returns empty lists if the graph store is unavailable."""
+    graph = await current_graph()
     r = await atomic_tools.graph_search(
-        await _g(transitional_default_graph()), query=query, depth=depth,
+        await _g(graph), query=query, depth=depth,
     )
     return json.loads(r.observation)
 
@@ -204,8 +207,9 @@ async def graph_walk(
     `rel_filter` relationship types. Returns entities + relations.
     NOT FOR: a single hop (use `find_neighbours`) or discovery without a
     start entity (use `graph_search` / `find_entity_by_name` first)."""
+    graph = await current_graph()
     r = await atomic_tools.graph_walk(
-        await _g(transitional_default_graph()), start_entity=start_entity, hops=hops,
+        await _g(graph), start_entity=start_entity, hops=hops,
         rel_filter=rel_filter,
     )
     return json.loads(r.observation)
@@ -222,8 +226,9 @@ async def find_entity_by_id(
     gives an exact identifier. One entity expected.
     PREFER INSTEAD: `find_entity_by_name` when you only have a partial /
     approximate name; `graph_search` for non-name semantic queries."""
+    graph = await current_graph()
     r = await atomic_tools.find_entity_by_id(
-        await _g(transitional_default_graph()), name=name, entity_type=entity_type,
+        await _g(graph), name=name, entity_type=entity_type,
     )
     return json.loads(r.observation)
 
@@ -241,8 +246,9 @@ async def find_entity_by_name(
     PREFER INSTEAD: `find_entity_by_id` for an exact identifier;
     `graph_search` for non-name semantic queries. Returns entity rows
     only (no chunks)."""
+    graph = await current_graph()
     r = await atomic_tools.find_entity_by_name(
-        await _g(transitional_default_graph()), query=query, limit=limit,
+        await _g(graph), query=query, limit=limit,
     )
     return json.loads(r.observation)
 
@@ -260,8 +266,9 @@ async def find_neighbours(
     PREFER INSTEAD: `graph_walk` for deterministic edge-following with
     rel-type filtering; `graph_search` if the entity isn't pinned down
     yet; `find_entity_*` to resolve the entity first."""
+    graph = await current_graph()
     r = await atomic_tools.find_neighbours(
-        await _g(transitional_default_graph()), entity_name=entity_name, hops=hops,
+        await _g(graph), entity_name=entity_name, hops=hops,
     )
     return json.loads(r.observation)
 
@@ -277,8 +284,9 @@ async def get_chunks_by_doc_id(
     same source, or reading a document chunk-by-chunk.
     REQUIRES: a `doc_id` you already have (from `vector_search` or graph
     results). For the whole raw file at once, see `read_full_document`."""
+    graph = await current_graph()
     r = await atomic_tools.get_chunks_by_doc_id(
-        await _c(transitional_default_graph()), doc_id=doc_id, limit=limit, offset=offset,
+        await _c(graph), doc_id=doc_id, limit=limit, offset=offset,
     )
     # Observation is either a JSON list of chunks or an error dict.
     try:
@@ -299,8 +307,9 @@ async def read_full_document(
     REQUIRES: a `doc_id`. For large documents prefer
     `get_chunks_by_doc_id` (this returns one big blob, truncated at
     `max_chars`)."""
+    graph = await current_graph()
     r = await atomic_tools.read_full_document(
-        await _c(transitional_default_graph()), doc_id=doc_id, max_chars=max_chars,
+        await _c(graph), doc_id=doc_id, max_chars=max_chars,
     )
     if r.observation.startswith("Error"):
         return {"error": r.observation}
@@ -324,9 +333,10 @@ async def graph_pagerank(top_n: int = 20) -> dict[str, Any]:
     PREFER INSTEAD: `graph_personalized_pagerank` when you want
     importance *relative to* specific seed entities. Returns top_n
     {name, score}. Empty if the graph store is unavailable."""
+    graph = await current_graph()
     from src.graph import analysis
     return {"top": await analysis.pagerank(
-        await _gs(transitional_default_graph()), top_n=top_n,
+        await _gs(graph), top_n=top_n,
     )}
 
 
@@ -341,9 +351,10 @@ async def graph_personalized_pagerank(
     `seeds` (exact entity names). Resolve names first with
     `find_entity_by_name` if unsure. Empty seeds → empty result. Returns
     top_n {name, score}; empty if the graph store is unavailable."""
+    graph = await current_graph()
     from src.graph import analysis
     return {"top": await analysis.personalized_pagerank(
-        await _gs(transitional_default_graph()), seeds, top_n=top_n,
+        await _gs(graph), seeds, top_n=top_n,
     )}
 
 
@@ -354,8 +365,9 @@ async def graph_components() -> dict[str, Any]:
     USE FOR: connectivity health — a large singleton fraction explains
     sparse/empty communities and weak multi-hop reach. Returns
     {component_count, distribution}; empty if the graph store is unavailable."""
+    graph = await current_graph()
     from src.graph import analysis
-    return await analysis.components(await _gs(transitional_default_graph()))
+    return await analysis.components(await _gs(graph))
 
 
 @mcp.tool(timeout=1800)
@@ -368,9 +380,10 @@ async def graph_shortest_path(
     between them. Resolve names first with `find_entity_by_name` if
     unsure. Returns {path:[names], hops}; {path:[], hops:-1} when there's
     no path (or the graph store is unavailable)."""
+    graph = await current_graph()
     from src.graph import analysis
     return await analysis.shortest_path(
-        await _gs(transitional_default_graph()), source, target, max_hops=max_hops,
+        await _gs(graph), source, target, max_hops=max_hops,
     )
 
 
@@ -388,8 +401,9 @@ async def graph_stats() -> dict[str, Any]:
     Nebula's own job results, exact but as old as `stats_computed_at`;
     `scan` means counted live. Degree and duplicate counts have no cheap
     equivalent and are `null` whenever the graph is too large to scan."""
+    graph = await current_graph()
     from src.graph import analysis
-    return await analysis.graph_stats(await _gs(transitional_default_graph()))
+    return await analysis.graph_stats(await _gs(graph))
 
 
 # ── ingest statistics (Postgres `documents` pipeline) ──────────────
@@ -405,6 +419,7 @@ async def graph_stats() -> dict[str, Any]:
 
 async def _stats_by(
     group_by: str, since: str | None, until: str | None,
+    *, graph: GraphContext,
 ) -> dict[str, Any]:
     from datetime import date
 
@@ -418,7 +433,7 @@ async def _stats_by(
         u = date.fromisoformat(until) if until else None
     except ValueError as exc:
         return {"error": f"since/until must be ISO YYYY-MM-DD: {exc}"}
-    rows = await AsyncPostgres(graph=transitional_default_graph()).status_counts_by(
+    rows = await AsyncPostgres(graph=graph).status_counts_by(
         dimension, since=s, until=u,
     )
     return {"group_by": group_by, "rows": rows}
@@ -427,6 +442,7 @@ async def _stats_by(
 async def _timeline(
     date_field: str, group_by: str | None, channel: str | None,
     group: str | None, since: str | None, until: str | None,
+    *, graph: GraphContext,
 ) -> dict[str, Any]:
     from datetime import date
 
@@ -441,7 +457,7 @@ async def _timeline(
         u = date.fromisoformat(until) if until else None
     except ValueError as exc:
         return {"error": f"since/until must be ISO YYYY-MM-DD: {exc}"}
-    buckets = await AsyncPostgres(graph=transitional_default_graph()).timeline_counts(
+    buckets = await AsyncPostgres(graph=graph).timeline_counts(
         date_field=date_field, group_by=group_by,
         channel=channel, group=group, since=s, until=u,
     )
@@ -568,7 +584,8 @@ async def channel_message_stats(
     Documents with no channel tag are excluded.
     NOT FOR: message CONTENT / semantic search (use `vector_search`) or graph
     entities. NEXT STEP: for daily dynamics call `channel_message_timeline`."""
-    return await _stats_by(group_by, since, until)
+    graph = await current_graph()
+    return await _stats_by(group_by, since, until, graph=graph)
 
 
 @mcp.tool(timeout=120)
@@ -590,7 +607,10 @@ async def channel_message_timeline(
     `group`. `since` / `until` are ISO `YYYY-MM-DD` bounds. Returns
     `{date_field, buckets:[{day, count[, key]}]}`, ordered by day.
     NOT FOR: per-channel status totals (use `channel_message_stats`)."""
-    return await _timeline(date_field, group_by, channel, group, since, until)
+    graph = await current_graph()
+    return await _timeline(
+        date_field, group_by, channel, group, since, until, graph=graph,
+    )
 
 
 @mcp.tool(timeout=1800)
@@ -614,8 +634,9 @@ async def topic_trend(
     as "this topic was never mentioned".
     NOT FOR: ingest volume (use `channel_message_timeline`) or message
     content (use `vector_search`)."""
+    graph = await current_graph()
     return await _topic_trend(
-        await _gs(transitional_default_graph()), topic, granularity, since, until,
+        await _gs(graph), topic, granularity, since, until,
     )
 
 
@@ -643,8 +664,9 @@ async def polarity_evolution(
     value}` points yourself.
     NOT FOR: mention counts (use `topic_trend`, whose rows DO feed
     `stat_align` unchanged)."""
+    graph = await current_graph()
     return await _polarity_evolution(
-        await _gs(transitional_default_graph()), name, rel_type,
+        await _gs(graph), name, rel_type,
     )
 
 

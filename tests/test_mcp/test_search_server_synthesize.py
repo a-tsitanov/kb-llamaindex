@@ -54,27 +54,27 @@ def _fake_ctx() -> MagicMock:
 def test_local_params_default_synthesize_true():
     from src.mcp.search_server import _local_params
 
-    assert _local_params("q").synthesize is True
+    assert _local_params("q", graph_id="default").synthesize is True
 
 
 def test_local_params_carries_synthesize_false():
     from src.mcp.search_server import _local_params
 
-    assert _local_params("q", synthesize=False).synthesize is False
+    assert _local_params("q", graph_id="default", synthesize=False).synthesize is False
 
 
 def test_global_params_default_synthesize_true():
     from src.mcp.search_server import _global_params
 
-    assert _global_params("q").synthesize is True
+    assert _global_params("q", graph_id="default").synthesize is True
 
 
 def test_global_params_carries_synthesize_false():
     from src.mcp.search_server import _global_params
 
-    assert _global_params("q", synthesize=False).synthesize is False
+    assert _global_params("q", graph_id="default", synthesize=False).synthesize is False
     # drift_mode is independent of synthesize — both should thread through.
-    p = _global_params("q", drift_mode=True, synthesize=False)
+    p = _global_params("q", graph_id="default", drift_mode=True, synthesize=False)
     assert p.drift_mode is True
     assert p.synthesize is False
 

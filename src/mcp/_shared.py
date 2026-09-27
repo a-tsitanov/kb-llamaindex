@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from fastapi import HTTPException
+from fastmcp.exceptions import ToolError
+from fastmcp.server.auth import AccessToken, TokenVerifier
+from fastmcp.server.dependencies import get_access_token, get_http_headers
 from loguru import logger
 
+from src.api.graph_dep import choose_graph_id
 from src.config import settings
-
-if TYPE_CHECKING:
-    from fastmcp.server.auth import StaticTokenVerifier
+from src.tenancy.api_keys import ApiKeyRecord, get_api_key_store
+from src.tenancy.context import DEFAULT_GRAPH_ID, GraphContext
+from src.tenancy.registry import GraphNotFound, GraphNotReady, get_graph_registry
 
 
 def _auth_required() -> bool:
@@ -73,15 +78,82 @@ def is_valid_key(provided: str) -> bool:
     return provided in settings.api.keys_list
 
 
-def build_sse_auth() -> StaticTokenVerifier | None:
+class RegistryTokenVerifier(TokenVerifier):
+    """Bearer token = API key, looked up in the API-key registry
+    (``public.api_keys`` with the legacy env ``API_KEYS`` fallback).
+
+    The resulting ``AccessToken.claims`` carry the key's graphs so every
+    tool call can bind itself to one graph via :func:`current_graph`
+    (R-A4)."""
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        rec = await get_api_key_store().lookup(token)
+        if rec is None:
+            return None
+        return AccessToken(
+            token=token,
+            client_id=rec.owner,
+            scopes=[],
+            claims={
+                "owner": rec.owner,
+                "graph_ids": list(rec.graph_ids),
+                "is_admin": rec.is_admin,
+            },
+        )
+
+
+def _configured_mcp_graph() -> str:
+    """Graph used when there is no access token (stdio / auth disabled).
+
+    Read from ``KB_MCP_GRAPH`` the same way ``KB_MCP_REQUIRE_AUTH`` is
+    (plain env, not a settings field); default ``"default"``."""
+    return os.environ.get("KB_MCP_GRAPH", "").strip() or DEFAULT_GRAPH_ID
+
+
+async def current_graph() -> GraphContext:
+    """Resolve the graph this tool call is bound to.
+
+    * HTTP with a verified token: same rules as the REST API
+      (``choose_graph_id`` over the token's claims + ``X-Graph`` header).
+    * No token (stdio, or auth disabled): the configured ``KB_MCP_GRAPH``.
+
+    The graph is always resolved through the registry.  Every refusal
+    raises ``ToolError`` — there is no silent fallback to the default
+    graph (R-A4)."""
+    tok = get_access_token()
+    if tok is None:
+        gid = _configured_mcp_graph()
+    else:
+        c = tok.claims or {}
+        if "graph_ids" not in c:
+            raise ToolError("access token carries no graph claims")
+        key = ApiKeyRecord(
+            owner=str(c.get("owner", "")),
+            graph_ids=tuple(c["graph_ids"]),
+            is_admin=bool(c.get("is_admin", False)),
+        )
+        headers = get_http_headers(include={"x-graph"})
+        try:
+            gid = choose_graph_id(key, headers.get("x-graph"))
+        except HTTPException as exc:
+            raise ToolError(str(exc.detail)) from None
+    try:
+        return await get_graph_registry().get(gid)
+    except GraphNotFound:
+        raise ToolError(f"graph {gid!r} not found") from None
+    except GraphNotReady as exc:
+        raise ToolError(f"graph {gid!r} is {exc.status}") from None
+
+
+def build_sse_auth() -> RegistryTokenVerifier | None:
     """Build a FastMCP auth provider for HTTP/SSE transports.
 
-    Returns a ``StaticTokenVerifier`` seeded with the configured API
-    keys when ``KB_MCP_REQUIRE_AUTH`` is on and keys exist; otherwise
-    ``None`` (auth disabled — stdio/desktop usage).  The verifier
-    validates the incoming ``Authorization: Bearer <key>`` header
-    against the configured key set.  Enforced only on HTTP/SSE
-    transports; stdio is unaffected.
+    Returns a ``RegistryTokenVerifier`` when ``KB_MCP_REQUIRE_AUTH`` is
+    on and env API keys exist; otherwise ``None`` (auth disabled —
+    stdio/desktop usage).  The verifier validates the incoming
+    ``Authorization: Bearer <key>`` header against the API-key registry
+    (DB keys + legacy env keys) and carries the key's graphs as claims.
+    Enforced only on HTTP/SSE transports; stdio is unaffected.
 
     The result is computed once at import time (when the server module
     is loaded), not lazily per request.
@@ -96,13 +168,7 @@ def build_sse_auth() -> StaticTokenVerifier | None:
             "or KB_MCP_REQUIRE_AUTH=false.",
         )
         return None
-    from fastmcp.server.auth import StaticTokenVerifier
-    return StaticTokenVerifier(
-        tokens={
-            k: {"sub": "kb-mcp-client", "client_id": "kb"}
-            for k in keys
-        },
-    )
+    return RegistryTokenVerifier()
 
 
 def log_banner(server_name: str, transport: str, host: str, port: int) -> None:

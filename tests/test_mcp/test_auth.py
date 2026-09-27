@@ -26,18 +26,36 @@ def test_build_sse_auth_returns_none_when_no_keys(monkeypatch):
 
 
 def test_build_sse_auth_builds_verifier_with_keys(monkeypatch):
-    from fastmcp.server.auth import StaticTokenVerifier
-
     monkeypatch.setenv("KB_MCP_REQUIRE_AUTH", "true")
     monkeypatch.setattr(
         _shared, "settings",
         SimpleNamespace(api=SimpleNamespace(keys_list=["secret-key", "k2"])),
     )
     auth = _shared.build_sse_auth()
-    assert isinstance(auth, StaticTokenVerifier)
-    assert "secret-key" in auth.tokens
-    assert "k2" in auth.tokens
-    assert auth.tokens["secret-key"]["client_id"] == "kb"
+    # Bearer tokens are verified against the API-key registry (DB keys +
+    # legacy env keys), not a static token table.
+    assert isinstance(auth, _shared.RegistryTokenVerifier)
+
+
+async def test_registry_verifier_accepts_legacy_env_key(monkeypatch):
+    """An env API_KEYS key still authenticates (registry env fallback) and
+    is bound to the default graph as an admin key."""
+    from src.tenancy import api_keys
+
+    async def _no_row(_h):
+        return None
+    monkeypatch.setattr(
+        api_keys, "settings",
+        SimpleNamespace(api=SimpleNamespace(keys_list=["secret-key"])),
+    )
+    monkeypatch.setattr(
+        _shared, "get_api_key_store", lambda: api_keys.ApiKeyStore(loader=_no_row),
+    )
+    tok = await _shared.RegistryTokenVerifier().verify_token("secret-key")
+    assert tok is not None
+    assert tok.client_id == "legacy-env"
+    assert tok.claims == {"owner": "legacy-env", "graph_ids": ["default"], "is_admin": True}
+    assert await _shared.RegistryTokenVerifier().verify_token("wrong") is None
 
 
 def test_both_servers_wire_sse_auth(monkeypatch):
@@ -45,8 +63,6 @@ def test_both_servers_wire_sse_auth(monkeypatch):
     server constructors. Reload the server modules with auth required +
     a key configured, and assert each module's `mcp.auth` is set."""
     import importlib
-
-    from fastmcp.server.auth import StaticTokenVerifier
 
     monkeypatch.setenv("KB_MCP_REQUIRE_AUTH", "true")
     # build_sse_auth reads _shared.settings.api.keys_list — patch it so a
@@ -62,5 +78,5 @@ def test_both_servers_wire_sse_auth(monkeypatch):
     tools_server = importlib.reload(tools_server)
     search_server = importlib.reload(search_server)
 
-    assert isinstance(tools_server.mcp.auth, StaticTokenVerifier)
-    assert isinstance(search_server.mcp.auth, StaticTokenVerifier)
+    assert isinstance(tools_server.mcp.auth, _shared.RegistryTokenVerifier)
+    assert isinstance(search_server.mcp.auth, _shared.RegistryTokenVerifier)

@@ -40,3 +40,10 @@ def _offline_graph_registry(monkeypatch):
     monkeypatch.setattr(reg, "get_graph_registry", lambda: _Stub())
     import src.tenancy.activity as ta
     monkeypatch.setattr(ta, "get_graph_registry", lambda: _Stub())
+    # MCP servers bind every tool call via ``src.mcp._shared.current_graph``,
+    # which resolves through the registry name imported into ``_shared``.
+    # Patch it only when already imported (fastmcp is heavy; see above).
+    import sys
+    sh = sys.modules.get("src.mcp._shared")
+    if sh is not None:
+        monkeypatch.setattr(sh, "get_graph_registry", lambda: _Stub())

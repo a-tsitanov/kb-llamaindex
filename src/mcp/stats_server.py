@@ -30,12 +30,13 @@ from src.config import settings
 from src.mcp._shared import (
     assert_api_key_env_set,
     build_sse_auth,
+    current_graph,
     log_banner,
     parse_args,
 )
 from src.stats.align import GRANULARITIES, VALUE_KINDS, align
 from src.storage.stats import StatsRepository
-from src.tenancy.context import transitional_default_graph
+from src.tenancy.context import GraphContext
 
 mcp = FastMCP(
     name="kb-llamaindex-stats",
@@ -58,8 +59,8 @@ mcp = FastMCP(
 _MAX_SEARCH_LIMIT = 100
 
 
-def _repo() -> StatsRepository:
-    return StatsRepository(graph=transitional_default_graph())
+def _repo(graph: GraphContext) -> StatsRepository:
+    return StatsRepository(graph=graph)
 
 
 def _parse_date(value: str | None, field: str) -> tuple[date | None, str | None]:
@@ -234,7 +235,8 @@ async def stat_indicators_search(
     the box) when omitted.
     NOT FOR: values (use `stat_series`) or document text (use MCP-2
     `vector_search`)."""
-    return await _indicators_search(_repo(), query, source, limit)
+    graph = await current_graph()
+    return await _indicators_search(_repo(graph), query, source, limit)
 
 
 @mcp.tool(timeout=120)
@@ -259,7 +261,8 @@ async def stat_series(
     `dims` before aligning.  READ `warnings`.
     NEXT STEP: to compare against channel attention, fetch a series
     with MCP-2 `topic_trend` and pass both to `stat_align`."""
-    return await _series(_repo(), indicator_id, since, until, dims)
+    graph = await current_graph()
+    return await _series(_repo(graph), indicator_id, since, until, dims)
 
 
 @mcp.tool(timeout=120)
@@ -294,6 +297,9 @@ async def stat_align(
     `low_overlap:*` means too few common periods for the correlation to
     mean anything.
     Do NOT compute these numbers yourself; this tool is the arithmetic."""
+    # Pure arithmetic — reads no graph data — but the call is still bound
+    # to (and refused for) the connection's graph like every other tool.
+    await current_graph()
     return _align_tool(
         series_a, series_b, granularity, value_kind_a, value_kind_b, max_lag,
     )

@@ -41,6 +41,7 @@ from src.config import settings
 from src.mcp._shared import (
     assert_api_key_env_set,
     build_sse_auth,
+    current_graph,
     log_banner,
     parse_args,
 )
@@ -81,6 +82,7 @@ def _local_params(
     max_refinements: int = 3,
     bounds: DateBounds | None = None,
     *,
+    graph_id: str,
     synthesize: bool = True,
 ) -> OrchestratorParams:
     """Build OrchestratorParams for the local plan-execute flow,
@@ -100,6 +102,7 @@ def _local_params(
     b = bounds or DateBounds()
     return OrchestratorParams(
         query=query,
+        graph_id=graph_id,
         max_subqueries=settings.agent.max_subqueries,
         max_refinements=max_refinements,
         coverage_check_enabled=settings.agent.coverage_check_enabled,
@@ -155,7 +158,7 @@ def _bounds_or_error(
 
 
 def _global_params(
-    query: str, *, drift_mode: bool = False, synthesize: bool = True,
+    query: str, *, graph_id: str, drift_mode: bool = False, synthesize: bool = True,
 ) -> GlobalSearchParams:
     """Build GlobalSearchParams, mirroring the FastAPI ``/search/global``
     and ``/search/drift`` route defaults.
@@ -164,6 +167,7 @@ def _global_params(
     the REDUCE step's large-model write-up (``answer == ""``)."""
     return GlobalSearchParams(
         query=query,
+        graph_id=graph_id,
         level=0,
         max_communities=settings.agent.global_max_communities,
         drift_mode=drift_mode,
@@ -282,10 +286,13 @@ async def kb_search(
       `step_stats` are unchanged.
       On a malformed date param: {"error": str, "field": str} instead.
     """
+    graph = await current_graph()
     bounds = _bounds_or_error(doc_date_after, doc_date_before, created_after, created_before)
     if isinstance(bounds, dict):
         return bounds
-    params = _local_params(query, max_refinements, bounds, synthesize=synthesize)
+    params = _local_params(
+        query, max_refinements, bounds, graph_id=graph.id, synthesize=synthesize,
+    )
     handle = await (await get_temporal_client()).start_workflow(
         SearchOrchestratorWorkflow.run,
         params,
@@ -333,7 +340,8 @@ async def kb_global_search(
     come back empty — they are products of the REDUCE synthesis you
     skipped; `sources` and `step_stats` are unchanged.
     """
-    params = _global_params(query, synthesize=synthesize)
+    graph = await current_graph()
+    params = _global_params(query, graph_id=graph.id, synthesize=synthesize)
     handle = await (await get_temporal_client()).start_workflow(
         GlobalSearchWorkflow.run,
         params,
@@ -388,17 +396,20 @@ async def kb_drift_search(
     synthesis you skipped; `sources` and `step_stats` are unchanged.  On a
     malformed date param: {"error": str, "field": str} instead.
     """
+    graph = await current_graph()
     bounds = _bounds_or_error(doc_date_after, doc_date_before, created_after, created_before)
     if isinstance(bounds, dict):
         return bounds
-    local = _local_params(query, bounds=bounds, synthesize=synthesize)
+    local = _local_params(query, bounds=bounds, graph_id=graph.id, synthesize=synthesize)
     handle = await (await get_temporal_client()).start_workflow(
         DriftSearchWorkflow.run,
         # drift_mode=True mirrors the FastAPI /search/drift route; the
         # workflow also forces it internally, so this is defensive.
         args=[
             local,
-            _global_params(query, drift_mode=True, synthesize=synthesize),
+            _global_params(
+                query, graph_id=graph.id, drift_mode=True, synthesize=synthesize,
+            ),
         ],
         id=graph_scoped_id("mcp-drift", local.graph_id, uuid.uuid4().hex),
         task_queue=settings.temporal.search_task_queue,
@@ -445,15 +456,16 @@ async def kb_auto_search(
     `sources` and `step_stats` are unchanged.  On a malformed date param:
     {"error": str, "field": str} instead.
     """
+    graph = await current_graph()
     bounds = _bounds_or_error(doc_date_after, doc_date_before, created_after, created_before)
     if isinstance(bounds, dict):
         return bounds
-    local = _local_params(query, bounds=bounds, synthesize=synthesize)
+    local = _local_params(query, bounds=bounds, graph_id=graph.id, synthesize=synthesize)
     handle = await (await get_temporal_client()).start_workflow(
         AutoSearchWorkflow.run,
         args=[
             local,
-            _global_params(query, synthesize=synthesize),
+            _global_params(query, graph_id=graph.id, synthesize=synthesize),
         ],
         id=graph_scoped_id("mcp-auto", local.graph_id, uuid.uuid4().hex),
         task_queue=settings.temporal.search_task_queue,
@@ -473,7 +485,8 @@ async def kb_analyze(query: str, ctx: Context, top_n: int = 20) -> dict[str, Any
     from src.analytics.contracts import AnalyzeParams
     from src.workflow.analytics.workflow import AnalyticalQueryWorkflow
 
-    params = AnalyzeParams(query=query, top_n=top_n)
+    graph = await current_graph()
+    params = AnalyzeParams(query=query, top_n=top_n, graph_id=graph.id)
     handle = await (await get_temporal_client()).start_workflow(
         AnalyticalQueryWorkflow.run,
         params,

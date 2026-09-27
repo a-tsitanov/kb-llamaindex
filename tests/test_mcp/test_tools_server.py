@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pytest
 
+from src.tenancy.context import default_graph_context
+
 _EXPECTED_TOOLS = {
     "vector_search",
     "graph_search",
@@ -138,7 +140,7 @@ async def test_channel_message_stats_maps_group_by_and_calls_pg(monkeypatch):
     m = AsyncMock(return_value=fake)
     monkeypatch.setattr(AsyncPostgres, "status_counts_by", m)
 
-    out = await tools_server._stats_by("group", None, None)
+    out = await tools_server._stats_by("group", None, None, graph=default_graph_context())
     assert out == {"group_by": "group", "rows": fake}
     # 'group' → source_group dimension, passed positionally to the method.
     assert m.call_args.args[0] == "source_group"
@@ -147,14 +149,14 @@ async def test_channel_message_stats_maps_group_by_and_calls_pg(monkeypatch):
 @pytest.mark.asyncio
 async def test_channel_message_stats_bad_group_by_errors():
     from src.mcp import tools_server
-    out = await tools_server._stats_by("bogus", None, None)
+    out = await tools_server._stats_by("bogus", None, None, graph=default_graph_context())
     assert "error" in out
 
 
 @pytest.mark.asyncio
 async def test_channel_message_stats_bad_date_errors():
     from src.mcp import tools_server
-    out = await tools_server._stats_by("channel", "not-a-date", None)
+    out = await tools_server._stats_by("channel", "not-a-date", None, graph=default_graph_context())
     assert "error" in out
 
 
@@ -170,7 +172,9 @@ async def test_channel_message_timeline_stringifies_day(monkeypatch):
         AsyncPostgres, "timeline_counts",
         AsyncMock(return_value=[{"day": date(2026, 7, 21), "count": 5}]),
     )
-    out = await tools_server._timeline("doc_date", None, None, None, None, None)
+    out = await tools_server._timeline(
+        "doc_date", None, None, None, None, None, graph=default_graph_context(),
+    )
     assert out["date_field"] == "doc_date"
     assert out["buckets"] == [{"day": "2026-07-21", "count": 5}]
 
@@ -178,7 +182,9 @@ async def test_channel_message_timeline_stringifies_day(monkeypatch):
 @pytest.mark.asyncio
 async def test_channel_message_timeline_bad_date_field_errors():
     from src.mcp import tools_server
-    out = await tools_server._timeline("bogus", None, None, None, None, None)
+    out = await tools_server._timeline(
+        "bogus", None, None, None, None, None, graph=default_graph_context(),
+    )
     assert "error" in out
 
 
