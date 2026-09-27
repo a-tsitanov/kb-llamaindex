@@ -19,6 +19,7 @@ from src.storage.chunk_repository import (
     _read_file_capped,
 )
 from src.storage.postgres import DocumentRow
+from src.tenancy.context import default_graph_context
 
 # ── stubs ────────────────────────────────────────────────────────────
 
@@ -147,6 +148,7 @@ async def test_get_chunks_by_doc_id_sorts_by_position() -> None:
         {"id": "c2", "text": "second", "doc_id": did, "position": 1},
     ])
     repo = ChunkRepository(
+        graph=default_graph_context(),
         milvus_client=milvus, collection="kb_llamaindex", pg=_StubPG(docs={}),
     )
     chunks = await repo.aget_chunks_by_doc_id(did)
@@ -160,6 +162,7 @@ async def test_get_chunks_by_doc_id_uses_filter() -> None:
     milvus = _StubMilvus(rows=[])
     valid_id = str(uuid.uuid4())
     repo = ChunkRepository(
+        graph=default_graph_context(),
         milvus_client=milvus, collection="some_coll", pg=_StubPG(docs={}),
     )
     await repo.aget_chunks_by_doc_id(valid_id, limit=5, offset=10)
@@ -175,6 +178,7 @@ async def test_get_chunks_by_doc_id_rejects_non_uuid() -> None:
     interpolated into a Milvus filter expression (filter injection)."""
     milvus = _StubMilvus(rows=[])
     repo = ChunkRepository(
+        graph=default_graph_context(),
         milvus_client=milvus, collection="some_coll", pg=_StubPG(docs={}),
     )
     for bad in ('not-a-uuid', 'd1" or doc_id != "', "1; drop", ""):
@@ -195,6 +199,7 @@ async def test_get_chunks_by_doc_id_sorts_by_position_with_uuid() -> None:
         {"id": "c2", "text": "second", "doc_id": did, "position": 1},
     ])
     repo = ChunkRepository(
+        graph=default_graph_context(),
         milvus_client=milvus, collection="kb_llamaindex", pg=_StubPG(docs={}),
     )
     chunks = await repo.aget_chunks_by_doc_id(did)
@@ -206,6 +211,7 @@ async def test_get_chunks_by_doc_id_sorts_by_position_with_uuid() -> None:
 async def test_get_document_path_returns_postgres_value() -> None:
     valid_id = str(uuid.uuid4())
     repo = ChunkRepository(
+        graph=default_graph_context(),
         milvus_client=_StubMilvus(rows=[]),
         collection="x",
         pg=_StubPG(docs={valid_id: "/tmp/file.txt"}),
@@ -223,6 +229,7 @@ async def test_read_document_text_returns_capped(tmp_path: Path) -> None:
     f.write_text("a" * 500)
     valid_id = str(uuid.uuid4())
     repo = ChunkRepository(
+        graph=default_graph_context(),
         milvus_client=_StubMilvus(rows=[]),
         collection="x",
         pg=_StubPG(docs={valid_id: str(f)}),
@@ -237,6 +244,7 @@ async def test_read_document_text_returns_capped(tmp_path: Path) -> None:
 async def test_read_document_text_missing_file_returns_none(tmp_path: Path) -> None:
     valid_id = str(uuid.uuid4())
     repo = ChunkRepository(
+        graph=default_graph_context(),
         milvus_client=_StubMilvus(rows=[]),
         collection="x",
         pg=_StubPG(docs={valid_id: str(tmp_path / "ghost.txt")}),
@@ -254,6 +262,7 @@ async def test_read_document_text_streams_from_minio_for_s3_path(
     s3_uri = f"s3://kb-uploads/{valid_id}/doc.txt"
     minio = _StubMinio(objects={s3_uri: b"a" * 500}, download_dir=tmp_path)
     repo = ChunkRepository(
+        graph=default_graph_context(),
         milvus_client=_StubMilvus(rows=[]),
         collection="x",
         pg=_StubPG(docs={valid_id: s3_uri}),
@@ -273,6 +282,7 @@ async def test_read_document_text_s3_missing_object_returns_none(
     s3_uri = f"s3://kb-uploads/{valid_id}/doc.txt"
     minio = _StubMinio(objects={}, download_dir=tmp_path)  # object absent
     repo = ChunkRepository(
+        graph=default_graph_context(),
         milvus_client=_StubMilvus(rows=[]),
         collection="x",
         pg=_StubPG(docs={valid_id: s3_uri}),

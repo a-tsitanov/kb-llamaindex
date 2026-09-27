@@ -51,11 +51,17 @@ def test_vector_stores_are_milvus(monkeypatch):
     from src.graph import entity_vector_store_milvus as em
     from src.graph.community_vector_store import build_community_report_vector_store
     from src.graph.entity_vector_store import build_entity_vector_store
+    from src.tenancy.context import default_graph_context
 
-    monkeypatch.setattr(cm.MilvusCommunityReportVectorStore, "__init__", lambda self: None)
-    monkeypatch.setattr(em.MilvusEntityVectorStore, "__init__", lambda self: None)
-    assert type(build_community_report_vector_store(object())).__name__ == "MilvusCommunityReportVectorStore"
-    assert type(build_entity_vector_store(object())).__name__ == "MilvusEntityVectorStore"
+    monkeypatch.setattr(
+        cm.MilvusCommunityReportVectorStore, "__init__", lambda self, *a, **k: None,
+    )
+    monkeypatch.setattr(
+        em.MilvusEntityVectorStore, "__init__", lambda self, *a, **k: None,
+    )
+    g = default_graph_context()
+    assert type(build_community_report_vector_store(g)).__name__ == "MilvusCommunityReportVectorStore"
+    assert type(build_entity_vector_store(g)).__name__ == "MilvusEntityVectorStore"
 
 
 def test_er_composite_wraps_nebula_graph_ops(monkeypatch):

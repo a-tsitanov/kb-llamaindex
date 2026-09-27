@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import src.graph.community_vector_store as cvs
+from src.tenancy.context import default_graph_context
 
 
 def test_factory_returns_milvus(monkeypatch):
@@ -12,4 +13,4 @@ def test_factory_returns_milvus(monkeypatch):
     import src.graph.community_vector_store_milvus as cvsm
     sentinel = object()
     monkeypatch.setattr(cvsm, "MilvusCommunityReportVectorStore", lambda *a, **k: sentinel)
-    assert cvs.build_community_report_vector_store(object()) is sentinel
+    assert cvs.build_community_report_vector_store(default_graph_context()) is sentinel

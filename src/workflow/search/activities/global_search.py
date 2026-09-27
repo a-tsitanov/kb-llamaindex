@@ -107,7 +107,7 @@ async def select_communities_semantic(
     Fail-open: returns ``[]`` on ANY error (store-build, knn, or mapping)
     so the caller can fall back to the lexical path."""
     try:
-        report_store = build_community_report_vector_store(store)
+        report_store = build_community_report_vector_store(store.graph)
         rows = await asyncio.to_thread(
             report_store.knn, query_vec, level=level, limit=max(0, limit),
         )
@@ -153,7 +153,7 @@ def _attach_report_vecs_nebula(store: Any, rows: list[dict]) -> list[dict]:
     store can't fetch vectors."""
     from src.graph.community_vector_store import build_community_report_vector_store
 
-    fetch = getattr(build_community_report_vector_store(store), "fetch_vectors", None)
+    fetch = getattr(build_community_report_vector_store(store.graph), "fetch_vectors", None)
     if not callable(fetch):
         return []
     refs = [(str(r["community_id"]), int(r.get("level") or 0)) for r in rows]

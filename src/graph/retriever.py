@@ -211,7 +211,7 @@ class GraphRetriever:
         from src.ingestion.embeddings import build_embedding_model
 
         vec = await build_embedding_model().aget_text_embedding(query)
-        evs = build_entity_vector_store(self._graph_store)
+        evs = build_entity_vector_store(self._graph_store.graph)
         cands = await asyncio.to_thread(evs.knn, vec, self._similarity_top_k)
         # EntityCandidate is a TypedDict (a dict), not an attr object.
         return [c.get("name") for c in cands if isinstance(c, dict) and c.get("name")]

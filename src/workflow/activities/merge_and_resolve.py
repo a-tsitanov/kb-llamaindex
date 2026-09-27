@@ -275,7 +275,7 @@ async def merge_and_resolve(kg: KGExtracted) -> Merged:
         from src.graph.entity_vector_store import build_entity_vector_store
         # ER candidate-kNN + canonical upsert go through the Milvus-backed
         # EntityVectorStore seam.
-        vector_store = build_entity_vector_store(graph_store)
+        vector_store = build_entity_vector_store(graph_store.graph)
         pre_er_count = len(merged_entities)
         # ER on a dense-entity doc issues thousands of LLM judge-pairs and can
         # run far past the 15-min heartbeat_timeout; resolve_entities emits no

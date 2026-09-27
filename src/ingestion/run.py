@@ -27,6 +27,7 @@ from src.retrieval.vector_index import (
     build_vector_store,
     index_nodes,
 )
+from src.tenancy.context import transitional_default_graph
 from src.utils.logging import configure_logging
 
 
@@ -73,7 +74,9 @@ def main() -> None:
     nodes = pipeline.run(documents=docs)
     logger.info("pipeline produced {n} nodes", n=len(nodes))
 
-    vector_store = build_vector_store(overwrite=args.overwrite_collection)
+    vector_store = build_vector_store(
+        transitional_default_graph(), overwrite=args.overwrite_collection,
+    )
     index = build_vector_index(vector_store, embed_model)
     inserted = index_nodes(index, nodes)
     logger.info("inserted {n} nodes into Milvus", n=inserted)

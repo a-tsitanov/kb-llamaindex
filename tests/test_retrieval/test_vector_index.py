@@ -21,6 +21,7 @@ from src.retrieval.vector_index import (
     build_vector_store,
     index_nodes,
 )
+from src.tenancy.context import default_graph_context
 
 
 def _three_docs() -> list[Document]:
@@ -80,7 +81,7 @@ def test_build_vector_store_passes_ann_index_config() -> None:
     """build_vector_store must hand Milvus an explicit index_config so the
     collection is NOT created with the brute-force FLAT default."""
     with patch("src.retrieval.vector_index.MilvusVectorStore") as MVS:
-        build_vector_store()
+        build_vector_store(default_graph_context())
     _, kwargs = MVS.call_args
     assert kwargs["index_config"]["index_type"] == settings.milvus.index_type
     assert "search_config" in kwargs

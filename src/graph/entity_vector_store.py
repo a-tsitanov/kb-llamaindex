@@ -10,7 +10,10 @@ collection, which returns candidates WITH their embeddings (ER's
 
 from __future__ import annotations
 
-from typing import Any, Protocol, TypedDict, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, TypedDict, runtime_checkable
+
+if TYPE_CHECKING:
+    from src.tenancy.context import GraphContext
 
 
 class EntityCandidate(TypedDict):
@@ -27,7 +30,7 @@ class EntityVectorStore(Protocol):
     def upsert(self, entities: list[EntityCandidate]) -> None: ...
 
 
-def build_entity_vector_store(graph_store: Any) -> EntityVectorStore:
+def build_entity_vector_store(graph: GraphContext) -> EntityVectorStore:
     from src.graph.entity_vector_store_milvus import MilvusEntityVectorStore
 
-    return MilvusEntityVectorStore()
+    return MilvusEntityVectorStore(collection=graph.er_vec_collection)

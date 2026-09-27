@@ -94,8 +94,9 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("backfill doc_id: {n} registered documents", n=len(path_to_doc))
 
     client = MilvusClient(uri=settings.milvus.uri, timeout=settings.milvus.timeout_s)
-    collection = settings.milvus.collection
-    store = build_vector_store()
+    graph = default_graph_context()
+    collection = graph.chunks_collection
+    store = build_vector_store(graph)
 
     totals = BackfillStats()
     for page in _iter_rows(client, collection, args.batch_size):

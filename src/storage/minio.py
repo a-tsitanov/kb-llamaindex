@@ -21,6 +21,7 @@ from minio import Minio
 from minio.error import S3Error
 
 from src.config import MinioSettings, settings
+from src.tenancy.context import GraphContext
 
 
 class MinioStorage:
@@ -135,6 +136,11 @@ class MinioStorage:
         return bucket, key
 
 
+def graph_object_key(graph: GraphContext, key: str) -> str:
+    """MinIO object key inside the graph's prefix (`default` keeps legacy unprefixed keys)."""
+    return f"{graph.minio_prefix}{key}"
+
+
 @functools.cache
 def build_minio_storage() -> MinioStorage:
     """Module-level singleton.  Calls `ensure_bucket()` on first build
@@ -149,4 +155,5 @@ __all__ = [
     "MinioStorage",
     "S3Error",
     "build_minio_storage",
+    "graph_object_key",
 ]

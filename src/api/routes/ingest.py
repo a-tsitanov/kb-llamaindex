@@ -26,7 +26,7 @@ from src.config import settings
 from src.ingest_queue.priorities import PRIO_LIVE
 from src.retrieval.date_filters import iso_to_epoch_days, today_epoch_days
 from src.retrieval.groups import GROUP_SET
-from src.storage.minio import S3Error, build_minio_storage
+from src.storage.minio import S3Error, build_minio_storage, graph_object_key
 from src.storage.postgres import AsyncPostgres
 from src.tenancy.context import transitional_default_graph
 from src.workflow.client import get_temporal_client
@@ -122,7 +122,7 @@ async def upload_document(
     doc_id = uuid.uuid4()
     # Object key keeps the original filename so the worker can pick the
     # right SimpleDirectoryReader extension handler after download.
-    object_key = f"{doc_id}/{file.filename}"
+    object_key = graph_object_key(transitional_default_graph(), f"{doc_id}/{file.filename}")
 
     # Read the full body into memory.  Large PDFs (~hundreds of MB)
     # should arrive via presigned URLs in a future iteration; the

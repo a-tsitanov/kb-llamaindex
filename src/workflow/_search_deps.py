@@ -50,7 +50,7 @@ async def _build_retriever_once():
     from src.ingestion.embeddings import build_embedding_model
     from src.retrieval.vector_index import build_vector_index, build_vector_store
     embed = build_embedding_model()
-    store = build_vector_store()
+    store = build_vector_store(transitional_default_graph())
     index = build_vector_index(store, embed)
     # Stash the index so per-request retrievers at a custom top_k (the date
     # over-fetch path) can reuse it without rebuilding the Milvus client.
@@ -86,7 +86,10 @@ async def _build_graph_retriever_once(embed_model, llm):
 async def _build_chunk_repo_once():
     from src.storage.chunk_repository import ChunkRepository
     from src.storage.postgres import AsyncPostgres
-    return ChunkRepository(pg=AsyncPostgres(graph=transitional_default_graph()))
+    return ChunkRepository(
+        graph=transitional_default_graph(),
+        pg=AsyncPostgres(graph=transitional_default_graph()),
+    )
 
 
 async def _build_synthesizer_once(llm):

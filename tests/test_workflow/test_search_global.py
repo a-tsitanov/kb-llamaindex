@@ -28,6 +28,7 @@ from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 from src.config import settings
 from src.graph.community_writeback import community_vid
 from src.graph.nebula_store import _q
+from src.tenancy.context import default_graph_context
 from src.workflow.contracts import (
     CommunitySummaryRef,
     DocumentsForCommunitiesParams,
@@ -125,6 +126,7 @@ class _NebulaStmtStore:
         self._responses = dict(responses or {})
         self._raise = raise_
         self.calls: list[str] = []
+        self.graph = default_graph_context()
 
     def structured_query(self, query, param_map=None):
         assert not param_map, f"nebula binds no params, got {param_map!r}"
@@ -257,7 +259,7 @@ async def test_select_communities_semantic_routes_through_report_store(monkeypat
         gs_mod, "build_community_report_vector_store", lambda store: report_store,
     )
     out = await select_communities_semantic(
-        object(), [0.1, 0.2], level=0, limit=5,
+        _NebulaStmtStore(), [0.1, 0.2], level=0, limit=5,
     )
     assert [r.community_id for r in out] == ["7", "8"]
     assert all(isinstance(r, CommunitySummaryRef) for r in out)
@@ -634,6 +636,7 @@ class _FakeNebulaStore:
     def __init__(self, canned):
         self.calls: list[str] = []
         self._canned = list(canned)
+        self.graph = default_graph_context()
 
     def structured_query(self, stmt, param_map=None):
         self.calls.append(stmt)
@@ -693,7 +696,9 @@ def test_attach_report_vecs_nebula_empty_when_no_fetch(monkeypatch):
         "src.graph.community_vector_store.build_community_report_vector_store",
         lambda s: _NoFetch(),
     )
-    assert gs_mod._attach_report_vecs_nebula(object(), [{"community_id": "1", "level": 0}]) == []
+    assert gs_mod._attach_report_vecs_nebula(
+        _FakeNebulaStore(canned=[]), [{"community_id": "1", "level": 0}],
+    ) == []
 
 
 # ── GlobalSearchWorkflow.run — the synthesize flag (live test-server env) ──

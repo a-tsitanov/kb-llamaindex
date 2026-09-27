@@ -39,6 +39,7 @@ from src.retrieval.vector_index import (
     build_vector_store,
     index_nodes,
 )
+from src.tenancy.context import transitional_default_graph
 from src.workflow.contracts import Indexed, Parsed
 from src.workflow.staging import build_staging_store
 
@@ -167,7 +168,7 @@ async def index_vector(parsed: Parsed) -> Indexed:
     activity.heartbeat({"stage": "loaded", "chunks": len(nodes)})
 
     embed_model = build_embedding_model()
-    store = build_vector_store()
+    store = build_vector_store(transitional_default_graph())
     index = build_vector_index(store, embed_model)
     activity.heartbeat({"stage": "embedding_init"})
 

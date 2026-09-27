@@ -5,6 +5,7 @@ import pytest
 
 from src.graph.nebula_store import entity_vid
 from src.graph.retriever import GRAPH_WALK_MAX_HOPS, GraphRetriever, RoundGraphData
+from src.tenancy.context import default_graph_context
 
 
 class _FakeStore:
@@ -13,6 +14,7 @@ class _FakeStore:
         self._subgraph_rows = subgraph_rows or []
         self.last_query = None
         self.last_subgraph_call = None
+        self.graph = default_graph_context()
     def structured_query(self, query, param_map=None):
         self.last_query = query
         assert not param_map, "nebula path must not pass param_map"

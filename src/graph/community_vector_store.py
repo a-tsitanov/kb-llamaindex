@@ -6,7 +6,10 @@ collection. Mirrors src/graph/entity_vector_store.py (the er_vec slice)."""
 
 from __future__ import annotations
 
-from typing import Any, Protocol, TypedDict, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, TypedDict, runtime_checkable
+
+if TYPE_CHECKING:
+    from src.tenancy.context import GraphContext
 
 
 class CommunityRef(TypedDict):
@@ -28,7 +31,7 @@ class CommunityReportVectorStore(Protocol):
     def upsert(self, reports: list[CommunityReport]) -> None: ...
 
 
-def build_community_report_vector_store(graph_store: Any) -> CommunityReportVectorStore:
+def build_community_report_vector_store(graph: GraphContext) -> CommunityReportVectorStore:
     from src.graph.community_vector_store_milvus import MilvusCommunityReportVectorStore
 
-    return MilvusCommunityReportVectorStore()
+    return MilvusCommunityReportVectorStore(collection=graph.report_vec_collection)

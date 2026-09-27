@@ -20,6 +20,7 @@ import pytest
 
 from src.graph.community_writeback import community_vid
 from src.graph.nebula_store import _q
+from src.tenancy.context import default_graph_context
 from src.workflow.contracts import (
     DetectCommunitiesResult,
     DetectedCommunity,
@@ -39,6 +40,7 @@ class _FakeStore:
         self._child_rows = child_rows or []
         self._raise_on = raise_on
         self.calls: list[tuple[str, dict]] = []
+        self.graph = default_graph_context()
 
     def structured_query(self, cypher, param_map=None):
         self.calls.append((cypher, param_map or {}))
@@ -62,6 +64,7 @@ class _NebulaStmtStore:
     def __init__(self, responses=None):
         self._responses = dict(responses or {})
         self.calls: list[str] = []
+        self.graph = default_graph_context()
 
     def structured_query(self, query, param_map=None):
         assert not param_map, f"nebula binds no params, got {param_map!r}"

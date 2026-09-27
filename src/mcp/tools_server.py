@@ -89,7 +89,7 @@ async def _init() -> None:
         from src.storage.postgres import AsyncPostgres
 
         embed = build_embedding_model()
-        store = build_vector_store()
+        store = build_vector_store(transitional_default_graph())
         index = build_vector_index(store, embed)
         _deps["retriever"] = index.as_retriever(similarity_top_k=10)
 
@@ -121,7 +121,10 @@ async def _init() -> None:
             _deps["graph"] = None
             _deps["graph_store"] = None
 
-        _deps["chunks"] = ChunkRepository(pg=AsyncPostgres(graph=transitional_default_graph()))
+        _deps["chunks"] = ChunkRepository(
+            graph=transitional_default_graph(),
+            pg=AsyncPostgres(graph=transitional_default_graph()),
+        )
 
 
 async def _r():

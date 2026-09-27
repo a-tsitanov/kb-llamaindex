@@ -469,7 +469,7 @@ async def summarize_community_activity(
     #     Community vertex.
     if report_vec is not None:
         try:
-            report_store = build_community_report_vector_store(store)
+            report_store = build_community_report_vector_store(store.graph)
             await asyncio.to_thread(report_store.upsert, [{
                 "community_id": params.community_id,
                 "level": params.level,

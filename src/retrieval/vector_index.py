@@ -22,12 +22,13 @@ from llama_index.core.vector_stores.types import BasePydanticVectorStore
 from llama_index.vector_stores.milvus import MilvusVectorStore
 
 from src.config import settings
+from src.tenancy.context import GraphContext
 
 
 def build_vector_store(
-    *, overwrite: bool = False,
+    graph: GraphContext, *, overwrite: bool = False,
 ) -> BasePydanticVectorStore:
-    """Open the Milvus collection configured in ``MilvusSettings``.
+    """Open the Milvus collection for ``graph`` (``graph.chunks_collection``).
 
     ``overwrite=True`` drops and recreates — only for setup scripts /
     full re-ingest, never in the request path.
@@ -35,7 +36,7 @@ def build_vector_store(
     cfg = settings.milvus
     return MilvusVectorStore(
         uri=cfg.uri,
-        collection_name=cfg.collection,
+        collection_name=graph.chunks_collection,
         dim=cfg.dim,
         overwrite=overwrite,
         # Milvus requires a non-empty similarity-metric — cosine is

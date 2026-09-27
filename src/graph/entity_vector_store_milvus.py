@@ -10,11 +10,11 @@ from __future__ import annotations
 from typing import Any
 
 from loguru import logger
+from pymilvus import MilvusClient
 
 from src.config import settings
 from src.graph.entity_vector_store import EntityCandidate
 
-_COLLECTION = "entity_er_vec"
 _NAME_MAX, _LABEL_MAX, _DESC_MAX = 512, 256, 4096
 
 
@@ -32,9 +32,7 @@ def _btrunc(s: str, max_bytes: int) -> str:
 
 
 class MilvusEntityVectorStore:
-    def __init__(self, client: Any | None = None, collection: str = _COLLECTION):
-        from pymilvus import MilvusClient
-
+    def __init__(self, collection: str, client: Any | None = None):
         self._client = client or MilvusClient(
             uri=settings.milvus.uri, timeout=settings.milvus.timeout_s,
         )
