@@ -28,6 +28,7 @@ from pymilvus import MilvusClient
 
 from src.config import settings
 from src.storage.postgres import AsyncPostgres
+from src.tenancy.context import transitional_default_graph
 
 if TYPE_CHECKING:
     from src.storage.minio import MinioStorage
@@ -67,7 +68,7 @@ class ChunkRepository:
             uri=settings.milvus.uri,
             timeout=settings.milvus.timeout_s,
         )
-        self._pg = pg or AsyncPostgres()
+        self._pg = pg or AsyncPostgres(graph=transitional_default_graph())
         # Lazily resolved on first s3:// read so tests / Milvus-only
         # callers don't pay for a MinIO client + bucket bootstrap.
         self._minio = minio

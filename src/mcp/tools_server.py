@@ -49,6 +49,7 @@ from src.mcp._shared import (
 )
 from src.retrieval import atomic_tools
 from src.stats.align import GRANULARITIES
+from src.tenancy.context import transitional_default_graph
 
 mcp = FastMCP(
     name="kb-llamaindex-tools",
@@ -120,7 +121,7 @@ async def _init() -> None:
             _deps["graph"] = None
             _deps["graph_store"] = None
 
-        _deps["chunks"] = ChunkRepository(pg=AsyncPostgres())
+        _deps["chunks"] = ChunkRepository(pg=AsyncPostgres(graph=transitional_default_graph()))
 
 
 async def _r():
@@ -405,7 +406,9 @@ async def _stats_by(
         u = date.fromisoformat(until) if until else None
     except ValueError as exc:
         return {"error": f"since/until must be ISO YYYY-MM-DD: {exc}"}
-    rows = await AsyncPostgres().status_counts_by(dimension, since=s, until=u)
+    rows = await AsyncPostgres(graph=transitional_default_graph()).status_counts_by(
+        dimension, since=s, until=u,
+    )
     return {"group_by": group_by, "rows": rows}
 
 
@@ -426,7 +429,7 @@ async def _timeline(
         u = date.fromisoformat(until) if until else None
     except ValueError as exc:
         return {"error": f"since/until must be ISO YYYY-MM-DD: {exc}"}
-    buckets = await AsyncPostgres().timeline_counts(
+    buckets = await AsyncPostgres(graph=transitional_default_graph()).timeline_counts(
         date_field=date_field, group_by=group_by,
         channel=channel, group=group, since=s, until=u,
     )

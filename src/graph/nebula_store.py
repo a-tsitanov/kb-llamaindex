@@ -18,6 +18,7 @@ from loguru import logger
 from src.config import settings
 from src.graph.entity_table import mirror_entities, node_to_row
 from src.graph.nebula_schema import ensure_schema
+from src.tenancy.context import transitional_default_graph
 
 _store: NebulaGraphStore | None = None
 # Held at module scope only to keep the ConnectionPool alive for the life of
@@ -193,6 +194,7 @@ class NebulaGraphStore:
 
             # Search mirror (fail-soft). Same nodes, same entity_vid key.
             mirror_entities(
+                transitional_default_graph(),
                 [node_to_row(n, entity_vid(getattr(n, "name", ""))) for n in chunk],
             )
 

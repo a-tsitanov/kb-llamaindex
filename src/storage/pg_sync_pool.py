@@ -45,6 +45,9 @@ def get_pg_sync_pool() -> ConnectionPool:
         return _pool
     with _lock:
         if _pool is None:
+            # Local import: pg_scope imports this module (cycle).
+            from src.storage.pg_scope import reset_search_path_sync
+
             pool = ConnectionPool(
                 conninfo=settings.postgres.dsn,
                 min_size=settings.postgres.pool_min_size,
@@ -52,6 +55,7 @@ def get_pg_sync_pool() -> ConnectionPool:
                 timeout=settings.postgres.pool_timeout_s,
                 name="kb-pg-sync",
                 open=False,
+                reset=reset_search_path_sync,
             )
             pool.open()
             _pool = pool

@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.config import settings
 from src.storage.postgres import DOC_STATUSES, AsyncPostgres
+from src.tenancy.context import default_graph_context
 
 _COLS = ("key", "total", *DOC_STATUSES)
 
@@ -44,7 +45,7 @@ def format_timeline(buckets: list[dict]) -> str:
 
 
 async def _run(args: argparse.Namespace) -> None:
-    pg = AsyncPostgres(settings.postgres.dsn)
+    pg = AsyncPostgres(settings.postgres.dsn, graph=default_graph_context())
     if args.cmd == "channels":
         rows = await pg.status_counts_by(
             "source_channel", since=args.since, until=args.until,

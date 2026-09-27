@@ -11,7 +11,6 @@ import uuid
 from pathlib import Path
 from urllib.parse import quote
 
-from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
@@ -19,6 +18,7 @@ from loguru import logger
 from src.api.auth import require_api_key
 from src.storage.minio import S3Error, build_minio_storage
 from src.storage.postgres import AsyncPostgres
+from src.tenancy.context import transitional_default_graph
 
 router = APIRouter(tags=["documents"])
 
@@ -28,8 +28,9 @@ router = APIRouter(tags=["documents"])
     dependencies=[Depends(require_api_key)],
     summary="Download the original source file of an ingested document",
 )
-@inject
-async def download_document(doc_id: str, pg: FromDishka[AsyncPostgres]):
+async def download_document(doc_id: str):
+    # Task 9 replaces this with the request's graph.
+    pg = AsyncPostgres(graph=transitional_default_graph())
     try:
         row = await pg.get(uuid.UUID(doc_id))
     except (ValueError, TypeError):

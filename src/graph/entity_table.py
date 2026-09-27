@@ -8,9 +8,12 @@ re-fillable (scripts/backfill_entity_table.py).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from src.tenancy.context import GraphContext
 
 _UPSERT = (
     "INSERT INTO entity (vid, name, label, description, mention_count) "
@@ -41,7 +44,7 @@ def node_to_row(n: Any, vid: str) -> dict[str, Any]:
     }
 
 
-def mirror_entities(rows: list[dict[str, Any]]) -> None:
+def mirror_entities(graph: GraphContext, rows: list[dict[str, Any]]) -> None:
     """Upsert entity rows into Postgres. Fail-soft, fail-FAST.
 
     ``timeout=1`` decouples connection acquisition from the shared sync
@@ -49,18 +52,20 @@ def mirror_entities(rows: list[dict[str, Any]]) -> None:
     write must not absorb up to 30s per chunk waiting on a search-only
     mirror. The 1s budget still goes through the same try/except, so a
     timeout is just another swallowed error.
+
+    Rows land in ``graph``'s schema (``search_path`` scoped connection).
     """
     if not rows:
         return
     try:
-        from src.storage.pg_sync_pool import get_pg_sync_pool
+        from src.storage.pg_scope import graph_sync_connection
 
         values = [
             (r["vid"], r["name"], r.get("label") or "",
              r.get("description") or "", int(r.get("mention_count") or 0))
             for r in rows
         ]
-        with get_pg_sync_pool().connection(timeout=1) as conn, conn.cursor() as cur:
+        with graph_sync_connection(graph, timeout=1) as conn, conn.cursor() as cur:
             cur.executemany(_UPSERT, values)
     except Exception as exc:
         logger.warning("entity mirror upsert failed (search only): {e}", e=exc)

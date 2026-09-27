@@ -29,6 +29,7 @@ from src.retrieval.atomic_tools import (
     GraphRetrieverProtocol,
     RetrieverProtocol,
 )
+from src.tenancy.context import transitional_default_graph
 
 # The unified rerank now owns the top_n cut (after group weighting), so the
 # cached cross-encoder is built as a pure SCORER that never truncates below
@@ -85,7 +86,7 @@ async def _build_graph_retriever_once(embed_model, llm):
 async def _build_chunk_repo_once():
     from src.storage.chunk_repository import ChunkRepository
     from src.storage.postgres import AsyncPostgres
-    return ChunkRepository(pg=AsyncPostgres())
+    return ChunkRepository(pg=AsyncPostgres(graph=transitional_default_graph()))
 
 
 async def _build_synthesizer_once(llm):

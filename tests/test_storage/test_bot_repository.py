@@ -172,7 +172,7 @@ async def test_start_request_writes_a_running_row_and_returns_its_id():
     )
     assert rid == 123
     sql, params = conn.cur.executed[-1]
-    assert "INSERT INTO bot_request" in sql
+    assert "INSERT INTO public.bot_request" in sql
     assert "RETURNING id" in sql
     assert params == (1, 2, "/ask", "что нового", "running")
 

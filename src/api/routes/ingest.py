@@ -15,7 +15,6 @@ import io
 import uuid
 from pathlib import Path
 
-from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
 from loguru import logger
 from pydantic import BaseModel
@@ -29,6 +28,7 @@ from src.retrieval.date_filters import iso_to_epoch_days, today_epoch_days
 from src.retrieval.groups import GROUP_SET
 from src.storage.minio import S3Error, build_minio_storage
 from src.storage.postgres import AsyncPostgres
+from src.tenancy.context import transitional_default_graph
 from src.workflow.client import get_temporal_client
 from src.workflow.contracts import IngestParams
 from src.workflow.ingest_submit import submit_document
@@ -57,9 +57,7 @@ class JobProgressResponse(BaseModel):
     status_code=status.HTTP_202_ACCEPTED,
     summary="Upload a document and enqueue it for ingestion",
 )
-@inject
 async def upload_document(
-    pg: FromDishka[AsyncPostgres],
     file: UploadFile = File(...),
     department: str = Form(default=""),
     force: bool = Form(default=False),
@@ -70,6 +68,8 @@ async def upload_document(
     priority: int | None = Form(default=None),
     x_version_tag: str | None = Header(default=None, alias="X-Version-Tag"),
 ) -> IngestEnqueuedResponse:
+    # Task 9 replaces this with the request's graph.
+    pg = AsyncPostgres(graph=transitional_default_graph())
     if not file.filename:
         raise HTTPException(400, "filename required")
 
@@ -240,11 +240,11 @@ async def upload_document(
     dependencies=[Depends(require_api_key)],
     summary="Get ingestion job status",
 )
-@inject
 async def job_status(
     job_id: uuid.UUID,
-    pg: FromDishka[AsyncPostgres],
 ) -> JobProgressResponse:
+    # Task 9 replaces this with the request's graph.
+    pg = AsyncPostgres(graph=transitional_default_graph())
     row = await pg.get(job_id)
     if row is None:
         raise HTTPException(404, f"job {job_id} not found")

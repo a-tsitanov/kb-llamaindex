@@ -16,6 +16,7 @@ from temporalio import activity
 
 from src.storage.minio import build_minio_storage
 from src.storage.postgres import AsyncPostgres
+from src.tenancy.context import transitional_default_graph
 from src.workflow.contracts import Ctx, IngestParams
 
 
@@ -27,7 +28,7 @@ async def fetch_source(params: IngestParams) -> Ctx:
     )
     activity.heartbeat({"stage": "init", "path": params.path})
 
-    pg = AsyncPostgres()
+    pg = AsyncPostgres(graph=transitional_default_graph())
     await pg.update_status(uuid.UUID(params.doc_id), status="processing")
     activity.heartbeat({"stage": "pg_processing"})
 

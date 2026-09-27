@@ -38,6 +38,9 @@ async def get_pg_pool() -> AsyncConnectionPool:
         return _pool
     async with _lock:
         if _pool is None:
+            # Local import: pg_scope imports this module (cycle).
+            from src.storage.pg_scope import reset_search_path
+
             pool = AsyncConnectionPool(
                 conninfo=settings.postgres.dsn,
                 min_size=settings.postgres.pool_min_size,
@@ -45,6 +48,7 @@ async def get_pg_pool() -> AsyncConnectionPool:
                 timeout=settings.postgres.pool_timeout_s,
                 name="kb-pg",
                 open=False,
+                reset=reset_search_path,
             )
             await pool.open()
             _pool = pool

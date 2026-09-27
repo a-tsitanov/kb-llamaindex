@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from src.api.auth import require_api_key
 from src.stats.align import GRANULARITIES, VALUE_KINDS
 from src.storage.stats import StatsRepository
+from src.tenancy.context import transitional_default_graph
 
 router = APIRouter(
     prefix="/statistics",
@@ -182,7 +183,7 @@ async def load_statistics(req: LoadRequest) -> LoadResponse:
     are computed on read, so changing the normalisation method never
     requires reloading a source.
     """
-    repo = StatsRepository()
+    repo = StatsRepository(graph=transitional_default_graph())
     ind = req.indicator
     try:
         indicator_id = await repo.upsert_indicator(

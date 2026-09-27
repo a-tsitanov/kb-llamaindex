@@ -39,7 +39,7 @@ def build_recent_requests_query(telegram_id: int, limit: int) -> tuple[str, list
     forgets a filter.
     """
     sql = (
-        f"SELECT {REQUEST_COLUMNS} FROM bot_request "
+        f"SELECT {REQUEST_COLUMNS} FROM public.bot_request "
         "WHERE telegram_id = %s ORDER BY started_at DESC LIMIT %s"
     )
     return sql, [telegram_id, max(1, int(limit))]
@@ -53,7 +53,7 @@ def build_list_users_query(status: str | None) -> tuple[str, list[Any]]:
     if status is not None:
         where = "WHERE status = %s "
         params.append(status)
-    return f"SELECT {USER_COLUMNS} FROM bot_user {where}ORDER BY created_at", params
+    return f"SELECT {USER_COLUMNS} FROM public.bot_user {where}ORDER BY created_at", params
 
 
 class BotRepository:
@@ -86,7 +86,7 @@ class BotRepository:
         """
         async with self._conn() as conn, conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
-                "INSERT INTO bot_user (telegram_id, username) VALUES (%s, %s) "
+                "INSERT INTO public.bot_user (telegram_id, username) VALUES (%s, %s) "
                 "ON CONFLICT (telegram_id) DO UPDATE SET username = EXCLUDED.username "
                 f"RETURNING {USER_COLUMNS}",
                 (telegram_id, username or ""),
@@ -98,7 +98,7 @@ class BotRepository:
     ) -> None:
         async with self._conn() as conn, conn.cursor() as cur:
             await cur.execute(
-                "UPDATE bot_user SET status = %s, approved_at = now(), "
+                "UPDATE public.bot_user SET status = %s, approved_at = now(), "
                 "approved_by = %s WHERE telegram_id = %s",
                 (status, approved_by, telegram_id),
             )
@@ -106,7 +106,7 @@ class BotRepository:
     async def set_role(self, telegram_id: int, role: str) -> None:
         async with self._conn() as conn, conn.cursor() as cur:
             await cur.execute(
-                "UPDATE bot_user SET role = %s WHERE telegram_id = %s",
+                "UPDATE public.bot_user SET role = %s WHERE telegram_id = %s",
                 (role, telegram_id),
             )
 
@@ -127,7 +127,7 @@ class BotRepository:
         """
         async with self._conn() as conn, conn.cursor() as cur:
             await cur.execute(
-                "SELECT count(*) FROM bot_request "
+                "SELECT count(*) FROM public.bot_request "
                 "WHERE telegram_id = %s AND started_at >= date_trunc('day', now())",
                 (telegram_id,),
             )
@@ -145,7 +145,7 @@ class BotRepository:
         """
         async with self._conn() as conn, conn.cursor() as cur:
             await cur.execute(
-                "INSERT INTO bot_request (telegram_id, chat_id, command, args, status) "
+                "INSERT INTO public.bot_request (telegram_id, chat_id, command, args, status) "
                 "VALUES (%s, %s, %s, %s, %s) RETURNING id",
                 (telegram_id, chat_id, command, args, status),
             )
@@ -158,7 +158,7 @@ class BotRepository:
     ) -> None:
         async with self._conn() as conn, conn.cursor() as cur:
             await cur.execute(
-                "UPDATE bot_request SET status = %s, finished_at = now(), "
+                "UPDATE public.bot_request SET status = %s, finished_at = now(), "
                 "answer = %s, sources = %s, error = %s WHERE id = %s",
                 (status, answer, json.dumps(sources or []), error, request_id),
             )
@@ -174,7 +174,7 @@ class BotRepository:
     async def get_request(self, request_id: int) -> dict[str, Any] | None:
         async with self._conn() as conn, conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
-                f"SELECT {REQUEST_COLUMNS} FROM bot_request WHERE id = %s",
+                f"SELECT {REQUEST_COLUMNS} FROM public.bot_request WHERE id = %s",
                 (request_id,),
             )
             return await cur.fetchone()

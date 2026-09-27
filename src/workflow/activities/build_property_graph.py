@@ -9,6 +9,7 @@ from loguru import logger
 from temporalio import activity
 
 from src.graph.store import build_graph_store
+from src.tenancy.context import transitional_default_graph
 from src.workflow.contracts import GraphBuilt, Merged
 from src.workflow.heartbeat import heartbeat_every
 from src.workflow.staging import build_staging_store
@@ -143,7 +144,8 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
             try:
                 from src.storage.postgres import AsyncPostgres
 
-                await AsyncPostgres().record_fact_conflicts(edge_conflicts)
+                pg = AsyncPostgres(graph=transitional_default_graph())
+                await pg.record_fact_conflicts(edge_conflicts)
             except Exception as exc:
                 logger.warning("fact_supersede log skipped (non-fatal): {e}", e=exc)
 

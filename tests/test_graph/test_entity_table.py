@@ -10,12 +10,14 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from functools import partial
 from types import SimpleNamespace
 
 import pytest
 
 import src.storage.pg_sync_pool as pg_sync_pool_mod
 from src.graph.entity_table import mirror_entities, node_to_row
+from src.tenancy.context import default_graph_context, new_graph_context
 
 # ── stubs ────────────────────────────────────────────────────────────
 
@@ -52,6 +54,16 @@ class _StubConn:
         self.cursors.append(cur)
         return cur
 
+    # graph_sync_connection's committed `SET search_path`, recorded apart
+    # from the cursor traffic the tests assert on.
+    scope_log: list = field(default_factory=list)
+
+    def execute(self, q, params=None):
+        self.scope_log.append(q.as_string(None) if hasattr(q, "as_string") else str(q))
+
+    def commit(self):
+        self.scope_log.append("commit")
+
     def __enter__(self):
         return self
 
@@ -85,7 +97,7 @@ def mirror_with_pool(monkeypatch):
             raise_on_execute=raise_on_execute, raise_on_connection=raise_on_connection,
         )
         monkeypatch.setattr(pg_sync_pool_mod, "get_pg_sync_pool", lambda: pool)
-        return mirror_entities, pool
+        return partial(mirror_entities, default_graph_context()), pool
 
     return _make
 
@@ -174,3 +186,16 @@ def test_an_unavailable_pool_is_swallowed_without_blocking(mirror_with_pool):
     fn([{"vid": "v1", "name": "n", "label": "", "description": "", "mention_count": 1}])
     assert pool.connection_timeouts == [1]
     assert pool.executed == []
+
+
+def test_mirror_writes_into_the_graphs_schema(monkeypatch):
+    """The mirror lands in the graph's own schema: the connection's
+    search_path is pinned (and committed) before the upsert."""
+    pool = _StubPool()
+    monkeypatch.setattr(pg_sync_pool_mod, "get_pg_sync_pool", lambda: pool)
+    mirror_entities(
+        new_graph_context("acme"),
+        [{"vid": "v1", "name": "n", "label": "", "description": "", "mention_count": 1}],
+    )
+    assert pool.conn.scope_log == ['SET search_path TO "g_acme", public', "commit"]
+    assert "INSERT INTO entity" in pool.executed[0][0]

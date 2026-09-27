@@ -12,6 +12,7 @@ import pytest
 
 from src.config import settings
 from src.storage.postgres import AsyncPostgres
+from src.tenancy.context import default_graph_context
 
 
 def _pg_reachable() -> bool:
@@ -58,7 +59,7 @@ def _cleanup() -> None:
 
 
 def test_status_counts_by_channel() -> None:
-    pg = AsyncPostgres(settings.postgres.dsn)
+    pg = AsyncPostgres(settings.postgres.dsn, graph=default_graph_context())
     try:
         _seed()
         rows = asyncio.run(pg.status_counts_by("source_channel"))
@@ -76,7 +77,7 @@ def test_status_counts_by_channel() -> None:
 
 
 def test_timeline_counts_by_channel_on_doc_date() -> None:
-    pg = AsyncPostgres(settings.postgres.dsn)
+    pg = AsyncPostgres(settings.postgres.dsn, graph=default_graph_context())
     try:
         _seed()
         buckets = asyncio.run(
@@ -92,7 +93,7 @@ def test_timeline_counts_by_channel_on_doc_date() -> None:
 
 
 def test_timeline_counts_group_by_none() -> None:
-    pg = AsyncPostgres(settings.postgres.dsn)
+    pg = AsyncPostgres(settings.postgres.dsn, graph=default_graph_context())
     try:
         _seed()
         buckets = asyncio.run(

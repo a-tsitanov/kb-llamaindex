@@ -16,6 +16,7 @@ from temporalio import activity
 from src.observability.ingest_metrics_extractor import parse_activity_timings
 from src.storage.ingest_metrics import build_ingest_metrics_store
 from src.storage.postgres import AsyncPostgres
+from src.tenancy.context import transitional_default_graph
 from src.workflow.client import get_temporal_client
 from src.workflow.contracts import (
     FinalizeIn,
@@ -42,7 +43,7 @@ async def finalize(payload: FinalizeIn) -> IngestResult:
     )
     activity.heartbeat({"stage": "init", "status": payload.graph_status})
 
-    pg = AsyncPostgres()
+    pg = AsyncPostgres(graph=transitional_default_graph())
     await pg.update_status(
         uuid.UUID(payload.ctx.doc_id), status=payload.graph_status,
     )
@@ -174,7 +175,7 @@ async def mark_skipped(payload: SkipIn) -> IngestResult:
     )
     activity.heartbeat({"stage": "init", "doc_id": payload.ctx.doc_id})
 
-    pg = AsyncPostgres()
+    pg = AsyncPostgres(graph=transitional_default_graph())
     await pg.update_status(
         uuid.UUID(payload.ctx.doc_id), status="skipped", error=payload.reason,
     )
@@ -205,7 +206,7 @@ async def mark_failed(payload: MarkFailedIn) -> None:
     )
     activity.heartbeat({"stage": "init", "doc_id": doc_id})
 
-    pg = AsyncPostgres()
+    pg = AsyncPostgres(graph=transitional_default_graph())
     await pg.update_status(uuid.UUID(doc_id), status="failed", error=payload.error)
     activity.heartbeat({"stage": "pg_failed_written"})
 

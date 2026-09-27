@@ -17,7 +17,7 @@ def _no_entity_mirror(monkeypatch):
     a real Postgres pool on every call and, with Postgres unreachable,
     stall behind mirror_entities' own fail-fast timeout — no-op it so this
     file stays fast and DB-free."""
-    monkeypatch.setattr(nebula_store_mod, "mirror_entities", lambda rows: None)
+    monkeypatch.setattr(nebula_store_mod, "mirror_entities", lambda graph, rows: None)
 
 
 class _Cast:

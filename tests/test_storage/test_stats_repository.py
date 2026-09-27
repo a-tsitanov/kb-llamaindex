@@ -19,6 +19,7 @@ from src.storage.stats import (
     build_series_query,
     build_sources_query,
 )
+from src.tenancy.context import default_graph_context
 
 # ── stubs ────────────────────────────────────────────────────────────
 
@@ -73,7 +74,7 @@ class _StubConn:
 
 def _repo_with(rows: list[dict]) -> tuple[StatsRepository, _StubConn]:
     conn = _StubConn(cur=_StubCursor(rows=rows))
-    repo = StatsRepository()
+    repo = StatsRepository(graph=default_graph_context())
 
     @asynccontextmanager
     async def _conn():

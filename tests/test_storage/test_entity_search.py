@@ -6,8 +6,9 @@ from dataclasses import dataclass, field
 import pytest
 from psycopg.rows import dict_row
 
-import src.storage.entity_search as entity_search_mod
+import src.storage.pg_scope as pg_scope_mod
 from src.storage.entity_search import EntitySearchRepository, build_entity_search_query
+from src.tenancy.context import default_graph_context
 
 # ── query builders ──────────────────────────────────────────────────
 
@@ -91,10 +92,17 @@ class _StubConn:
         self.cur.row_factory = kw.get("row_factory")
         return self.cur
 
+    # graph_connection's `SET search_path` + commit, before the cursor.
+    async def execute(self, q, params=None):
+        pass
+
+    async def commit(self):
+        pass
+
 
 def _repo_with(rows: list[dict]) -> tuple[EntitySearchRepository, _StubConn]:
     conn = _StubConn(cur=_StubCursor(rows=rows))
-    repo = EntitySearchRepository()
+    repo = EntitySearchRepository(graph=default_graph_context())
 
     @asynccontextmanager
     async def _conn():
@@ -153,8 +161,8 @@ async def test_conn_acquires_the_pool_connection_with_a_short_timeout(monkeypatc
     async def _get_pool():
         return pool
 
-    monkeypatch.setattr(entity_search_mod, "get_pg_pool", _get_pool)
-    repo = EntitySearchRepository()
+    monkeypatch.setattr(pg_scope_mod, "get_pg_pool", _get_pool)
+    repo = EntitySearchRepository(graph=default_graph_context())
     result = await repo.search("x", mode="exact")
     assert result == rows
     assert pool.connection_timeouts == [1]

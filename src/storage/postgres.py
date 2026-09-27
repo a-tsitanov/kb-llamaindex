@@ -16,7 +16,8 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 
-from src.storage.pg_pool import get_pg_pool
+from src.storage.pg_scope import graph_connection, search_path_sql
+from src.tenancy.context import GraphContext
 
 DOC_STATUSES: tuple[str, ...] = (
     "pending", "processing", "completed", "vector_only", "failed", "skipped",
@@ -64,18 +65,20 @@ class AsyncPostgres:
     the legacy connect-per-call path.
     """
 
-    def __init__(self, dsn: str | None = None) -> None:
+    def __init__(self, dsn: str | None = None, *, graph: GraphContext) -> None:
         # None → shared pool; explicit dsn → legacy direct connect.
         self._dsn = dsn
+        self._graph = graph
 
     @asynccontextmanager
     async def _conn(self) -> AsyncIterator[psycopg.AsyncConnection]:
         if self._dsn is None:
-            pool = await get_pg_pool()
-            async with pool.connection() as conn:
+            async with graph_connection(self._graph) as conn:
                 yield conn
         else:
             async with await psycopg.AsyncConnection.connect(self._dsn) as conn:
+                await conn.execute(search_path_sql(self._graph))
+                await conn.commit()
                 yield conn
 
     async def insert_pending(

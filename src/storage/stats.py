@@ -19,7 +19,8 @@ import psycopg
 from psycopg.rows import dict_row
 
 from src.stats.align import GRANULARITIES, VALUE_KINDS
-from src.storage.pg_pool import get_pg_pool
+from src.storage.pg_scope import graph_connection, search_path_sql
+from src.tenancy.context import GraphContext
 
 _SERIES_COLUMNS = (
     "period_start, period_end, dims, value, sample_n, revision, source_doc_id"
@@ -144,17 +145,19 @@ def _row_out(row: dict[str, Any]) -> dict[str, Any]:
 class StatsRepository:
     """Async wrapper over the two `stat_*` tables."""
 
-    def __init__(self, dsn: str | None = None) -> None:
+    def __init__(self, dsn: str | None = None, *, graph: GraphContext) -> None:
         self._dsn = dsn
+        self._graph = graph
 
     @asynccontextmanager
     async def _conn(self) -> AsyncIterator[psycopg.AsyncConnection]:
         if self._dsn is None:
-            pool = await get_pg_pool()
-            async with pool.connection() as conn:
+            async with graph_connection(self._graph) as conn:
                 yield conn
         else:
             async with await psycopg.AsyncConnection.connect(self._dsn) as conn:
+                await conn.execute(search_path_sql(self._graph))
+                await conn.commit()
                 yield conn
 
     async def search_indicators(

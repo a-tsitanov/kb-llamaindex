@@ -235,7 +235,7 @@ CREATE TABLE IF NOT EXISTS stat_observation (
 # RESERVED and the group filters carry an explicit "NOT an access-control
 # boundary" warning).  So this table decides who gets in, nothing more.
 _BOT_USER_DDL = """
-CREATE TABLE IF NOT EXISTS bot_user (
+CREATE TABLE IF NOT EXISTS public.bot_user (
     telegram_id  BIGINT PRIMARY KEY,
     username     TEXT        NOT NULL DEFAULT '',
     status       TEXT        NOT NULL DEFAULT 'pending',
@@ -258,7 +258,7 @@ CREATE TABLE IF NOT EXISTS bot_user (
 # Deliberately NO foreign key to `bot_user`: the record of what someone
 # asked must outlive the account being deleted.
 _BOT_REQUEST_DDL = """
-CREATE TABLE IF NOT EXISTS bot_request (
+CREATE TABLE IF NOT EXISTS public.bot_request (
     id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     telegram_id  BIGINT      NOT NULL,
     chat_id      BIGINT      NOT NULL,
@@ -279,7 +279,7 @@ CREATE TABLE IF NOT EXISTS bot_request (
 # No other index is wanted: every read of this table is scoped to one user.
 _BOT_INDEXES_DDL = """
 CREATE INDEX IF NOT EXISTS bot_request_user_time_idx
-    ON bot_request (telegram_id, started_at DESC);
+    ON public.bot_request (telegram_id, started_at DESC);
 """
 
 _ER_VERDICT_DDL = """
@@ -488,34 +488,63 @@ def setup_temporal_retention() -> None:
     asyncio.run(_update())
 
 
+# Global tables live in `public` whatever graph is in play (the registry,
+# API keys, the Telegram bot's users/audit).  Everything else is per-graph:
+# `migrate_graph_schema` runs GRAPH_DDL once per graph under a
+# `search_path` pinned to that graph's schema (`public` for `default`, so
+# the pre-multi-graph deployment's tables are exactly where they were).
+# pg_trgm is global (an extension lives in one schema); the trigram
+# indexes in GRAPH_DDL find `gin_trgm_ops` through the trailing `public`.
+GLOBAL_DDL: list[str] = [
+    _PG_TRGM_DDL, _BOT_USER_DDL, _BOT_REQUEST_DDL, _BOT_INDEXES_DDL, _GRAPHS_DDL, _API_KEYS_DDL,
+]
+GRAPH_DDL: list[str] = [
+    _DOCUMENTS_DDL, _INGEST_METRICS_DDL, _BACKFILL_SOURCE_CHANNEL_SQL, _FACT_SUPERSEDE_DDL,
+    _STAT_INDICATOR_DDL, _STAT_INDICATOR_CONSTRAINTS_DDL, _STAT_OBSERVATION_DDL, _STAT_INDEXES_DDL,
+    _ER_VERDICT_DDL, _ENTITY_DDL, _ENTITY_INDEXES_DDL,
+]
+
+
+def migrate_graph_schema(cur, graph) -> None:
+    """Create (idempotently) one graph's tables in its own schema."""
+    from psycopg import sql
+
+    from src.storage.pg_scope import search_path_sql
+
+    if graph.pg_schema != "public":
+        cur.execute(
+            sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(graph.pg_schema)),
+        )
+    cur.execute(search_path_sql(graph))
+    for stmt in GRAPH_DDL:
+        cur.execute(stmt)
+    cur.execute("RESET search_path")
+
+
 def setup_postgres() -> None:
     pg = settings.postgres
-    logger.info(
-        "postgres setup  host={h}:{p}  db={d}",
-        h=pg.host, p=pg.port, d=pg.db,
-    )
+    logger.info("postgres setup  host={h}:{p}  db={d}", h=pg.host, p=pg.port, d=pg.db)
     with psycopg.connect(
         pg.dsn, connect_timeout=pg.connect_timeout_s, autocommit=True,
     ) as conn, conn.cursor() as cur:
-        cur.execute(_DOCUMENTS_DDL)
-        cur.execute(_INGEST_METRICS_DDL)
-        cur.execute(_BACKFILL_SOURCE_CHANNEL_SQL)
-        cur.execute(_PG_TRGM_DDL)
-        cur.execute(_FACT_SUPERSEDE_DDL)
-        cur.execute(_STAT_INDICATOR_DDL)
-        cur.execute(_STAT_INDICATOR_CONSTRAINTS_DDL)
-        cur.execute(_STAT_OBSERVATION_DDL)
-        cur.execute(_STAT_INDEXES_DDL)
-        cur.execute(_ER_VERDICT_DDL)
-        cur.execute(_ENTITY_DDL)
-        cur.execute(_ENTITY_INDEXES_DDL)
-        cur.execute(_BOT_USER_DDL)
-        cur.execute(_BOT_REQUEST_DDL)
-        cur.execute(_BOT_INDEXES_DDL)
-        cur.execute(_GRAPHS_DDL)
-        cur.execute(_API_KEYS_DDL)
+        for stmt in GLOBAL_DDL:
+            cur.execute(stmt)
         _bootstrap_registry(cur)
+        for graph in _ready_graphs(cur):
+            migrate_graph_schema(cur, graph)
     logger.info("postgres setup  done")
+
+
+def _ready_graphs(cur) -> list:
+    from src.tenancy.registry import _context_from_row
+
+    cur.execute(
+        "SELECT id, owner, status, nebula_space, nebula_partition_num, chunks_collection, "
+        "er_vec_collection, report_vec_collection, pg_schema "
+        "FROM public.graphs WHERE status = 'ready' ORDER BY id"
+    )
+    cols = [d.name for d in cur.description]
+    return [_context_from_row(dict(zip(cols, r, strict=True))) for r in cur.fetchall()]
 
 
 # ── Milvus ───────────────────────────────────────────────────────────

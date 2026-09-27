@@ -1,9 +1,10 @@
 """Dishka DI providers.
 
 Two containers:
-  * **API** — long-lived: PG client + shared LLM/embedding singletons.
-    The only active consumer is the ingest route (injects ``AsyncPostgres``).
-  * **Worker** — long-lived: PG client + shared LLM/embed singletons.
+  * **API** — long-lived: shared LLM/embedding singletons.  There is no
+    ``AsyncPostgres`` provider: PG clients are graph-scoped, so routes build
+    one per request for the request's graph.
+  * **Worker** — long-lived: shared LLM/embed singletons.
     Ingestion pipeline is built ad-hoc inside the worker task since
     its transformations vary per call.
 
@@ -23,17 +24,12 @@ from llama_index.core.embeddings import BaseEmbedding
 from llama_index.core.llms import LLM
 
 from src.ingestion.embeddings import build_embedding_model
-from src.storage.postgres import AsyncPostgres
 
 
 class CommonProvider(Provider):
     """Shared singletons available to both API and worker."""
 
     scope = Scope.APP
-
-    @provide
-    def postgres(self) -> AsyncPostgres:
-        return AsyncPostgres()
 
     @provide
     def llm(self) -> LLM:

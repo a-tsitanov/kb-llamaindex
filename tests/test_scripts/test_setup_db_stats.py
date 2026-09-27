@@ -6,6 +6,8 @@ as literal text, so the two can never quietly drift apart."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from scripts.setup_db import (
     _PG_TRGM_DDL,
     _STAT_INDEXES_DDL,
@@ -14,6 +16,7 @@ from scripts.setup_db import (
     _STAT_OBSERVATION_DDL,
 )
 from src.stats.align import GRANULARITIES, VALUE_KINDS
+from src.tenancy.context import default_graph_context
 
 
 def test_tables_are_created_idempotently():
@@ -107,6 +110,19 @@ def test_setup_postgres_runs_the_constraints_ddl_idempotently(monkeypatch):
 
         def execute(self, sql, *a, **kw):
             executed.append(sql)
+
+        # `_ready_graphs` reads the registry: answer with the `default` row
+        # so the per-graph DDL runs once per setup, as on a real database.
+        _cols = ("id", "owner", "status", "nebula_space", "nebula_partition_num",
+                 "chunks_collection", "er_vec_collection", "report_vec_collection",
+                 "pg_schema")
+        description = [SimpleNamespace(name=c) for c in _cols]
+
+        def fetchall(self):
+            d = default_graph_context()
+            return [(d.id, "system", "ready", d.nebula_space, d.nebula_partition_num,
+                     d.chunks_collection, d.er_vec_collection, d.report_vec_collection,
+                     d.pg_schema)]
 
     class _FakeConn:
         def __enter__(self):

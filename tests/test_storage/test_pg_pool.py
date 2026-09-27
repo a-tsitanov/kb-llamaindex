@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from src.storage import pg_pool
 from src.storage.ingest_metrics import AsyncIngestMetrics
 from src.storage.postgres import AsyncPostgres
+from src.tenancy.context import default_graph_context
 
 
 def test_get_pg_pool_is_a_process_singleton():
@@ -44,6 +45,17 @@ def test_close_pg_pool_drops_singleton():
     asyncio.run(go())
 
 
+class _SentinelConn:
+    """Pooled-connection stand-in: absorbs graph_connection's committed
+    ``SET search_path`` before the store sees it."""
+
+    async def execute(self, q, params=None):
+        pass
+
+    async def commit(self):
+        pass
+
+
 class _FakePool:
     """Stand-in for AsyncConnectionPool: records that a pooled
     connection was acquired and yields a sentinel."""
@@ -59,16 +71,16 @@ class _FakePool:
 
 
 def test_async_postgres_default_dsn_uses_pool(monkeypatch):
-    sentinel = object()
+    sentinel = _SentinelConn()
     fake = _FakePool(sentinel)
 
     async def _fake_get_pool():
         return fake
 
-    monkeypatch.setattr("src.storage.postgres.get_pg_pool", _fake_get_pool)
+    monkeypatch.setattr("src.storage.pg_scope.get_pg_pool", _fake_get_pool)
 
     async def go():
-        async with AsyncPostgres()._conn() as conn:
+        async with AsyncPostgres(graph=default_graph_context())._conn() as conn:
             assert conn is sentinel
         assert fake.acquired == 1
 
@@ -83,24 +95,24 @@ def test_async_postgres_explicit_dsn_bypasses_pool(monkeypatch):
         called["pool"] = True
         raise AssertionError("explicit dsn should not use the pool")
 
-    monkeypatch.setattr("src.storage.postgres.get_pg_pool", _boom)
+    monkeypatch.setattr("src.storage.pg_scope.get_pg_pool", _boom)
 
-    pg = AsyncPostgres(dsn="postgresql://u:p@localhost:5432/other")
+    pg = AsyncPostgres(dsn="postgresql://u:p@localhost:5432/other", graph=default_graph_context())
     assert pg._dsn == "postgresql://u:p@localhost:5432/other"
     assert called["pool"] is False  # constructing it didn't touch the pool
 
 
 def test_ingest_metrics_default_dsn_uses_pool(monkeypatch):
-    sentinel = object()
+    sentinel = _SentinelConn()
     fake = _FakePool(sentinel)
 
     async def _fake_get_pool():
         return fake
 
-    monkeypatch.setattr("src.storage.ingest_metrics.get_pg_pool", _fake_get_pool)
+    monkeypatch.setattr("src.storage.pg_scope.get_pg_pool", _fake_get_pool)
 
     async def go():
-        async with AsyncIngestMetrics()._conn() as conn:
+        async with AsyncIngestMetrics(graph=default_graph_context())._conn() as conn:
             assert conn is sentinel
         assert fake.acquired == 1
 

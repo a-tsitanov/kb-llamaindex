@@ -11,6 +11,7 @@ import pytest
 
 from src.config import settings
 from src.storage.postgres import AsyncPostgres
+from src.tenancy.context import default_graph_context
 
 
 def _pg_reachable() -> bool:
@@ -28,7 +29,7 @@ pytestmark = pytest.mark.skipif(
 
 def test_insert_pending_writes_source_columns() -> None:
     doc_id = uuid.uuid4()
-    pg = AsyncPostgres(settings.postgres.dsn)
+    pg = AsyncPostgres(settings.postgres.dsn, graph=default_graph_context())
 
     async def go():
         await pg.insert_pending(

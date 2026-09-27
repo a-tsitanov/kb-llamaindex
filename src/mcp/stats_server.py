@@ -35,6 +35,7 @@ from src.mcp._shared import (
 )
 from src.stats.align import GRANULARITIES, VALUE_KINDS, align
 from src.storage.stats import StatsRepository
+from src.tenancy.context import transitional_default_graph
 
 mcp = FastMCP(
     name="kb-llamaindex-stats",
@@ -58,7 +59,7 @@ _MAX_SEARCH_LIMIT = 100
 
 
 def _repo() -> StatsRepository:
-    return StatsRepository()
+    return StatsRepository(graph=transitional_default_graph())
 
 
 def _parse_date(value: str | None, field: str) -> tuple[date | None, str | None]:

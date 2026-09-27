@@ -45,6 +45,7 @@ from src.storage.backfill import (
     row_to_node,
 )
 from src.storage.postgres import AsyncPostgres
+from src.tenancy.context import default_graph_context
 from src.utils.logging import configure_logging
 
 # Milvus output fields: everything (metadata/_node_content/dynamic) plus
@@ -72,7 +73,7 @@ def _iter_rows(client: MilvusClient, collection: str, batch_size: int):
 
 
 async def _load_path_index() -> dict[str, str]:
-    pg = AsyncPostgres()
+    pg = AsyncPostgres(graph=default_graph_context())
     rows = await pg.list_id_path()
     return build_path_index(rows)
 

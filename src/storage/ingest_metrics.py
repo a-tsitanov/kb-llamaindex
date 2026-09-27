@@ -20,7 +20,8 @@ from datetime import datetime
 import psycopg
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.storage.pg_pool import get_pg_pool
+from src.storage.pg_scope import graph_connection, search_path_sql
+from src.tenancy.context import GraphContext, transitional_default_graph
 
 
 class MetricRow(BaseModel):
@@ -54,9 +55,10 @@ class AsyncIngestMetrics:
     Temporal replays history) is a no-op rather than a duplicate.
     """
 
-    def __init__(self, dsn: str | None = None) -> None:
+    def __init__(self, dsn: str | None = None, *, graph: GraphContext) -> None:
         # None → shared per-process pool; explicit dsn → legacy connect.
         self._dsn = dsn
+        self._graph = graph
 
     async def insert_metrics(self, rows: Iterable[MetricRow]) -> int:
         """Bulk-insert measurement rows, returning the count of
@@ -105,14 +107,15 @@ class AsyncIngestMetrics:
     @asynccontextmanager
     async def _conn(self) -> AsyncIterator[psycopg.AsyncConnection]:
         if self._dsn is None:
-            pool = await get_pg_pool()
-            async with pool.connection() as conn:
+            async with graph_connection(self._graph) as conn:
                 yield conn
         else:
             async with await psycopg.AsyncConnection.connect(self._dsn) as conn:
+                await conn.execute(search_path_sql(self._graph))
+                await conn.commit()
                 yield conn
 
 
 def build_ingest_metrics_store() -> AsyncIngestMetrics:
     """Factory consistent with the rest of ``src/storage/``."""
-    return AsyncIngestMetrics()
+    return AsyncIngestMetrics(graph=transitional_default_graph())

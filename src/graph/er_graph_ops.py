@@ -7,9 +7,12 @@ served from Postgres by default (``PostgresERVerdictCache``, composed via
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, Protocol
 
 from src.config import settings
+from src.tenancy.context import GraphContext, transitional_default_graph
 
 
 def verdict_vid(key: str) -> str:
@@ -180,13 +183,28 @@ class PostgresERVerdictCache:
     swallows every error so ER degrades to pure LLM judging.
     """
 
-    def __init__(self, dsn: str | None = None) -> None:
+    def __init__(self, dsn: str | None = None, *, graph: GraphContext) -> None:
         self._dsn = dsn
+        self._graph = graph
 
     def _pool(self):
         from src.storage.pg_sync_pool import get_pg_sync_pool
 
         return get_pg_sync_pool()
+
+    @contextmanager
+    def _connection(self) -> Iterator[Any]:
+        """A pooled connection scoped to this cache's graph schema.
+
+        Same shape as ``pg_scope.graph_sync_connection`` but drawn through
+        ``self._pool()`` so the test seam keeps working; the SET is
+        committed before use and the pool's ``reset`` callback undoes it."""
+        from src.storage.pg_scope import search_path_sql
+
+        with self._pool().connection() as conn:
+            conn.execute(search_path_sql(self._graph))
+            conn.commit()
+            yield conn
 
     def ensure_verdict_schema(self) -> None:
         # NOT called on the ER runtime path — nothing there calls it
@@ -195,7 +213,7 @@ class PostgresERVerdictCache:
         # table is missing at runtime the fail-safe takes over: the error
         # is logged and ER judges with the LLM, as with any other storage
         # failure.
-        with self._pool().connection() as conn, conn.cursor() as cur:
+        with self._connection() as conn, conn.cursor() as cur:
             cur.execute(_ER_VERDICT_TABLE_DDL)
 
     def load_verdicts(self, keys: list[str]) -> dict[str, bool]:
@@ -210,7 +228,7 @@ class PostgresERVerdictCache:
             return {}
         from psycopg.rows import dict_row
 
-        with self._pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        with self._connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT er_key, same FROM er_verdict WHERE er_key = ANY(%s)",
                 (list(keys),),
@@ -223,7 +241,7 @@ class PostgresERVerdictCache:
         overwrites, so the newest verdict wins."""
         if not entries:
             return
-        with self._pool().connection() as conn, conn.cursor() as cur:
+        with self._connection() as conn, conn.cursor() as cur:
             cur.executemany(
                 "INSERT INTO er_verdict (er_key, same) VALUES (%s, %s) "
                 "ON CONFLICT (er_key) DO UPDATE "
@@ -262,5 +280,7 @@ class _CompositeERGraphOps:
 def build_er_graph_ops(store: Any) -> ERGraphOps:
     graph_ops: ERGraphOps = NebulaERGraphOps(store)
     if settings.agent.er_verdict_cache_backend == "postgres":
-        return _CompositeERGraphOps(PostgresERVerdictCache(), graph_ops)
+        return _CompositeERGraphOps(
+            PostgresERVerdictCache(graph=transitional_default_graph()), graph_ops,
+        )
     return graph_ops

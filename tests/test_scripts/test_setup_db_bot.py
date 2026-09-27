@@ -6,8 +6,8 @@ from scripts.setup_db import _BOT_INDEXES_DDL, _BOT_REQUEST_DDL, _BOT_USER_DDL
 
 
 def test_tables_are_created_idempotently():
-    assert "CREATE TABLE IF NOT EXISTS bot_user" in _BOT_USER_DDL
-    assert "CREATE TABLE IF NOT EXISTS bot_request" in _BOT_REQUEST_DDL
+    assert "CREATE TABLE IF NOT EXISTS public.bot_user" in _BOT_USER_DDL
+    assert "CREATE TABLE IF NOT EXISTS public.bot_request" in _BOT_REQUEST_DDL
 
 
 def test_new_users_are_pending_and_clients():
@@ -30,6 +30,7 @@ def test_request_has_no_foreign_key_to_the_user():
     """Deliberate: the record of what someone asked must outlive their
     account being deleted."""
     assert "REFERENCES bot_user" not in _BOT_REQUEST_DDL
+    assert "REFERENCES public.bot_user" not in _BOT_REQUEST_DDL
 
 
 def test_sources_default_to_an_empty_array_not_null():

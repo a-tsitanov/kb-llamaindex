@@ -12,12 +12,12 @@ from __future__ import annotations
 
 from datetime import date
 
-from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from src.api.auth import require_api_key
 from src.storage.postgres import GROUP_BY_COLUMN, AsyncPostgres
+from src.tenancy.context import transitional_default_graph
 
 router = APIRouter(
     prefix="/stats",
@@ -57,13 +57,13 @@ class TimelineResponse(BaseModel):
 
 @router.get("/messages", response_model=MessagesStatsResponse,
             summary="Per-channel/group message counts by status")
-@inject
 async def messages_stats(
-    pg: FromDishka[AsyncPostgres],
     group_by: str = "channel",
     since: date | None = None,
     until: date | None = None,
 ) -> MessagesStatsResponse:
+    # Task 9 replaces this with the request's graph.
+    pg = AsyncPostgres(graph=transitional_default_graph())
     dimension = GROUP_BY_COLUMN.get(group_by)
     if dimension is None:
         raise HTTPException(
@@ -76,9 +76,7 @@ async def messages_stats(
 
 @router.get("/timeline", response_model=TimelineResponse,
             summary="Daily message counts")
-@inject
 async def timeline_stats(
-    pg: FromDishka[AsyncPostgres],
     date_field: str = "created_at",
     group_by: str | None = None,
     channel: str | None = None,
@@ -86,6 +84,8 @@ async def timeline_stats(
     since: date | None = None,
     until: date | None = None,
 ) -> TimelineResponse:
+    # Task 9 replaces this with the request's graph.
+    pg = AsyncPostgres(graph=transitional_default_graph())
     if date_field not in _DATE_FIELDS:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,

@@ -21,6 +21,7 @@ from src.graph.er_graph_ops import (
     _CompositeERGraphOps,
     build_er_graph_ops,
 )
+from src.tenancy.context import default_graph_context, new_graph_context
 
 # ── stubs ────────────────────────────────────────────────────────────
 
@@ -62,6 +63,16 @@ class _StubConn:
         self.cursors.append(cur)
         return cur
 
+    # The cache's scoped connection commits `SET search_path` first;
+    # recorded apart from the cursor traffic the tests assert on.
+    scope_log: list = field(default_factory=list)
+
+    def execute(self, q, params=None):
+        self.scope_log.append(q.as_string(None) if hasattr(q, "as_string") else str(q))
+
+    def commit(self):
+        self.scope_log.append("commit")
+
     def __enter__(self):
         return self
 
@@ -85,7 +96,7 @@ class _StubPool:
 @pytest.fixture
 def cache_with_pool():
     def _make(rows=None):
-        cache = PostgresERVerdictCache()
+        cache = PostgresERVerdictCache(graph=default_graph_context())
         pool = _StubPool(rows)
         cache._pool = lambda: pool  # noqa: SLF001 - test seam
         return cache, pool
@@ -247,3 +258,13 @@ def test_er_degrades_to_pure_llm_judging_when_the_cache_raises(monkeypatch):
 
     assert er._load_verdict_cache(object(), ["a"]) == {}
     er._store_verdicts(object(), {"a": True})  # must not raise
+
+
+def test_cache_reads_and_writes_in_the_graphs_schema():
+    """Verdicts are per-graph: every connection is pinned to the graph's
+    schema (committed) before the query runs."""
+    cache = PostgresERVerdictCache(graph=new_graph_context("acme"))
+    pool = _StubPool([{"er_key": "a", "same": True}])
+    cache._pool = lambda: pool  # noqa: SLF001 - test seam
+    assert cache.load_verdicts(["a"]) == {"a": True}
+    assert pool.conn.scope_log == ['SET search_path TO "g_acme", public', "commit"]
