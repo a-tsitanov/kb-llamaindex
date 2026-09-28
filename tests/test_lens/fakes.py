@@ -2,7 +2,44 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
+
+import httpx
+from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
+
 from src.lens.llm import ChatReply
+
+
+@asynccontextmanager
+async def lifespan_of(app):
+    """httpx.ASGITransport does not run the ASGI lifespan; the mounted MCP app needs it."""
+    started, stopped, inbox = asyncio.Event(), asyncio.Event(), asyncio.Queue()
+
+    async def send(msg):
+        {"lifespan.startup.complete": started, "lifespan.shutdown.complete": stopped}.get(
+            msg["type"], asyncio.Event()).set()
+
+    task = asyncio.create_task(app({"type": "lifespan"}, inbox.get, send))
+    await inbox.put({"type": "lifespan.startup"})
+    await started.wait()
+    try:
+        yield
+    finally:
+        await inbox.put({"type": "lifespan.shutdown"})
+        await stopped.wait()
+        await task
+
+
+def mcp_client(app, url: str, headers: dict) -> Client:
+    """fastmcp Client talking to an in-process ASGI app (no sockets)."""
+    def factory(headers=None, timeout=None, auth=None, **_):
+        return httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://test", headers=headers,
+                                 timeout=timeout, auth=auth)
+    return Client(StreamableHttpTransport(url=url, headers=headers,
+                                          httpx_client_factory=factory))
 
 
 class FakeLLM:
