@@ -93,3 +93,27 @@ async def test_startup_marks_orphans_failed(env):
     orphan = await w.store.create_run(w.ws.id, "q", [], "large", stale_after_s=600)
     async with lifespan_of(app):
         assert (await w.store.get_run(orphan.id)).status == "failed"
+
+
+async def test_daily_cleanup_logs_errors(env, monkeypatch, caplog):
+    from src.lens_agent.app import _daily_cleanup
+
+    w, _, _ = env
+    caplog.clear()
+    caplog.set_level("ERROR", "src.lens_agent.app")
+
+    async def cleanup_raises(*args, **kwargs):
+        raise RuntimeError("cleanup failed")
+
+    monkeypatch.setattr(w.store, "cleanup", cleanup_raises)
+    task = asyncio.create_task(_daily_cleanup(
+        AgentDeps(store=w.store, bus=w.bus, runner=w.runner, settings=w.settings)))
+
+    # Let cleanup loop iterate once
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert "cleanup failed" in caplog.text
+    assert caplog.records[0].levelname == "ERROR"

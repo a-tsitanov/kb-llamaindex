@@ -150,10 +150,12 @@ async def _build_deps(settings: AgentSettings) -> AgentDeps:
 
 async def _daily_cleanup(deps: AgentDeps) -> None:
     while True:
-        with contextlib.suppress(Exception):
+        try:
             n = await deps.store.cleanup(deps.settings.retention_days)
             if n:
                 log.info("lens-agent cleanup: %d old runs removed", n)
+        except Exception:
+            log.exception("lens-agent cleanup failed")
         await asyncio.sleep(24 * 3600)
 
 
@@ -171,6 +173,8 @@ def create_app(deps: AgentDeps | None = None) -> FastAPI:
             yield
         finally:
             cleanup.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cleanup
             await app.state.deps.runner.drain()
             if deps is None:
                 await close_pg_pool()
