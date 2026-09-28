@@ -1064,10 +1064,5 @@
   "1062": "__init__.py",
   "1063": "Eval scripts README (community backend parity gate GDS→leidenalg)",
   "1064": "__init__.py",
-  "1065": "test_auth.py",
-  "1066": "_FlakyClient",
-  "1067": "test_config_wave2.py",
-  "1068": "test_tg_ingest_groups.py",
-  "1069": ".put_object",
-  "1070": "_no_entity_mirror"
+  "1066": "_FlakyClient"
 }

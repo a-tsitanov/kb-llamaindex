@@ -40,8 +40,8 @@
     "semantic_hash": "9b90c2e756ac77fd8839fe6391ccfdc0"
   },
   "pyproject.toml": {
-    "mtime": 1790164428.4073126,
-    "ast_hash": "b52bfd079149ffe443c9b34d60a3ae1f",
+    "mtime": 1790622299.7245705,
+    "ast_hash": "64172f90b031178aca724ffb7c936d57",
     "semantic_hash": ""
   },
   "scripts/analyze.py": {
@@ -4587,6 +4587,76 @@
   "docs/superpowers/specs/2026-09-28-lens-v2-design.md": {
     "mtime": 1790618944.3997602,
     "ast_hash": "c62b1680586dc55333a059eafadf9cd0",
+    "semantic_hash": ""
+  },
+  "src/lens_agent/__init__.py": {
+    "mtime": 1790622469.2570016,
+    "ast_hash": "b8b79e3ed5750b07bdd162354b3d8ede",
+    "semantic_hash": ""
+  },
+  "src/lens_agent/app.py": {
+    "mtime": 1790623748.6754699,
+    "ast_hash": "c25fa36b7c6889437c2c75d4d90c748b",
+    "semantic_hash": ""
+  },
+  "src/lens_agent/calls.py": {
+    "mtime": 1790623711.136625,
+    "ast_hash": "eebea9b06e68b15b1a0d45b3200d303f",
+    "semantic_hash": ""
+  },
+  "src/lens_agent/config.py": {
+    "mtime": 1790622478.230441,
+    "ast_hash": "82ec7ac23c99d96623fb274604ca5757",
+    "semantic_hash": ""
+  },
+  "src/lens_agent/prompt.py": {
+    "mtime": 1790623711.1366947,
+    "ast_hash": "5bc4761667a269de43293f69dfe366ee",
+    "semantic_hash": ""
+  },
+  "src/lens_agent/runner.py": {
+    "mtime": 1790623711.1367373,
+    "ast_hash": "7b055bc6894c9805aae35eeff29fcbaf",
+    "semantic_hash": ""
+  },
+  "src/lens_agent/store.py": {
+    "mtime": 1790622506.0976186,
+    "ast_hash": "f5015a2f4e9a4bd6b3e04ec350b69bbb",
+    "semantic_hash": ""
+  },
+  "src/lens_agent/stream.py": {
+    "mtime": 1790623164.8592126,
+    "ast_hash": "06e253b04fa4ed78ffebb210003779c5",
+    "semantic_hash": ""
+  },
+  "tests/test_lens_agent/__init__.py": {
+    "mtime": 1790622448.913086,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "tests/test_lens_agent/helpers.py": {
+    "mtime": 1790623711.1367767,
+    "ast_hash": "6a3b31977d2e77170cda7c078a6624ac",
+    "semantic_hash": ""
+  },
+  "tests/test_lens_agent/test_app.py": {
+    "mtime": 1790623730.167999,
+    "ast_hash": "67a009fe6d344223e6d4b0e24c2dc28a",
+    "semantic_hash": ""
+  },
+  "tests/test_lens_agent/test_runner.py": {
+    "mtime": 1790623711.1368134,
+    "ast_hash": "00e20acffa79e93da15af239a36b272b",
+    "semantic_hash": ""
+  },
+  "tests/test_lens_agent/test_store.py": {
+    "mtime": 1790622462.018348,
+    "ast_hash": "9264d4ee295d5bdce9403a53ce5266a5",
+    "semantic_hash": ""
+  },
+  "tests/test_lens_agent/test_stream.py": {
+    "mtime": 1790623155.3137026,
+    "ast_hash": "625c07badae44d575c5650b06f700e68",
     "semantic_hash": ""
   }
 }
