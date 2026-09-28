@@ -16,6 +16,17 @@ def obj(oid, label=None, type_="organization", **kw):
     return {"id": oid, "label": label or oid, "type": type_, "source": src(), **kw}
 
 
+class YieldingStore(MemoryLensStore):
+    """Test store that yields control to force genuine asyncio interleaving."""
+    async def list_ops(self, *a, **kw):
+        await asyncio.sleep(0)
+        return await super().list_ops(*a, **kw)
+
+    async def append_ops(self, *a, **kw):
+        await asyncio.sleep(0)
+        return await super().append_ops(*a, **kw)
+
+
 @pytest.fixture
 async def board():
     store, bus = MemoryLensStore(), EventBus()
@@ -137,10 +148,13 @@ async def test_writes_publish_board_events(board):
     assert op.input_id is None
 
 
-async def test_parallel_calls_in_one_workspace_do_not_duplicate(board):
-    b, ws, _ = board
+async def test_parallel_calls_in_one_workspace_do_not_duplicate():
+    # Use YieldingStore to force genuine asyncio interleaving
+    store, bus = YieldingStore(), EventBus()
+    b = BoardService(store, bus, BoardLimits(objects_per_call=3, objects_per_run=4))
+    ws = await store.create_workspace("t")
     r1, r2 = await asyncio.gather(
-        b.add_objects(ws, "r1", [obj("id-1", label="Росатом")]),
-        b.add_objects(ws, "r1", [obj("id-2", label="РОСАТОМ")]))
+        b.add_objects(ws.id, "r1", [obj("id-1", label="Росатом")]),
+        b.add_objects(ws.id, "r1", [obj("id-2", label="РОСАТОМ")]))
     assert r1["added"] + r2["added"] == 1
-    assert len((await b.state(ws)).objects) == 1
+    assert len((await b.state(ws.id)).objects) == 1
