@@ -260,6 +260,8 @@ services:
 
   # A new source = one more entry in LENS_AGENT_MCP (role "source"); kb-search is off by
   # default (it runs its own LLM synthesis and blows the time budget of a local model).
+  # LENS_AGENT_KB_SEARCH is inlined into the JSON below ("enabled":${LENS_AGENT_KB_SEARCH:-false}),
+  # so it must be exactly `true` or `false` (lowercase, no quotes) — anything else is invalid JSON.
   lens-agent:
     <<: [*app-build]
     command: ["uvicorn", "src.lens_agent.app:app", "--host", "0.0.0.0", "--port", "8020"]
