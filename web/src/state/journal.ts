@@ -75,7 +75,8 @@ export function reduce(j: RunJournal, ev: AgentEvent): RunJournal {
                    text: `→ ${ev.server}.${ev.tool}(${shortArgs(ev.args)})` });
       break;
     case "tool_result":
-      lines.push({ kind: "result", callId: ev.call_id, ok: ev.ok, truncated: ev.truncated,
+      // A cached result's payload lives under the original call's id, not this one's.
+      lines.push({ kind: "result", callId: ev.cached_from ?? ev.call_id, ok: ev.ok, truncated: ev.truncated,
                    text: `← ${resultText(ev)}` });
       break;
     case "final": {

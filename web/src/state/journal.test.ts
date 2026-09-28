@@ -42,6 +42,15 @@ describe("journal reducer", () => {
     expect(j.lines).toEqual([{ kind: "text", text: "ab" }]);
   });
 
+  it("routes a cached tool_result's «подробнее» link to the original call's id", () => {
+    seq = 0;
+    const j = [
+      ev("tool_call", { call_id: "c1", server: "kb", tool: "find", args: {} }),
+      ev("tool_result", { call_id: "c2", cached_from: "c1", ok: true, summary: { items: 1, bytes: 10 } }),
+    ].reduce(reduce, newJournal("r1"));
+    expect(j.lines[1].callId).toBe("c1");
+  });
+
   it("shows errors and failed status", () => {
     seq = 0;
     const j = [ev("error", { where: "limit", message: "время вышло" }), ev("done", { status: "failed" })]
