@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from src.lens.keys import match_labels
 from src.lens.model import Column, OpKind, Ref, TableEl
 from src.lens.state import CanvasState
 
@@ -23,7 +24,6 @@ _CANVAS_MODE = re.compile(r"^(покажи\s+)?(полем|на поле|кар�
 _HIDE = re.compile(r"^(скрой|убери|спрячь)\b\s*(?P<t>.*?)" + _END, re.I)
 _SHOW = re.compile(r"^(покажи|верни)\b\s*(?P<t>.*?)" + _END, re.I)
 _OPEN = re.compile(r"^открой\s+(?P<t>.+?)" + _END, re.I)
-_WORD = re.compile(r"\w+", re.U)
 _VALS_SPLIT = re.compile(r"\s*(?:,|\bи\b|\s)\s*", re.I)
 
 
@@ -44,34 +44,8 @@ def is_stop(text: str) -> bool:
     return bool(_STOP.match(text.strip()))
 
 
-def _stem(w: str) -> str:
-    w = w.lower().replace("ё", "е")
-    if len(w) > 5:
-        return w[:-2]
-    if len(w) > 4:
-        return w[:-1]
-    return w
-
-
-def _words(s: str) -> list[str]:
-    return [_stem(w) for w in _WORD.findall(s)]
-
-
 def _match(target: str, state: CanvasState, keys: list[str]) -> list[str]:
-    t = target.strip().lower()
-    if not t:
-        return []
-    exact = [k for k in keys if state.objects[k].label.lower() == t]
-    if exact:
-        return exact[:1]
-    want = _words(t)
-    found = []
-    for k in keys:
-        have = _words(state.objects[k].label)
-        if want and all(any(h == w or (len(w) >= 4 and h.startswith(w)) for h in have)
-                        for w in want):
-            found.append(k)
-    return found
+    return match_labels(target, {k: state.objects[k].label for k in keys})
 
 
 def _ambiguous(state: CanvasState, keys: list[str]) -> Command:
