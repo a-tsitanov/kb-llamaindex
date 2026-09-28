@@ -55,3 +55,6 @@ worktrees/
 
 # graphify dated snapshots — regenerable, ~10MB each
 graphify-out/20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
+
+# Local LiteLLM model routing (dev machine); selected via LITELLM_CONFIG in .env
+docker/litellm_config.local.yaml
