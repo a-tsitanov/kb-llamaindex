@@ -101,3 +101,22 @@ async def test_payload_roundtrip_and_cleanup(store):
     assert await store.cleanup(30) >= 1
     assert await store.get_run(run.id) is None
     assert await store.get_payload(run.id, "c1") is None
+
+
+def test_strip_nul_walks_json():
+    from src.lens_agent.store import strip_nul
+
+    assert strip_nul({"a\u0000": ["x\u0000y", {"k": "\u0000"}, 1, None, True, 2.5]}) == {
+        "a": ["xy", {"k": ""}, 1, None, True, 2.5]}
+    assert strip_nul("без\u0000нуля") == "безнуля" and strip_nul(7) == 7
+
+
+async def test_nul_is_stripped_before_saving(store):
+    run = await store.create_run(ws(), "q", [], "large", stale_after_s=600)
+    await store.save_payload(CallPayload(run_id=run.id, call_id="c1", server="kb", tool="t",
+                                         args={"q": "a\u0000"}, payload={"x": "b\u0000c"}))
+    rec = await store.get_payload(run.id, "c1")
+    assert rec.args == {"q": "a"} and rec.payload == {"x": "bc"}
+    ev = await store.append_event(run.id, "tool_result", {"preview": "d\u0000e"})
+    assert ev.data == {"preview": "de"}
+    assert (await store.list_events(run.id))[0].data == {"preview": "de"}

@@ -60,6 +60,18 @@ CREATE TABLE IF NOT EXISTS agent_call_payload (
 STALE_REASON = "зависший запуск снят"
 
 
+def strip_nul(value: Any) -> Any:
+    """``value`` with NUL characters removed from every string (and key): Postgres jsonb
+    rejects ``\\u0000``, and a tool result may carry it. Both stores apply it, for parity."""
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, dict):
+        return {strip_nul(k): strip_nul(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [strip_nul(v) for v in value]
+    return value
+
+
 def _terminal_events(reason: str) -> list[tuple[str, dict[str, Any]]]:
     """The events closing a run failed outside its runner."""
     return [("error", {"where": "internal", "message": reason}), ("done", {"status": "failed"})]
@@ -192,6 +204,7 @@ class MemoryAgentStore:
         return len(orphans)
 
     async def append_event(self, run_id, type_, data):
+        data = strip_nul(data)
         evs = self.events.setdefault(run_id, [])
         ev = AgentEvent(run_id=run_id, seq=len(evs) + 1, ts=_now(), type=type_, data=data)
         evs.append(ev)
@@ -201,7 +214,8 @@ class MemoryAgentStore:
         return [e for e in self.events.get(run_id, []) if e.seq > after_seq]
 
     async def save_payload(self, rec):
-        self.payloads[(rec.run_id, rec.call_id)] = rec
+        self.payloads[(rec.run_id, rec.call_id)] = rec.model_copy(
+            update={"args": strip_nul(rec.args), "payload": strip_nul(rec.payload)})
 
     async def get_payload(self, run_id, call_id):
         return self.payloads.get((run_id, call_id))
@@ -309,6 +323,7 @@ class PgAgentStore:
             return await self._fail_where(conn, "true", (), reason)
 
     async def append_event(self, run_id, type_, data):
+        data = strip_nul(data)
         async with self.pool.connection() as conn, conn.transaction():
             seq, ts = await self._append_on(conn, run_id, type_, data)
         return AgentEvent(run_id=run_id, seq=seq, ts=ts, type=type_, data=data)
@@ -325,8 +340,8 @@ class PgAgentStore:
             await conn.execute(
                 "INSERT INTO agent_call_payload (run_id, call_id, server, tool, args, payload) "
                 "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (run_id, call_id) DO NOTHING",
-                (rec.run_id, rec.call_id, rec.server, rec.tool, Jsonb(rec.args),
-                 Jsonb(rec.payload)))
+                (rec.run_id, rec.call_id, rec.server, rec.tool, Jsonb(strip_nul(rec.args)),
+                 Jsonb(strip_nul(rec.payload))))
 
     async def get_payload(self, run_id, call_id):
         row = await self._one("SELECT run_id, call_id, server, tool, args, payload "
