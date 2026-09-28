@@ -18,9 +18,9 @@ export const pin = (s: Settings, ws: string, key: string, x: number, y: number) 
 
 export type BoardEvent = { type: "ready" } | { type: "ops"; ops: Op[] } | { type: "resync" };
 
-/** Follows the board stream; reconnects (fresh token) forever until aborted. */
+/** Follows the board stream; reconnects (fresh token, exponential backoff) forever until aborted. */
 export function followBoard(s: Settings, ws: string, onEvent: (e: BoardEvent) => void,
-                            signal: AbortSignal): Promise<void> {
+                            signal: AbortSignal, onError?: (err: unknown) => void): Promise<void> {
   return openStream({
     url: async () => {
       const { token } = await api<{ token: string }>(s, `/board/workspaces/${ws}/stream_token`,
@@ -28,6 +28,7 @@ export function followBoard(s: Settings, ws: string, onEvent: (e: BoardEvent) =>
       return `/board/workspaces/${ws}/stream?token=${encodeURIComponent(token)}`;
     },
     onMessage: (m) => onEvent(JSON.parse(m.data) as BoardEvent),
+    onError,
     signal,
   });
 }

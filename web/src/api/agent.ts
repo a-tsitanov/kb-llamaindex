@@ -23,9 +23,10 @@ export const getCall = (s: Settings, runId: string, callId: string) =>
   api<{ server: string; tool: string; args: unknown; payload: unknown }>(
     s, `/agent/runs/${runId}/calls/${callId}`);
 
-/** Streams one run from the start (or `after`) until `done`. */
+/** Streams one run from the start (or `after`) until `done`; reconnects with exponential backoff. */
 export function followRun(s: Settings, runId: string, onEvent: (e: AgentEvent) => void,
-                          signal: AbortSignal, firstToken?: string): Promise<void> {
+                          signal: AbortSignal, firstToken?: string,
+                          onError?: (err: unknown) => void): Promise<void> {
   let token = firstToken;
   let finished = false;
   return openStream({
@@ -44,6 +45,7 @@ export function followRun(s: Settings, runId: string, onEvent: (e: AgentEvent) =
       onEvent(ev);
     },
     finished: () => finished,
+    onError,
     signal,
   });
 }

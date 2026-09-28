@@ -51,7 +51,10 @@ export interface StreamOptions {
   finished?: () => boolean;
   onError?: (err: unknown) => void;
   lastEventId?: string;
+  /** Base backoff delay (default 1000ms); doubles on each failed reconnect. */
   retryMs?: number;
+  /** Backoff ceiling (default 30000ms). */
+  maxRetryMs?: number;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }
@@ -65,6 +68,9 @@ const sleep = (ms: number, signal?: AbortSignal) =>
 /** Reads until `finished()` or abort; reconnects with Last-Event-ID after drops. */
 export async function openStream(opts: StreamOptions): Promise<void> {
   const doFetch = opts.fetchImpl ?? fetch;
+  const base = opts.retryMs ?? 1000;
+  const max = opts.maxRetryMs ?? 30000;
+  let delay = base;
   let lastId = opts.lastEventId;
   while (!opts.signal?.aborted) {
     try {
@@ -79,6 +85,7 @@ export async function openStream(opts: StreamOptions): Promise<void> {
         if (done) break;
         for (const msg of parser.feed(value)) {
           if (msg.id) lastId = msg.id;
+          delay = base; // the connection is healthy again: reset backoff
           opts.onMessage(msg);
         }
       }
@@ -87,6 +94,7 @@ export async function openStream(opts: StreamOptions): Promise<void> {
       opts.onError?.(err);
     }
     if (opts.finished?.()) return;
-    await sleep(opts.retryMs ?? 1000, opts.signal);
+    await sleep(delay, opts.signal);
+    delay = Math.min(delay * 2, max);
   }
 }

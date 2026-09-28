@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { openStream, SSEParser, type SSEMessage } from "./sse";
 
 describe("SSEParser", () => {
@@ -75,5 +75,36 @@ describe("openStream", () => {
     });
     expect(tries).toBe(2);
     expect(String(errors[0])).toContain("403");
+  });
+
+  it("doubles the retry delay on repeated failures, caps it at maxRetryMs, and resets it after a message", async () => {
+    const ctl = new AbortController();
+    const delays: number[] = [];
+    vi.stubGlobal("setTimeout", ((fn: (...a: unknown[]) => void, ms?: number) => {
+      delays.push(ms ?? 0);
+      fn();
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout);
+    try {
+      let attempt = 0;
+      const fetchImpl = (async () => {
+        attempt++;
+        if (attempt <= 3) return new Response("nope", { status: 500 });
+        if (attempt === 4) return new Response(body(["id: 1\nevent: text\ndata: {}\n\n"]), { status: 200 });
+        ctl.abort();
+        return new Response("nope", { status: 500 });
+      }) as unknown as typeof fetch;
+      await openStream({
+        url: async () => "/x",
+        onMessage: () => {},
+        retryMs: 10,
+        maxRetryMs: 40,
+        signal: ctl.signal,
+        fetchImpl,
+      });
+      expect(delays).toEqual([10, 20, 40, 10]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
