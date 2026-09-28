@@ -2,6 +2,8 @@
 
 export interface Settings {
   key: string;
+  /** Last-opened workspace id, restored on reload (undefined = none / cleared). */
+  ws?: string;
 }
 
 const STORAGE = "lensWeb";
