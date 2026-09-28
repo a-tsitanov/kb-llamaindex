@@ -37,6 +37,7 @@ services:
       LITELLM_MASTER_KEY: ${LITELLM_API_KEY:-sk-litellm-stub}
       # Yandex AI Studio (OpenAI-compatible) models in litellm_config reference it.
       YANDEX_API_KEY: ${YANDEX_API_KEY:-}
+      UNSLOTH_API_KEY: ${UNSLOTH_API_KEY:-}
       # config.yaml's os.environ/OPENAI_API_KEY refs resolve from here; empty
       # is fine when only the ollama models are used.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
