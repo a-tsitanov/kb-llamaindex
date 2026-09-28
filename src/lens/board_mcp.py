@@ -2,8 +2,14 @@
 
 Mounted in the Lens app at ``/mcp``. lens-agent calls it with ``Authorization: Bearer
 <LENS_BOARD_MCP_TOKEN>`` plus ``X-Workspace`` / ``X-Run`` set per run, so the model can
-never pick the workspace or pose as another run. Sources inside ``add_objects`` /
-``add_relations`` items are injected by lens-agent (the model only passes ``call_id``).
+never pick the workspace or pose as another run.
+
+Trust contract for ``source``: the board takes ``source`` inside ``add_objects`` /
+``add_relations`` items at face value (BoardService only forces ``run_id`` to the calling
+run — see ``board.py::_source``; it does not otherwise validate ``server``/``tool``/
+``namespace``). lens-agent MUST strip any model-supplied ``source`` from tool-call
+arguments before they reach here and build the real one itself from its own call registry;
+the model must only ever be allowed to pass ``call_id``.
 """
 
 from __future__ import annotations
@@ -28,12 +34,20 @@ class BearerGuard:
         self.lifespan = getattr(app, "lifespan", None)
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http" and not self._ok(scope):
-            body = json.dumps({"detail": "invalid or missing bearer token"}).encode()
-            await send({"type": "http.response.start", "status": 401,
-                        "headers": [(b"content-type", b"application/json")]})
-            await send({"type": "http.response.body", "body": body})
+        if scope["type"] == "http":
+            if not self._ok(scope):
+                body = json.dumps({"detail": "invalid or missing bearer token"}).encode()
+                await send({"type": "http.response.start", "status": 401,
+                            "headers": [(b"content-type", b"application/json")]})
+                await send({"type": "http.response.body", "body": body})
+                return
+        elif scope["type"] == "websocket":
+            # The MCP app has no websocket routes; refuse rather than let an unauthenticated
+            # websocket handshake reach it.
+            await send({"type": "websocket.close", "code": 1008})
             return
+        elif scope["type"] != "lifespan":
+            return  # unknown scope type: deny by doing nothing
         await self.app(scope, receive, send)
 
     def _ok(self, scope) -> bool:

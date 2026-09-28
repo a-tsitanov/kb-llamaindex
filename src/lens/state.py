@@ -46,9 +46,13 @@ def _merge_obj(into: ObjectEl, other: ObjectEl) -> None:
     if other.description:
         into.description = other.description  # latest non-empty wins; history in the op log
     if other.type != into.type:
-        seen = into.attrs.setdefault("types_seen", [into.type])
+        seen = into.attrs.get("types_seen")
+        # Tolerate a non-list value: the model can write into attrs directly, and a
+        # non-list types_seen must never brick every future read/write of this key.
+        seen = list(seen) if isinstance(seen, list) else ([seen] if seen else [into.type])
         if other.type not in seen:
             seen.append(other.type)
+        into.attrs["types_seen"] = seen
 
 
 def _add_input(st: CanvasState, key: str, input_id: str | None) -> None:

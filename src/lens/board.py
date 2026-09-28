@@ -21,6 +21,9 @@ from src.lens.store import LensStore
 
 _CITE = re.compile(r"\[\[([^\[\]]+)\]\]")
 _SOURCE_FIELDS = ("server", "tool", "call_id", "namespace")
+# Keys the fold writes into ObjectEl/RelationEl.attrs itself (state.py, _put_relation). An
+# item's incoming attrs must never seed or overwrite these — see state.py::_merge_obj.
+_RESERVED_ATTRS = ("types_seen", "kind_original")
 
 
 class BoardError(ValueError):
@@ -36,13 +39,17 @@ class BoardLimits:
 def _source(raw: Any, run_id: str | None) -> Source | None:
     if not isinstance(raw, dict) or any(not raw.get(f) for f in _SOURCE_FIELDS):
         return None
-    return Source(**{**raw, "run_id": raw.get("run_id") or run_id})
+    # run_id always comes from the caller's own header, never from the item — a caller
+    # cannot forge a source into a different run this way.
+    return Source(**{**raw, "run_id": run_id})
 
 
 class BoardService:
     def __init__(self, store: LensStore, bus: EventBus, limits: BoardLimits | None = None):
         self.store, self.bus = store, bus
         self.limits = limits or BoardLimits()
+        # Serializes read-check-write within one process only (Lens runs a single uvicorn
+        # process). Running multiple workers would need a Postgres advisory lock here instead.
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     # ── plumbing ────────────────────────────────────────────────────────
@@ -132,11 +139,13 @@ class BoardService:
                     merged.append({"id": oid, "merged_into": key})
                 elif key not in keys:
                     added += 1
+                raw_attrs = item.get("attrs") if isinstance(item.get("attrs"), dict) else {}
+                attrs = {k: v for k, v in raw_attrs.items() if k not in _RESERVED_ATTRS}
                 built.append(ObjectEl(
                     key=key, type=otype, label=label,
                     description=(str(item["description"]).strip() or None)
                     if item.get("description") else None,
-                    attrs=item.get("attrs") if isinstance(item.get("attrs"), dict) else {},
+                    attrs=attrs,
                     sources=[src]))
                 by_label.setdefault((otype, normalize_id(label)), key)
                 keys.append(key)
@@ -178,13 +187,15 @@ class BoardService:
             if any(o.kind == "undo" and o.input_id == run_id for o in ops):
                 return {"skipped": "в этом запуске была отмена — заметка не нужна"}
             st = fold(ops)
-            labels = {k: o.label for k, o in st.objects.items()}
+            # Hidden objects are excluded here too: a citation must never resolve to (or
+            # match the label of) something the board currently hides.
+            labels = {k: o.label for k, o in st.objects.items() if k not in st.hidden}
             cites: list[str] = []
 
             def resolve(m: re.Match) -> str:
                 raw = m.group(1).strip()
                 key = st.canon(raw)
-                if key not in st.objects:
+                if key not in st.objects or key in st.hidden:
                     query = raw.split(":", 1)[1] if ":" in raw else raw
                     found = match_labels(query, labels)
                     if len(found) != 1:

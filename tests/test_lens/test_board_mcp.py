@@ -79,6 +79,22 @@ async def test_bearer_token_required(env):
             assert r.status_code == 401
 
 
+async def test_bearer_guard_closes_websocket_scope():
+    store, bus = MemoryLensStore(), EventBus()
+    board = BoardService(store, bus)
+    guard = board_mcp_app(lambda: board, TOKEN)
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+
+    async def receive():  # pragma: no cover - not exercised, guard denies before use
+        return {"type": "websocket.receive"}
+
+    await guard({"type": "websocket", "headers": []}, receive, send)
+    assert sent == [{"type": "websocket.close", "code": 1008}]
+
+
 async def test_empty_token_refuses_everything():
     store, bus = MemoryLensStore(), EventBus()
     board = BoardService(store, bus)

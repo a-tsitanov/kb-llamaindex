@@ -181,3 +181,14 @@ def test_relation_sources_merge():
         op("add_relations", {"relations": [dict(rel, sources=[src("c2", "r2")])]}, "r2"),
     ])
     assert [s.call_id for s in st.relations["kb:1|связан|kb:2"].sources] == ["c1", "c2"]
+
+
+def test_merge_tolerates_non_list_types_seen():
+    # A model-supplied (or otherwise corrupted) attrs["types_seen"] that is not a list must
+    # not brick the fold: _merge_obj has to coerce it instead of calling .append on it.
+    st = fold([
+        op("add_objects", {"objects": [obj("kb:1", attrs={"types_seen": "x"})]}, "i1"),
+        op("add_objects", {"objects": [{"key": "kb:1", "type": "organization", "label": "L",
+                                        "attrs": {}, "refs": []}]}, "i2"),
+    ])
+    assert st.objects["kb:1"].attrs["types_seen"] == ["x", "organization"]

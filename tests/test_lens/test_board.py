@@ -62,6 +62,30 @@ async def test_unknown_type_becomes_other(board):
     assert (await b.get_object(ws, "kb:x"))["type"] == "other"
 
 
+async def test_add_objects_strips_reserved_attrs(board):
+    b, ws, _ = board
+    await b.add_objects(ws, "r1", [
+        obj("A", attrs={"types_seen": "x", "kind_original": "y", "ok": 1})])
+    o = await b.get_object(ws, "kb:a")
+    assert o["attrs"] == {"ok": 1}
+
+
+async def test_source_run_id_cannot_be_forged(board):
+    b, ws, _ = board
+    forged = {**src(), "run_id": "OTHER"}
+    await b.add_objects(ws, "r1", [
+        {"id": "A", "label": "A", "type": "organization", "source": forged},
+        {"id": "B", "label": "B", "type": "organization", "source": src()}])
+    o = await b.get_object(ws, "kb:a")
+    assert o["sources"][0]["run_id"] == "r1"
+    r = await b.add_relations(ws, "r1", [
+        {"from": "kb:a", "to": "kb:b", "kind": "связан", "source": forged}])
+    assert r["added"] == 1
+    st = await b.state(ws)
+    (rel,) = st.relations.values()
+    assert rel.sources[0].run_id == "r1"
+
+
 async def test_limits_per_call_and_per_run(board):
     b, ws, _ = board
     with pytest.raises(BoardError, match="за вызов"):
@@ -97,6 +121,16 @@ async def test_note_canonicalizes_citations(board):
     assert r["cites"] == ["kb:a"]
     await b.add_note(ws, "r2", "замена")
     assert [n.text for n in (await b.state(ws)).notes] == ["замена"]
+
+
+async def test_note_citations_skip_hidden_objects(board):
+    b, ws, _ = board
+    await b.add_objects(ws, "r1", [obj("A", label="Rosatom")])
+    await b.hide(ws, "r1", ["kb:a"])
+    r = await b.add_note(ws, "r2", "см. [[kb:a]] и [[Rosatom]].")
+    assert r["cites"] == []
+    st = await b.state(ws)
+    assert st.notes[-1].text == "см. a и Rosatom."
 
 
 async def test_undo_reverts_previous_run_not_current(board):
