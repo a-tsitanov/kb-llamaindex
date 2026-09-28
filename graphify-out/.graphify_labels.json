@@ -1069,5 +1069,19 @@
   "1067": "_Cast",
   "1068": "test_tg_ingest_groups.py",
   "1069": "._validate_iso_date",
-  "1070": ".achat"
+  "1070": ".achat",
+  "1071": "_pages_to_delete",
+  "1072": "test_entity_vector_store.py",
+  "1073": "test_setup_db_entity.py",
+  "1074": "test_search_server.py",
+  "1075": "handle_repeat",
+  "1076": "ingest_metrics_extractor.py",
+  "1077": "test_publisher.py",
+  "1078": "_McpErrorClient",
+  "1079": "input.ts",
+  "1080": "test_config_wave2.py",
+  "1081": "test_search_deps_lock.py",
+  "1082": "_no_entity_mirror",
+  "1083": "test_value_kind_families_partition_the_enumeration",
+  "1084": "vite.config.ts"
 }
