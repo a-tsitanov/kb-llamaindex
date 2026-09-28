@@ -10,6 +10,14 @@ describe("SSEParser", () => {
       { event: "ready", data: "{}" },
     ]);
   });
+
+  it("preserves CRLF split across chunks", () => {
+    const p = new SSEParser();
+    expect(p.feed("data: line1\r")).toEqual([]);
+    expect(p.feed("\ndata: line2\r\n\r\n")).toEqual([
+      { event: "message", data: "line1\nline2" },
+    ]);
+  });
 });
 
 function body(chunks: string[]): ReadableStream<Uint8Array> {

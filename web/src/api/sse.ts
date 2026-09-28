@@ -10,8 +10,14 @@ export interface SSEMessage {
 /** Incremental text/event-stream parser: feed chunks, get complete messages. */
 export class SSEParser {
   private buf = "";
+  private cr = false;
 
   feed(chunk: string): SSEMessage[] {
+    // Handle \r\n split across chunks: if this chunk starts with \n and previous ended with \r, skip it
+    if (this.cr && chunk.startsWith("\n")) {
+      chunk = chunk.slice(1);
+    }
+    this.cr = chunk.endsWith("\r");
     this.buf += chunk.replace(/\r\n?/g, "\n");
     const out: SSEMessage[] = [];
     let cut: number;
