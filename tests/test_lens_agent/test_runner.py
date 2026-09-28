@@ -264,3 +264,75 @@ async def test_cancel_then_drain_still_ends_with_one_done():
         evs = await w.store.list_events(run.id)
         assert of(evs, "done") == [{"status": "cancelled"}]
         assert (await w.store.get_run(run.id)).status == "cancelled"
+
+
+def same_tool_call_id(*turns):
+    """Like ``scripted``, but every tool call carries the same provider id (some backends
+    restart their ids each turn)."""
+    import json
+
+    from pydantic_ai.messages import ModelResponse
+    from pydantic_ai.models.function import DeltaToolCall, FunctionModel
+
+    async def stream(messages, info):
+        turn = turns[min(sum(isinstance(m, ModelResponse) for m in messages), len(turns) - 1)]
+        if isinstance(turn, str):
+            yield turn
+            return
+        yield {j: DeltaToolCall(name=n, json_args=json.dumps(a, ensure_ascii=False),
+                                tool_call_id="call_0") for j, (n, a) in enumerate(turn)}
+
+    return FunctionModel(stream_function=stream)
+
+
+async def test_repeated_provider_tool_call_id_gets_fresh_call_ids():
+    async with world() as w:
+        run, evs = await w.run(same_tool_call_id(
+            [("kb_find_entity", {"name": "Росатом"})], [("kb_big", {})],
+            [("board_add_objects", {"objects": objs("c1")[:1]})], "ok"))
+        assert run.status == "done"
+        assert [(c["call_id"], c["tool"]) for c in of(evs, "tool_call")] == [
+            ("c1", "find_entity"), ("c2", "big"), ("c3", "add_objects")]
+        assert (await w.store.get_payload(run.id, "c1")).tool == "find_entity"
+        assert (await w.store.get_payload(run.id, "c2")).tool == "big"
+        src = (await w.board.state(w.ws.id)).objects["kb:e1"].sources[0]
+        assert (src.call_id, src.tool) == ("c1", "find_entity")
+
+
+async def test_identical_calls_in_one_turn_hit_the_source_once():
+    async with world() as w:
+        seen = []
+        run, evs = await w.run(scripted(
+            [("kb_find_entity", {"name": "Р"}), ("kb_find_entity", {"name": "Р"})], "ok",
+            seen=seen))
+        assert run.status == "done" and w.hits["find_entity"] == 1
+        rets = tool_returns(seen[-1])
+        assert rets[0].startswith("call_id=c1") and rets[1].startswith("(повтор вызова c1")
+        assert [r.get("cached_from") for r in of(evs, "tool_result")] == [None, "c1"]
+
+
+async def test_several_tool_calls_in_one_turn():
+    async with world() as w:
+        run, evs = await w.run(scripted(
+            [("kb_find_entity", {"name": "Р"}), ("kb_big", {}), ("board_get_board", {})],
+            [("board_add_objects", {"objects": objs("c1")[:1]})], "ok"))
+        assert run.status == "done"
+        calls = [(c["call_id"], c["server"], c["tool"]) for c in of(evs, "tool_call")]
+        assert calls[:3] == [("c1", "kb", "find_entity"), ("c2", "kb", "big"),
+                             ("c3", "board", "get_board")]
+        results = of(evs, "tool_result")
+        assert sorted(r["call_id"] for r in results) == ["c1", "c2", "c3", "c4"]
+        assert all(r["ok"] for r in results)
+        src = (await w.board.state(w.ws.id)).objects["kb:e1"].sources[0]
+        assert (src.server, src.tool, src.call_id) == ("kb", "find_entity", "c1")
+
+
+async def test_board_call_id_cannot_be_cited_as_a_source():
+    async with world() as w:
+        seen = []
+        run, _ = await w.run(scripted(
+            [("board_get_board", {})],
+            [("board_add_objects", {"objects": objs("c1")[:1]})], "ok", seen=seen))
+        assert run.status == "done"
+        assert "неизвестный call_id 'c1'" in tool_returns(seen[-1])[1]
+        assert (await w.board.state(w.ws.id)).objects == {}

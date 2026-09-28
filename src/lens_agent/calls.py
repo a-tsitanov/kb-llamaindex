@@ -1,8 +1,11 @@
 """Per-run tool-call guard: the ``process_tool_call`` hook of every MCP server.
 
 What the model cannot be trusted with happens here:
-- every call gets a short ``call_id`` (c1, c2 …) that the model sees in source results and
-  cites in board writes; the journal (``tool_call``/``tool_result``) uses the same id;
+- every call gets a fresh short ``call_id`` (c1, c2 …) that the model sees in source results
+  and cites in board writes; the journal (``tool_call``/``tool_result``) uses the same id.
+  Provider tool-call ids are not trusted to be unique (some backends restart them each turn);
+- tool calls of a run are sequential (see ``runner``), so an identical call in the same turn
+  already finds the first one's result in the cache;
 - source results are stored in full and cut to ``result_chars`` for the model;
 - an identical repeated source call is answered from the run cache (not counted twice);
 - soft budgets per kind (source / board): over budget the call is not made and the model is
@@ -67,22 +70,21 @@ class RunCalls:
         self.counts = {"source": 0, "board": 0}
         self.note_written = False
         self.undone = False
-        self._ids: dict[str, str] = {}
+        self._seen: set[str] = set()
         self._n = 0
         self._cache: dict[str, tuple[str, str]] = {}
 
     def short_id(self, provider_id: str | None) -> str:
-        if provider_id and provider_id in self._ids:
-            return self._ids[provider_id]
-        self._n += 1
-        cid = f"c{self._n}"
+        """A fresh id for every hook invocation (never reused, even for a repeated provider
+        id); the provider id is only remembered for ``seen``."""
         if provider_id:
-            self._ids[provider_id] = cid
-        return cid
+            self._seen.add(provider_id)
+        self._n += 1
+        return f"c{self._n}"
 
     def seen(self, provider_id: str | None) -> bool:
         """Did this model tool call reach our hook (and get its own tool_result)?"""
-        return bool(provider_id) and provider_id in self._ids
+        return bool(provider_id) and provider_id in self._seen
 
     def hook(self, entry: McpEntry):
         async def process_tool_call(ctx, call_tool, name: str, args: dict[str, Any]):
