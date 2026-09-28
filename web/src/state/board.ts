@@ -83,9 +83,11 @@ export function applyOps(st: BoardState, ops: Op[]): BoardState | null {
         }
         break;
       case "add_note": {
+        // Mirror the server fold (state.py add_note): remove any existing note with this
+        // key, then append — a replaced note moves to the end, not its old position.
         const i = next.notes.findIndex((n) => n.key === p.note.key);
-        if (i >= 0) next.notes[i] = p.note;
-        else next.notes.push(p.note);
+        if (i >= 0) next.notes.splice(i, 1);
+        next.notes.push(p.note);
         break;
       }
       case "add_objects":
@@ -111,6 +113,12 @@ export function applyOps(st: BoardState, ops: Op[]): BoardState | null {
     next.last_seq = op.seq;
   }
   return next;
+}
+
+/** True when a freshly re-fetched board is safe to adopt: not older than what we already
+ * applied locally via ops (a slow/out-of-order refetch must not roll the board backward). */
+export function isFresherBoard(current: BoardState | null, incoming: BoardState): boolean {
+  return !current || incoming.last_seq >= current.last_seq;
 }
 
 /** A citation key → the object key it now lives under (after merges). */
