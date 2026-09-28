@@ -32,7 +32,7 @@ _KIND_ALIASES = {
     "mentions": "упоминает", "mentioned_in": "упоминает",
 }
 
-_QUOTES = re.compile(r"[«»\"'""„`]")
+_QUOTES = re.compile(r"[«»\"'“”„`]")
 _SPACES = re.compile(r"\s+")
 _WORD = re.compile(r"\w+", re.U)
 
@@ -63,7 +63,7 @@ def normalize_kind(raw: str | None) -> tuple[str, str | None]:
         return k, None
     if k in _KIND_ALIASES:
         return _KIND_ALIASES[k], None
-    return "related", (str(raw).strip() or None)
+    return "related", ((str(raw).strip() if raw is not None else "") or None)
 
 
 def stem(word: str) -> str:
