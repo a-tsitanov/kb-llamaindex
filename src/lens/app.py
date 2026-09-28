@@ -13,6 +13,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from src.lens.auth import make_stream_token, require_key, require_stream_token
+from src.lens.board import BoardLimits, BoardService
+from src.lens.board_mcp import board_mcp_app
 from src.lens.config import lens_settings
 from src.lens.events import EventBus, sse_stream
 from src.lens.model import Column
@@ -24,8 +26,15 @@ from src.lens.state import fold, state_to_dict
 class LensDeps:
     store: Any
     bus: EventBus
-    agent: Any
-    hub: Any
+    agent: Any = None  # legacy input path only (LENS_LEGACY_INPUT=true)
+    hub: Any = None
+    board: BoardService | None = None
+
+    def __post_init__(self) -> None:
+        if self.board is None:
+            self.board = BoardService(self.store, self.bus, BoardLimits(
+                objects_per_call=lens_settings.board_objects_per_call,
+                objects_per_run=lens_settings.board_objects_per_run))
 
 
 class NewWorkspace(BaseModel):
@@ -106,12 +115,12 @@ def _routes() -> tuple[APIRouter, APIRouter, APIRouter]:
         # Public: bucketed to "up"/"down" only — the raw status can carry connection
         # exception text (hostnames, ports, stack-adjacent detail) that's not for
         # anonymous callers.
-        return {"mcp": {name: "up" if s == "up" else "down"
-                       for name, s in deps.hub.status().items()}}
+        status_ = deps.hub.status() if deps.hub else {}
+        return {"mcp": {name: "up" if s == "up" else "down" for name, s in status_.items()}}
 
     @api.get("/health/details")
     async def health_details(deps: LensDeps = Depends(_deps)):
-        return {"mcp": deps.hub.status()}
+        return {"mcp": deps.hub.status() if deps.hub else {}}
 
     @api.post("/workspaces")
     async def create_workspace(body: NewWorkspace, deps: LensDeps = Depends(_deps)):
@@ -138,13 +147,16 @@ def _routes() -> tuple[APIRouter, APIRouter, APIRouter]:
     @api.post("/workspaces/{workspace_id}/input", status_code=status.HTTP_202_ACCEPTED)
     async def post_input(workspace_id: str, body: InputBody, deps: LensDeps = Depends(_deps)):
         await _workspace_or_404(deps, workspace_id)
+        if deps.agent is None:
+            raise HTTPException(status.HTTP_410_GONE,
+                                "legacy input is disabled; send requests to lens-agent")
         input_id = await deps.agent.submit(workspace_id, body.text, body.mentions)
         return {"input_id": input_id}
 
     @api.post("/workspaces/{workspace_id}/pin")
     async def pin(workspace_id: str, body: PinBody, deps: LensDeps = Depends(_deps)):
         await _workspace_or_404(deps, workspace_id)
-        (op,) = await deps.agent.pin(workspace_id, body.key, body.x, body.y)
+        op = await deps.board.pin(workspace_id, body.key, body.x, body.y)
         return {"seq": op.seq}
 
     @api.post("/workspaces/{workspace_id}/stream_token")
@@ -198,20 +210,28 @@ def _routes() -> tuple[APIRouter, APIRouter, APIRouter]:
 
 
 async def _build_deps() -> LensDeps:
-    from src.lens.agent import Agent
-    from src.lens.llm import OpenAICompatLLM
-    from src.lens.mcp_hub import McpHub
-    from src.lens.normalizer import Normalizer
-    from src.lens.planner import Planner
     from src.lens.store import PgLensStore
     from src.storage.pg_pool import get_pg_pool
 
     store = PgLensStore(await get_pg_pool())
     await store.ensure_schema()
+    bus = EventBus()
+    if not lens_settings.legacy_input:
+        return LensDeps(store=store, bus=bus)
+    return await _build_legacy_deps(store, bus)
+
+
+async def _build_legacy_deps(store: Any, bus: EventBus) -> LensDeps:
+    from src.lens.agent import Agent
+    from src.lens.llm import OpenAICompatLLM
+    from src.lens.mcp_hub import McpHub
+    from src.lens.normalizer import Normalizer
+    from src.lens.planner import Planner
+
     hub = McpHub(lens_settings.mcp_servers, timeout_s=lens_settings.tool_timeout_s,
                  backoff_s=lens_settings.reconnect_backoff_s)
     await hub.start()
-    llm, bus = OpenAICompatLLM(), EventBus()
+    llm = OpenAICompatLLM()
     planner = Planner(llm, hub, store, model=lens_settings.planner_model(),
                       max_steps=lens_settings.max_tool_steps,
                       sample_chars=lens_settings.sample_chars)
@@ -225,21 +245,28 @@ async def _build_deps() -> LensDeps:
 
 
 def create_app(deps: LensDeps | None = None) -> FastAPI:
+    # Board MCP for lens-agent; resolves the board per call (deps are built in lifespan).
+    board_mcp = board_mcp_app(lambda: app.state.deps.board,
+                              lens_settings.board_mcp_token.get_secret_value())
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        if deps is not None:
-            app.state.deps = deps
-            yield
-            return
-        from src.storage.pg_pool import close_pg_pool
+        async with board_mcp.lifespan(app):
+            if deps is not None:
+                app.state.deps = deps
+                yield
+                return
+            from src.storage.pg_pool import close_pg_pool
 
-        app.state.deps = await _build_deps()
-        try:
-            yield
-        finally:
-            await app.state.deps.agent.drain()
-            await app.state.deps.hub.close()
-            await close_pg_pool()
+            app.state.deps = await _build_deps()
+            try:
+                yield
+            finally:
+                if app.state.deps.agent is not None:
+                    await app.state.deps.agent.drain()
+                if app.state.deps.hub is not None:
+                    await app.state.deps.hub.close()
+                await close_pg_pool()
 
     app = FastAPI(title="Lens", lifespan=lifespan)
     if deps is not None:
@@ -249,6 +276,7 @@ def create_app(deps: LensDeps | None = None) -> FastAPI:
                                                                     "Content-Type"])
     for router in _routes():
         app.include_router(router)
+    app.mount("/mcp", board_mcp)  # endpoint: /mcp/mcp
     return app
 
 

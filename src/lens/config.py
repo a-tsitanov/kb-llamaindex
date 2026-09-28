@@ -56,6 +56,12 @@ class LensSettings(BaseSettings):
     api_keys: str = "dev-lens-key"
     stream_secret: SecretStr = SecretStr("")
     cors_origins: str = "http://localhost:5173"
+    # v2: lens-agent drives the board through the board MCP (/mcp); the old
+    # Router/Planner/Normalizer input path stays in the repo behind this flag.
+    legacy_input: bool = False
+    board_mcp_token: SecretStr = SecretStr("")
+    board_objects_per_call: int = 50
+    board_objects_per_run: int = 200
 
     def planner_model(self) -> str:
         return self.model_planner or settings.litellm.model_large

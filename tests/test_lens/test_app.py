@@ -2,6 +2,7 @@ import json
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from src.lens.app import LensDeps, create_app
 from src.lens.auth import check_stream_token, make_stream_token
@@ -9,6 +10,7 @@ from src.lens.config import lens_settings
 from src.lens.events import EventBus
 from src.lens.model import ToolCallRecord
 from src.lens.store import MemoryLensStore
+from tests.test_lens.fakes import lifespan_of, mcp_client
 
 KEY = "test-lens-key"
 
@@ -21,9 +23,6 @@ class FakeAgent:
     async def submit(self, ws, text, mentions):
         self.submitted.append((ws, text, mentions))
         return "i1"
-
-    async def pin(self, ws, key, x, y):
-        return await self.store.append_ops(ws, None, [("pin", {"key": key, "x": x, "y": y})])
 
 
 class FakeHub:
@@ -164,3 +163,41 @@ def test_key_is_valid_checks_all_keys():
     assert not key_is_valid("c", ["a", "b"])
     assert not key_is_valid("", [])
     assert key_is_valid("ключ", ["ключ"])
+
+
+async def test_legacy_input_off_returns_410_and_health_without_hub(monkeypatch):
+    monkeypatch.setattr(lens_settings, "api_keys", KEY)
+    app = create_app(LensDeps(store=MemoryLensStore(), bus=EventBus()))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t",
+                                 headers={"X-API-Key": KEY}) as c:
+        ws = (await c.post("/lens/v1/workspaces", json={"title": "t"})).json()
+        r = await c.post(f"/lens/v1/workspaces/{ws['id']}/input", json={"text": "x"})
+        assert r.status_code == 410
+        assert (await c.get("/lens/v1/health")).json() == {"mcp": {}}
+        r = await c.post(f"/lens/v1/workspaces/{ws['id']}/pin",
+                         json={"key": "kb:1", "x": 1, "y": 2})
+        assert r.json() == {"seq": 1}
+
+
+async def test_board_mcp_mounted_writes_reach_state_and_stream(monkeypatch):
+    monkeypatch.setattr(lens_settings, "api_keys", KEY)
+    monkeypatch.setattr(lens_settings, "board_mcp_token", SecretStr("mcp-token"))
+    deps = LensDeps(store=MemoryLensStore(), bus=EventBus())
+    app = create_app(deps)
+    async with lifespan_of(app):
+        ws = await deps.store.create_workspace("t")
+        q = deps.bus.subscribe(ws.id)
+        headers = {"Authorization": "Bearer mcp-token", "X-Workspace": ws.id, "X-Run": "r1"}
+        async with mcp_client(app, "http://test/mcp/mcp", headers) as c:
+            await c.call_tool("add_objects", {"objects": [{
+                "id": "A", "type": "organization", "label": "Росатом",
+                "source": {"server": "kb-tools", "tool": "t", "call_id": "c1",
+                           "namespace": "kb"}}]})
+        assert q.get_nowait()["type"] == "ops"
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://t") as h:
+            body = (await h.get(f"/lens/v1/workspaces/{ws.id}",
+                                headers={"X-API-Key": KEY})).json()
+            assert [o["key"] for o in body["state"]["objects"]] == ["kb:a"]
+            r = await h.post("/mcp/mcp", json={}, headers={"Authorization": "Bearer nope"})
+            assert r.status_code == 401

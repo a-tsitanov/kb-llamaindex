@@ -238,6 +238,10 @@ services:
       LENS_API_KEYS: ${LENS_API_KEYS:?set LENS_API_KEYS}
       LENS_STREAM_SECRET: ${LENS_STREAM_SECRET:-}
       LENS_CORS_ORIGINS: ${LENS_CORS_ORIGINS:-http://localhost:5173}
+      # v2: lens-agent writes the board through /mcp/mcp with this bearer token (empty =
+      # board MCP refuses every call). The old /input path is off unless LENS_LEGACY_INPUT.
+      LENS_BOARD_MCP_TOKEN: ${LENS_BOARD_MCP_TOKEN:-}
+      LENS_LEGACY_INPUT: ${LENS_LEGACY_INPUT:-false}
       # Role models (empty = LITELLM_MODEL_LARGE) and a Lens-only LLM timeout: a CPU-only
       # local model needs minutes per planner/normalizer step, other services keep theirs.
       LENS_MODEL_PLANNER: ${LENS_MODEL_PLANNER:-}
