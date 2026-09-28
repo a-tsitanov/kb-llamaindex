@@ -1,5 +1,7 @@
 # Lens — object-centric research workspace (design)
 
+> **Superseded by `2026-09-28-lens-v2-design.md`** (agent service + board MCP + simple web). Kept for history.
+
 Date: 2026-09-22 · Status: design approved; revision 2 after adversarial review (see §9) · Working name: Lens
 
 ## 1. Goal
