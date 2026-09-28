@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, SecretStr, field_validator
+from pydantic import BaseModel, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.config import settings
@@ -56,6 +56,18 @@ class AgentSettings(BaseSettings):
     connect_timeout_s: float = 10.0
     retention_days: int = 30
     heartbeat_s: float = 15.0
+
+    @model_validator(mode="after")
+    def _one_board_named_board(self) -> AgentSettings:
+        """The instructions name the board tools ``board_*`` and the tool prefix is the entry
+        name, so the board entry must be called ``board``."""
+        boards = [e.name for e in self.enabled() if e.role == "board"]
+        if len(boards) > 1:
+            raise ValueError(f"LENS_AGENT_MCP: only one enabled board entry allowed, got {boards}")
+        if boards and boards[0] != "board":
+            raise ValueError(f"LENS_AGENT_MCP: the board entry must be named 'board' (the prompt "
+                             f"uses board_* tool names), got {boards[0]!r}")
+        return self
 
     def enabled(self) -> list[McpEntry]:
         return [e for e in self.mcp if e.enabled]
