@@ -178,3 +178,89 @@ async def test_unknown_tool_is_journaled_and_model_retries():
     async with world() as w:
         run, evs = await w.run(scripted([("kb_no_such_tool", {})], "ладно"))
         assert run.status == "done" and of(evs, "error")[0]["where"] == "tool"
+
+
+async def wait_event(w, run_id, type_):
+    for _ in range(200):
+        if any(e.type == type_ for e in await w.store.list_events(run_id)):
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError(f"no {type_} event")
+
+
+def agent_tasks():
+    """Unfinished pydantic-ai tasks (a background agent loop or a detached tool call)."""
+    return [t for t in asyncio.all_tasks() if not t.done() and any(
+        n in getattr(t.get_coro(), "__qualname__", "") for n in ("run_agent", "_call_tool"))]
+
+
+async def test_cancel_stops_the_tool_call_and_nothing_follows_done():
+    async with world() as w:
+        w.model = scripted([("kb_slow", {})], "не дойдёт")
+        run = await w.runner.submit(w.ws.id, "медленно", [])
+        await wait_event(w, run.id, "tool_call")
+        assert w.runner.cancel(run.id)
+        await w.wait(run.id)
+        assert agent_tasks() == []
+        w.hits["_gate"].set()
+        await asyncio.sleep(0.3)
+        evs = await w.store.list_events(run.id)
+        assert types(evs)[-1] == "done" and of(evs, "done") == [{"status": "cancelled"}]
+        assert (await w.store.get_run(run.id)).status == "cancelled"
+        (res,) = of(evs, "tool_result")  # the interrupted call is closed in the journal
+        assert res["call_id"] == "c1" and res["ok"] is False and res["error"] == "отменено"
+
+
+async def test_run_timeout_stops_the_tool_call_and_nothing_follows_done():
+    async with world(run_timeout_s=0.3) as w:
+        run, _ = await w.run(scripted([("kb_slow", {})], "не дойдёт"))
+        assert run.status == "failed" and agent_tasks() == []
+        w.hits["_gate"].set()
+        await asyncio.sleep(0.3)
+        evs = await w.store.list_events(run.id)
+        assert types(evs)[-1] == "done" and of(evs, "done") == [{"status": "failed"}]
+
+
+async def test_run_timeout_stops_the_model():
+    from pydantic_ai.models.function import FunctionModel
+
+    state = {}
+
+    async def stream(messages, info):
+        await asyncio.sleep(0.6)
+        state["kept_running"] = True
+        yield "поздно"
+
+    async with world(run_timeout_s=0.2) as w:
+        run, _ = await w.run(FunctionModel(stream_function=stream))
+        assert run.status == "failed"
+        await asyncio.sleep(0.8)
+        assert state == {} and types(await w.store.list_events(run.id))[-1] == "done"
+
+
+async def test_double_cancel_still_ends_with_one_done():
+    async with world() as w:
+        w.model = scripted([("kb_slow", {})], "не дойдёт")
+        run = await w.runner.submit(w.ws.id, "медленно", [])
+        await wait_event(w, run.id, "tool_call")
+        assert w.runner.cancel(run.id)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert w.runner.cancel(run.id)
+        await w.wait(run.id)
+        evs = await w.store.list_events(run.id)
+        assert of(evs, "done") == [{"status": "cancelled"}]
+        assert (await w.store.get_run(run.id)).status == "cancelled"
+
+
+async def test_cancel_then_drain_still_ends_with_one_done():
+    async with world() as w:
+        w.model = scripted([("kb_slow", {})], "не дойдёт")
+        run = await w.runner.submit(w.ws.id, "медленно", [])
+        await wait_event(w, run.id, "tool_call")
+        assert w.runner.cancel(run.id)
+        await asyncio.sleep(0)
+        await w.runner.drain()
+        evs = await w.store.list_events(run.id)
+        assert of(evs, "done") == [{"status": "cancelled"}]
+        assert (await w.store.get_run(run.id)).status == "cancelled"

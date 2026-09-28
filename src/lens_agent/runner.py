@@ -1,7 +1,13 @@
 """Runs: connect MCP servers per run, drive the agent, map its events to our stream.
 
-The web never sees PydanticAI types: text/thinking/final come from ``run_stream_events``,
-tool_call/tool_result from the ``RunCalls`` hook. Every run ends with exactly one ``done``.
+The web never sees PydanticAI types: text/thinking come from the ``agent.run`` event stream
+handler, final/usage from its result, tool_call/tool_result from the ``RunCalls`` hook. Every
+run ends with exactly one ``done``.
+
+The whole run lives in its own task: ``agent.run`` drives the model and the tools in the
+calling task and tool calls are forced sequential (pydantic-ai would otherwise start them as
+detached tasks), so a cancel or the run timeout reaches the model request and the tool call in
+flight, and the MCP connections are closed by the task that opened them.
 """
 
 from __future__ import annotations
@@ -16,7 +22,6 @@ from typing import Any
 
 from pydantic_ai import (
     Agent,
-    AgentRunResultEvent,
     FunctionToolResultEvent,
     PartDeltaEvent,
     PartStartEvent,
@@ -77,6 +82,7 @@ class Runner:
         self.model_factory = model_factory
         self.server_factory = server_factory or http_server_factory(settings)
         self.tasks: dict[str, asyncio.Task] = {}
+        self._cancelling: set[str] = set()
 
     # ── control ─────────────────────────────────────────────────────────
     async def submit(self, workspace_id: str, text: str, mentions: list[str]) -> RunRecord:
@@ -84,20 +90,28 @@ class Runner:
                                           stale_after_s=2 * self.settings.run_timeout_s)
         task = asyncio.create_task(self._run(run), name=f"lens-run-{run.id}")
         self.tasks[run.id] = task
-        task.add_done_callback(lambda _t, rid=run.id: self.tasks.pop(rid, None))
+        task.add_done_callback(lambda _t, rid=run.id: self._forget(rid))
         return run
 
+    def _forget(self, run_id: str) -> None:
+        self.tasks.pop(run_id, None)
+        self._cancelling.discard(run_id)
+
     def cancel(self, run_id: str) -> bool:
+        """Idempotent: a run already being cancelled is not interrupted again (a second
+        ``Task.cancel`` would break its end-of-run bookkeeping)."""
         task = self.tasks.get(run_id)
         if task is None:
             return False
-        task.cancel()
+        if run_id not in self._cancelling:
+            self._cancelling.add(run_id)
+            task.cancel()
         return True
 
     async def drain(self) -> None:
         tasks = list(self.tasks.values())
-        for t in tasks:
-            t.cancel()
+        for rid in list(self.tasks):
+            self.cancel(rid)
         await asyncio.gather(*tasks, return_exceptions=True)
 
     # ── one run ─────────────────────────────────────────────────────────
@@ -139,32 +153,90 @@ class Runner:
             with contextlib.suppress(Exception):
                 await self.store.heartbeat(run_id)
 
-    async def _stream(self, agent: Agent, prompt: str, em: RunEmitter,
-                      calls: RunCalls) -> tuple[str, dict[str, int]]:
+    async def _agent_run(self, agent: Agent, prompt: str, em: RunEmitter,
+                         calls: RunCalls) -> tuple[str, dict[str, int]]:
+        async def on_events(_ctx, events) -> None:
+            async for ev in events:
+                if isinstance(ev, PartStartEvent):
+                    if isinstance(ev.part, TextPart):
+                        await em.delta("text", ev.part.content)
+                    elif isinstance(ev.part, ThinkingPart):
+                        await em.delta("thinking", ev.part.content)
+                elif isinstance(ev, PartDeltaEvent):
+                    if isinstance(ev.delta, TextPartDelta):
+                        await em.delta("text", ev.delta.content_delta)
+                    elif isinstance(ev.delta, ThinkingPartDelta):
+                        await em.delta("thinking", ev.delta.content_delta or "")
+                elif (isinstance(ev, FunctionToolResultEvent)
+                      and isinstance(ev.result, RetryPromptPart)
+                      and not calls.seen(ev.result.tool_call_id)):
+                    # rejected before reaching a server (unknown tool, invalid args)
+                    await em.emit("error", where="tool",
+                                  message=ev.result.model_response()[:500])
+
         limits = UsageLimits(request_limit=self.settings.request_limit)
-        async for ev in agent.run_stream_events(prompt, usage_limits=limits):
-            if isinstance(ev, PartStartEvent):
-                if isinstance(ev.part, TextPart):
-                    await em.delta("text", ev.part.content)
-                elif isinstance(ev.part, ThinkingPart):
-                    await em.delta("thinking", ev.part.content)
-            elif isinstance(ev, PartDeltaEvent):
-                if isinstance(ev.delta, TextPartDelta):
-                    await em.delta("text", ev.delta.content_delta)
-                elif isinstance(ev.delta, ThinkingPartDelta):
-                    await em.delta("thinking", ev.delta.content_delta or "")
-            elif (isinstance(ev, FunctionToolResultEvent)
-                  and isinstance(ev.result, RetryPromptPart)
-                  and not calls.seen(ev.result.tool_call_id)):
-                # rejected before reaching a server (unknown tool, invalid args)
-                await em.emit("error", where="tool",
-                              message=ev.result.model_response()[:500])
-            elif isinstance(ev, AgentRunResultEvent):
-                u = ev.result.usage()
-                return str(ev.result.output), {"requests": u.requests,
-                                               "tokens_in": u.input_tokens,
-                                               "tokens_out": u.output_tokens}
-        raise RunFailure("internal", "поток агента закончился без результата")
+        with Agent.sequential_tool_calls():  # no detached tool-call tasks: see module doc
+            result = await agent.run(prompt, usage_limits=limits,
+                                     event_stream_handler=on_events)
+        u = result.usage()
+        return str(result.output), {"requests": u.requests, "tokens_in": u.input_tokens,
+                                    "tokens_out": u.output_tokens}
+
+    async def _execute(self, run: RunRecord, em: RunEmitter, calls: RunCalls,
+                       t0: float) -> dict[str, int]:
+        s = self.settings
+        async with AsyncExitStack() as stack:
+            servers, statuses = await self._connect(stack, run, calls)
+            await em.emit("run_started", input={"text": run.text, "mentions": run.mentions},
+                          model=s.model, mcp=statuses)
+            board_entry = s.board()
+            board = servers.get(board_entry.name) if board_entry else None
+            if board is None:
+                raise RunFailure("internal", "доска недоступна (board MCP)")
+            prompt = user_prompt(run.text, await self._mentions(board, run.mentions))
+            agent = Agent(self.model_factory(), instructions=INSTRUCTIONS,
+                          toolsets=list(servers.values()))
+            answer, usage = await asyncio.wait_for(self._agent_run(agent, prompt, em, calls),
+                                                   s.run_timeout_s)
+            await em.emit("final", answer=answer, usage=usage,
+                          duration_ms=int((time.monotonic() - t0) * 1000))
+            if answer.strip() and not calls.note_written and not calls.undone:
+                try:  # the note is deterministic: written even if the model forgot
+                    await board.direct_call_tool("add_note", {"text": answer})
+                except Exception as e:
+                    log.warning("run %s: add_note failed: %s", run.id, e)
+            return usage
+
+    def _classify(self, run: RunRecord, e: BaseException) -> tuple[str, RunFailure | None]:
+        """(status, failure) for an exception that ended the run."""
+        if isinstance(e, TimeoutError):
+            return "failed", RunFailure(
+                "limit", f"время запуска исчерпано ({self.settings.run_timeout_s:.0f} с)")
+        e = _unwrap(e)
+        task = asyncio.current_task()
+        if isinstance(e, asyncio.CancelledError) or (task and task.cancelling()):
+            # closing MCP streams on cancel may raise its own error — still a cancel
+            return "cancelled", None
+        if isinstance(e, RunFailure):
+            return "failed", e
+        if isinstance(e, UsageLimitExceeded):
+            return "failed", RunFailure("limit", str(e))
+        if isinstance(e, ModelAPIError | UnexpectedModelBehavior):
+            return "failed", RunFailure("model", str(e))
+        log.error("run %s failed", run.id, exc_info=e)
+        return "failed", RunFailure("internal", f"{type(e).__name__}: {e}")
+
+    async def _finalize(self, run: RunRecord, em: RunEmitter, side: list[asyncio.Task],
+                        status: str, failure: RunFailure | None,
+                        usage: dict[str, int] | None) -> None:
+        for t in side:
+            t.cancel()
+        await asyncio.gather(*side, return_exceptions=True)
+        if failure is not None:
+            await em.emit("error", where=failure.where, message=failure.message[:1000])
+        await em.emit("done", status=status)
+        await self.store.finish_run(run.id, status, usage=usage,
+                                    error=failure.message if failure else None)
 
     async def _run(self, run: RunRecord) -> None:
         s = self.settings
@@ -176,52 +248,14 @@ class Runner:
         status, failure, usage = "failed", None, None
         side = [asyncio.create_task(self._heartbeat(run.id)), asyncio.create_task(em.autoflush())]
         try:
-            async with AsyncExitStack() as stack:
-                servers, statuses = await self._connect(stack, run, calls)
-                await em.emit("run_started", input={"text": run.text, "mentions": run.mentions},
-                              model=s.model, mcp=statuses)
-                board_entry = s.board()
-                board = servers.get(board_entry.name) if board_entry else None
-                if board is None:
-                    raise RunFailure("internal", "доска недоступна (board MCP)")
-                prompt = user_prompt(run.text, await self._mentions(board, run.mentions))
-                agent = Agent(self.model_factory(), instructions=INSTRUCTIONS,
-                              toolsets=list(servers.values()))
-                answer, usage = await asyncio.wait_for(self._stream(agent, prompt, em, calls),
-                                                       s.run_timeout_s)
-                await em.emit("final", answer=answer, usage=usage,
-                              duration_ms=int((time.monotonic() - t0) * 1000))
-                if answer.strip() and not calls.note_written and not calls.undone:
-                    try:  # the note is deterministic: written even if the model forgot
-                        await board.direct_call_tool("add_note", {"text": answer})
-                    except Exception as e:
-                        log.warning("run %s: add_note failed: %s", run.id, e)
-                status = "done"
-        except asyncio.CancelledError:
-            status = "cancelled"
-        except TimeoutError:
-            failure = RunFailure("limit", f"время запуска исчерпано ({s.run_timeout_s:.0f} с)")
+            usage = await self._execute(run, em, calls, t0)
+            status = "done"
         except BaseException as e:  # every run must end with `done`
-            e = _unwrap(e)
-            task = asyncio.current_task()
-            if isinstance(e, asyncio.CancelledError) or (task and task.cancelling()):
-                # closing MCP streams on cancel may raise its own error — still a cancel
-                status = "cancelled"
-            elif isinstance(e, RunFailure):
-                failure = e
-            elif isinstance(e, UsageLimitExceeded):
-                failure = RunFailure("limit", str(e))
-            elif isinstance(e, ModelAPIError | UnexpectedModelBehavior):
-                failure = RunFailure("model", str(e))
-            else:
-                log.exception("run %s failed", run.id)
-                failure = RunFailure("internal", f"{type(e).__name__}: {e}")
-        finally:
-            for t in side:
-                t.cancel()
-            await asyncio.gather(*side, return_exceptions=True)
-        if failure is not None:
-            await em.emit("error", where=failure.where, message=failure.message[:1000])
-        await em.emit("done", status=status)
-        await self.store.finish_run(run.id, status, usage=usage,
-                                    error=failure.message if failure else None)
+            status, failure = self._classify(run, e)
+        # The bookkeeping must survive a further cancellation (shutdown during a cancel):
+        # it runs shielded and this task waits it out.
+        fin = asyncio.ensure_future(self._finalize(run, em, side, status, failure, usage))
+        while not fin.done():
+            with contextlib.suppress(asyncio.CancelledError):
+                await asyncio.shield(fin)
+        fin.result()

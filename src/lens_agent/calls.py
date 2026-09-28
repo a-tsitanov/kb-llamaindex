@@ -116,6 +116,9 @@ class RunCalls:
             msg = f"таймаут {self.limits.tool_timeout_s:.0f} с — попробуй иначе или завершай"
             await self._result(cid, ok=False, t0=t0, error=msg)
             raise ModelRetry(msg) from None
+        except asyncio.CancelledError:  # run cancelled / timed out: close the call's entry
+            await self._result(cid, ok=False, t0=t0, error="отменено")
+            raise
 
     async def _source(self, entry: McpEntry, cid: str, call_tool, name: str,
                       args: dict[str, Any]) -> str:
