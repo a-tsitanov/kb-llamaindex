@@ -58,6 +58,9 @@ async def test_stale_heartbeat_frees_the_workspace(store):
     fresh = await store.create_run(w, "q2", [], "large", stale_after_s=1)
     old = await store.get_run(run.id)
     assert fresh.status == "running" and old.status == "failed" and old.error
+    assert [(e.type, e.data) for e in await store.list_events(run.id)] == [
+        ("error", {"where": "internal", "message": old.error}), ("done", {"status": "failed"})]
+    assert await store.list_events(fresh.id) == []
 
 
 async def test_fail_orphans_on_restart(store):
@@ -65,6 +68,9 @@ async def test_fail_orphans_on_restart(store):
     assert await store.fail_orphans("прервано перезапуском") >= 1
     r = await store.get_run(run.id)
     assert r.status == "failed" and r.error == "прервано перезапуском" and r.finished_at
+    assert [(e.seq, e.type, e.data) for e in await store.list_events(run.id)] == [
+        (1, "error", {"where": "internal", "message": "прервано перезапуском"}),
+        (2, "done", {"status": "failed"})]
 
 
 async def test_events_are_sequenced_and_filtered(store):

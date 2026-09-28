@@ -2,6 +2,8 @@
 
 One active run per workspace: ``create_run`` refuses (``Busy``) while another run of the
 workspace is ``running`` with a fresh heartbeat; a stale one is failed and replaced.
+A run failed here (stale takeover, ``fail_orphans`` on restart) still gets its terminal
+``error{where:"internal"}`` + ``done{status:"failed"}`` events, like any other run.
 """
 
 from __future__ import annotations
@@ -54,6 +56,14 @@ CREATE TABLE IF NOT EXISTS agent_call_payload (
     PRIMARY KEY (run_id, call_id)
 );
 """
+
+STALE_REASON = "зависший запуск снят"
+
+
+def _terminal_events(reason: str) -> list[tuple[str, dict[str, Any]]]:
+    """The events closing a run failed outside its runner."""
+    return [("error", {"where": "internal", "message": reason}), ("done", {"status": "failed"})]
+
 
 _RUN_COLS = ("id, workspace_id, text, mentions, model, status, error, usage, created_at, "
              "finished_at, heartbeat_at")
@@ -143,7 +153,7 @@ class MemoryAgentStore:
         if active is not None:
             if _now() - active.heartbeat_at <= timedelta(seconds=stale_after_s):
                 raise Busy(active.id)
-            await self.finish_run(active.id, "failed", error="зависший запуск снят")
+            await self._fail(active.id, STALE_REASON)
         now = _now()
         run = RunRecord(id=_new_id(), workspace_id=workspace_id, text=text,
                         mentions=list(mentions), model=model, created_at=now, heartbeat_at=now)
@@ -170,10 +180,15 @@ class MemoryAgentStore:
         r = self.runs[run_id]
         r.status, r.error, r.usage, r.finished_at = status, error, usage, _now()
 
+    async def _fail(self, run_id: str, reason: str) -> None:
+        await self.finish_run(run_id, "failed", error=reason)
+        for type_, data in _terminal_events(reason):
+            await self.append_event(run_id, type_, data)
+
     async def fail_orphans(self, reason):
         orphans = [r for r in self.runs.values() if r.status == "running"]
         for r in orphans:
-            await self.finish_run(r.id, "failed", error=reason)
+            await self._fail(r.id, reason)
         return len(orphans)
 
     async def append_event(self, run_id, type_, data):
@@ -217,13 +232,35 @@ class PgAgentStore:
             await cur.execute(sql, params)
             return await cur.fetchone()
 
+    @staticmethod
+    async def _append_on(conn, run_id: str, type_: str, data: dict[str, Any]):
+        """Append one event inside the caller's transaction; returns ``(seq, ts)``."""
+        await conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (run_id,))
+        cur = await conn.execute(
+            "INSERT INTO agent_event (run_id, seq, type, data) "
+            "SELECT %s, coalesce(max(seq), 0) + 1, %s, %s FROM agent_event "
+            "WHERE run_id = %s RETURNING seq, ts",
+            (run_id, type_, Jsonb(data), run_id))
+        return await cur.fetchone()
+
+    async def _fail_where(self, conn, where_sql: str, params: tuple, reason: str) -> int:
+        """Fail the matching running runs and close each with its terminal events, in one
+        transaction."""
+        async with conn.transaction():
+            cur = await conn.execute(
+                "UPDATE agent_run SET status = 'failed', error = %s, finished_at = now() "
+                f"WHERE status = 'running' AND {where_sql} RETURNING id", (reason, *params))
+            ids = [row[0] for row in await cur.fetchall()]
+            for run_id in ids:
+                for type_, data in _terminal_events(reason):
+                    await self._append_on(conn, run_id, type_, data)
+        return len(ids)
+
     async def create_run(self, workspace_id, text, mentions, model, *, stale_after_s):
         async with self.pool.connection() as conn:
-            await conn.execute(
-                "UPDATE agent_run SET status = 'failed', error = 'зависший запуск снят', "
-                "finished_at = now() WHERE workspace_id = %s AND status = 'running' "
-                "AND heartbeat_at < now() - make_interval(secs => %s)",
-                (workspace_id, stale_after_s))
+            await self._fail_where(
+                conn, "workspace_id = %s AND heartbeat_at < now() - make_interval(secs => %s)",
+                (workspace_id, stale_after_s), STALE_REASON)
             try:
                 # The partial unique index (one 'running' row per workspace) is the lock.
                 async with conn.transaction():
@@ -269,20 +306,11 @@ class PgAgentStore:
 
     async def fail_orphans(self, reason):
         async with self.pool.connection() as conn:
-            cur = await conn.execute(
-                "UPDATE agent_run SET status = 'failed', error = %s, finished_at = now() "
-                "WHERE status = 'running'", (reason,))
-            return cur.rowcount
+            return await self._fail_where(conn, "true", (), reason)
 
     async def append_event(self, run_id, type_, data):
         async with self.pool.connection() as conn, conn.transaction():
-            await conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (run_id,))
-            cur = await conn.execute(
-                "INSERT INTO agent_event (run_id, seq, type, data) "
-                "SELECT %s, coalesce(max(seq), 0) + 1, %s, %s FROM agent_event "
-                "WHERE run_id = %s RETURNING seq, ts",
-                (run_id, type_, Jsonb(data), run_id))
-            seq, ts = await cur.fetchone()
+            seq, ts = await self._append_on(conn, run_id, type_, data)
         return AgentEvent(run_id=run_id, seq=seq, ts=ts, type=type_, data=data)
 
     async def list_events(self, run_id, after_seq=0):

@@ -93,6 +93,10 @@ async def test_startup_marks_orphans_failed(env):
     orphan = await w.store.create_run(w.ws.id, "q", [], "large", stale_after_s=600)
     async with lifespan_of(app):
         assert (await w.store.get_run(orphan.id)).status == "failed"
+        evs = await w.store.list_events(orphan.id)
+        assert [(e.type, e.data) for e in evs] == [
+            ("error", {"where": "internal", "message": "прервано перезапуском"}),
+            ("done", {"status": "failed"})]
 
 
 async def test_daily_cleanup_logs_errors(env, monkeypatch, caplog):
