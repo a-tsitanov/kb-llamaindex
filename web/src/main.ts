@@ -1,11 +1,12 @@
 import "./style.css";
+import "vis-network/styles/vis-network.css"; // tooltips (div.vis-tooltip) etc. need this
 import { cancelRun, followRun, getCall, listRuns, startRun } from "./api/agent";
-import { createWorkspace, followBoard, getBoard, listWorkspaces, pin, type BoardEvent } from "./api/board";
+import { createWorkspace, followBoard, getBoard, listWorkspaces, pin, type BoardEvent, type Workspace } from "./api/board";
 import { HttpError, loadSettings, saveSettings } from "./api/http";
 import { VisRenderer } from "./render/vis";
 import type { BoardRenderer } from "./render/types";
 import { toView } from "./render/viewModel";
-import { applyOps, type BoardState } from "./state/board";
+import { applyOps, isFresherBoard, type BoardState } from "./state/board";
 import { decide, toggleMention } from "./state/input";
 import { newJournal, reduce, type RunJournal } from "./state/journal";
 import { $, esc, toast } from "./ui/dom";
@@ -28,6 +29,7 @@ let refetchTimer: ReturnType<typeof setTimeout> | undefined;
 
 const showErr = (e: unknown) => toast(e instanceof Error ? e.message : String(e), true);
 const labelOf = (k: string) => board?.objects.find((o) => o.key === k)?.label ?? k;
+const onStreamError = () => { $("st").textContent = "поток прервался, переподключаюсь…"; };
 
 // ── board ────────────────────────────────────────────────────────────
 function draw(): void {
@@ -41,7 +43,10 @@ function draw(): void {
 
 async function refetch(): Promise<void> {
   if (!ws) return;
+  const forWs = ws;
   const r = await getBoard(settings, ws);
+  if (ws !== forWs) return; // switched to another workspace while this was in flight
+  if (!isFresherBoard(board, r.state)) return; // older than what ops already applied locally
   board = r.state;
   title = r.workspace.title;
   draw();
@@ -100,14 +105,17 @@ function follow(runId: string, text: string, runMentions: string[], live: boolea
       $("st").textContent = { done: "готово", failed: "ошибка", cancelled: "остановлено" }[ev.status as string] ?? "";
       draw();
     }
-  }, runsAbort!.signal, token).catch(showErr);
+  }, runsAbort!.signal, token, onStreamError).catch(showErr);
 }
 
 // ── workspace ────────────────────────────────────────────────────────
 async function openWorkspace(id: string): Promise<void> {
   boardAbort?.abort();
   runsAbort?.abort();
+  clearTimeout(refetchTimer);
   ws = id || null;
+  settings.ws = ws ?? undefined; // remember (or forget) the open workspace across reloads
+  saveSettings(settings);
   board = null;
   mentions = [];
   journals = [];
@@ -122,17 +130,20 @@ async function openWorkspace(id: string): Promise<void> {
   }
   boardAbort = new AbortController();
   runsAbort = new AbortController();
-  followBoard(settings, ws, onBoardEvent, boardAbort.signal).catch(showErr);
+  followBoard(settings, ws, onBoardEvent, boardAbort.signal, onStreamError).catch(showErr);
+  const forWs = ws;
   const { active, runs } = await listRuns(settings, ws, 5);
+  if (ws !== forWs) return; // switched to another workspace while runs were loading
   for (const r of runs.filter((r) => r.id !== active?.id).reverse()) follow(r.id, r.text, r.mentions, false);
   if (active) follow(active.id, active.text, active.mentions, true);
 }
 
-async function loadWorkspaces(select?: string): Promise<void> {
+async function loadWorkspaces(select?: string): Promise<Workspace[]> {
   const list = await listWorkspaces(settings);
   $("wsSel").innerHTML = `<option value="">— расследование —</option>` +
     list.map((w) => `<option value="${esc(w.id)}">${esc(w.title)}</option>`).join("");
   if (select) $<HTMLSelectElement>("wsSel").value = select;
+  return list;
 }
 
 // ── input ────────────────────────────────────────────────────────────
@@ -153,7 +164,11 @@ async function submit(text: string): Promise<void> {
   if (d === "ignore") return;
   if (d === "busy") return toast("Идёт запрос. «стоп» — остановить его.");
   if (d === "stop") {
-    await cancelRun(settings, activeRun!);
+    try {
+      await cancelRun(settings, activeRun!);
+    } catch (e) {
+      if (!(e instanceof HttpError && e.status === 409)) throw e; // 409 = the run already ended
+    }
     $<HTMLInputElement>("q").value = "";
     return;
   }
@@ -228,7 +243,11 @@ async function boot(): Promise<void> {
     $("cfg").hidden = false;
     return;
   }
-  await loadWorkspaces();
+  const list = await loadWorkspaces();
+  if (settings.ws && list.some((w) => w.id === settings.ws)) {
+    $<HTMLSelectElement>("wsSel").value = settings.ws;
+    await openWorkspace(settings.ws);
+  }
 }
 
 boot().catch(showErr);
