@@ -98,3 +98,17 @@ async def test_slow_consumer_catches_up_from_the_store():
     await em.emit("done", status="done")
     await asyncio.wait_for(reader, 2)
     assert [e["seq"] for e in parse(reader_frames)] == list(range(1, 12))
+
+
+async def test_reconnect_after_done_closes_immediately():
+    store, bus = MemoryAgentStore(), EventBus()
+    run = await _run(store)
+    em = RunEmitter(store, bus, run.id)
+    await em.emit("final", answer="a")
+    done = await em.emit("done", status="done")
+    await store.finish_run(run.id, "done")
+
+    async def read():
+        return [f async for f in sse_events(store, bus, run.id, last_event_id=done.seq)]
+
+    assert await asyncio.wait_for(read(), 1) == []

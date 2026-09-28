@@ -91,6 +91,12 @@ async def sse_events(
             last = ev.seq
             if ev.type == TERMINAL:
                 return
+        run = await store.get_run(run_id)
+        if run is None or run.status != "running":
+            # finished (the client already has `done`, or it lands right now): no live tail
+            for ev in await store.list_events(run_id, after_seq=last):
+                yield _frame(ev.envelope())
+            return
         while True:
             try:
                 msg = await asyncio.wait_for(q.get(), timeout=ping_s)
