@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lens</title>
+</head>
+<body>
+  <div id="net"></div>
+
+  <div class="top">
+    <span class="pill" id="wsPill">нет расследования</span>
+    <select id="wsSel" title="Расследование"></select>
+    <button id="newWs" title="Новое расследование">＋</button>
+    <button id="cfgBtn" title="Настройки">⚙</button>
+  </div>
+
+  <div class="journal" id="journal"></div>
+  <div class="notes" id="notes"></div>
+  <div class="toast" id="toast"></div>
+
+  <div class="bottom">
+    <div class="hint">клик по объекту = @объект · Enter — отправить · «скрой X», «отмени», «это одно и то же» · «стоп» — остановить</div>
+    <div class="box" id="box"><input id="q" placeholder="встречи Путина в Китае" autocomplete="off"></div>
+    <div class="status"><span id="srv">—</span><span id="st">готово</span></div>
+  </div>
+
+  <div class="modal" id="cfg" hidden><div class="card">
+    <b>Подключение</b>
+    <label>X-API-Key (LENS_API_KEYS)<input id="cKey" type="password"></label>
+    <div class="row"><button id="cSave">Сохранить</button></div>
+  </div></div>
+
+  <div class="modal" id="detail" hidden><div class="card wide">
+    <div class="row between"><b id="dTitle"></b><button id="dClose">✕</button></div>
+    <pre id="dBody"></pre>
+  </div></div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
