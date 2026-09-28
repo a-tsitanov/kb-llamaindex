@@ -76,4 +76,3 @@ function sync<T extends { id?: string | number }>(ds: DataSet<T>, want: T[]) {
   ds.update(want as any);
   ds.remove(ds.getIds().filter((id) => !keep.has(id)));
 }
-

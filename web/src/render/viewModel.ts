@@ -34,4 +34,3 @@ export function toView(st: BoardState, mentions: string[], latestRun?: string): 
       .map((r) => ({ key: r.key, from: r.from_key, to: r.to_key, label: r.kind })),
   };
 }
-

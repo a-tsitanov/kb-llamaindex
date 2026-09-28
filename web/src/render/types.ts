@@ -40,4 +40,3 @@ export interface BoardRenderer {
   on(ev: RendererEvent, cb: (key: string, pos?: Point) => void): void;
   destroy(): void;
 }
-

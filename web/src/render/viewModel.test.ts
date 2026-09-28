@@ -29,4 +29,3 @@ describe("toView", () => {
     expect(v.edges).toEqual([{ key: "kb:p1|участник|kb:e1", from: "kb:p1", to: "kb:e1", label: "участник" }]);
   });
 });
-
