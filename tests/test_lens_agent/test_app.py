@@ -121,3 +121,22 @@ async def test_daily_cleanup_logs_errors(env, monkeypatch, caplog):
 
     assert "cleanup failed" in caplog.text
     assert caplog.records[0].levelname == "ERROR"
+
+
+async def test_stream_token_is_scoped_to_runs(env):
+    from src.lens.auth import make_stream_token
+
+    w, c, _ = env
+    w.model = scripted("готово")
+    r = (await c.post("/runs", json={"workspace_id": w.ws.id, "text": "q"})).json()
+    await w.wait(r["run_id"])
+    secret = lens_settings.stream_secret_value()
+    # a board (workspace) token over the same id must not open a run stream
+    bare = make_stream_token(r["run_id"], secret)
+    assert (await c.get(f"/runs/{r['run_id']}/events",
+                        params={"token": bare})).status_code == 403
+    for token in (r["stream_token"],
+                  (await c.post(f"/runs/{r['run_id']}/stream_token")).json()["stream_token"]):
+        async with c.stream("GET", f"/runs/{r['run_id']}/events",
+                            params={"token": token}) as s:
+            assert s.status_code == 200

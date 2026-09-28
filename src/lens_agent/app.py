@@ -1,7 +1,8 @@
 """lens-agent HTTP API.  Run: ``uvicorn src.lens_agent.app:app --host 0.0.0.0 --port 8020``.
 
 REST takes ``X-API-Key`` (``LENS_API_KEYS``, shared with the board); the event stream takes
-``?token=`` from ``POST /runs`` (HMAC bound to the run, secret ``LENS_STREAM_SECRET``).
+``?token=`` from ``POST /runs`` (HMAC bound to ``run:<run_id>``, secret ``LENS_STREAM_SECRET``;
+the ``run:`` scope keeps a board workspace token from ever opening a run stream).
 """
 
 from __future__ import annotations
@@ -49,6 +50,14 @@ class NewRun(BaseModel):
         return v
 
 
+def _run_token(run_id: str) -> str:
+    return make_stream_token(_token_scope(run_id), lens_settings.stream_secret_value())
+
+
+def _token_scope(run_id: str) -> str:
+    return f"run:{run_id}"
+
+
 def _deps(request: Request) -> AgentDeps:
     return request.app.state.deps
 
@@ -81,7 +90,7 @@ def _routes() -> tuple[APIRouter, APIRouter]:
             raise HTTPException(status.HTTP_409_CONFLICT,
                                 {"message": "busy", "run_id": e.run_id}) from e
         return {"run_id": run.id,
-                "stream_token": make_stream_token(run.id, lens_settings.stream_secret_value())}
+                "stream_token": _run_token(run.id)}
 
     @api.get("/runs")
     async def list_runs(workspace_id: str, limit: int = Query(10, ge=1, le=100),
@@ -105,7 +114,7 @@ def _routes() -> tuple[APIRouter, APIRouter]:
     @api.post("/runs/{run_id}/stream_token")
     async def stream_token(run_id: str, deps: AgentDeps = Depends(_deps)):
         await _run_or_404(deps, run_id)
-        return {"stream_token": make_stream_token(run_id, lens_settings.stream_secret_value())}
+        return {"stream_token": _run_token(run_id)}
 
     @api.get("/runs/{run_id}/calls/{call_id}")
     async def get_call(run_id: str, call_id: str, deps: AgentDeps = Depends(_deps)):
@@ -118,7 +127,8 @@ def _routes() -> tuple[APIRouter, APIRouter]:
     async def events(run_id: str, token: str = "", last_event_id: int = Query(0, ge=0),
                      last_event_id_header: str | None = Header(None, alias="Last-Event-ID"),
                      deps: AgentDeps = Depends(_deps)):
-        if not check_stream_token(token, run_id, lens_settings.stream_secret_value()):
+        if not check_stream_token(token, _token_scope(run_id),
+                                  lens_settings.stream_secret_value()):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "invalid or expired stream token")
         await _run_or_404(deps, run_id)
         after = last_event_id
