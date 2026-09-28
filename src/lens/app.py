@@ -218,6 +218,7 @@ async def _build_deps() -> LensDeps:
     normalizer = Normalizer(llm, store, model=lens_settings.normalizer_model(),
                             vocabulary=lens_settings.vocabulary,
                             aggregate_threshold=lens_settings.aggregate_threshold,
+                            aggregate_preview=lens_settings.aggregate_preview,
                             sample_chars=lens_settings.sample_chars)
     agent = Agent(store=store, bus=bus, planner=planner, normalizer=normalizer)
     return LensDeps(store=store, bus=bus, agent=agent, hub=hub)

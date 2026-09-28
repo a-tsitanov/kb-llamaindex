@@ -37,6 +37,7 @@ async def main() -> None:
             norm = Normalizer(llm, MemoryLensStore(), model=a.model,
                               vocabulary=lens_settings.vocabulary,
                               aggregate_threshold=lens_settings.aggregate_threshold,
+                              aggregate_preview=lens_settings.aggregate_preview,
                               sample_chars=lens_settings.sample_chars)
             call = ToolCallRecord(id=path.stem, input_id=None, server=fx["server"],
                                   namespace=fx.get("namespace"), tool=fx["tool"], args=fx["args"], payload=fx["payload"],

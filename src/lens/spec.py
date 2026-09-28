@@ -15,6 +15,7 @@ the canvas and the user's @mentions) — that is how new results attach to old o
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -31,8 +32,21 @@ class ObjectRule(BaseModel):
     each: str | None = None
     id: str
     label: str
-    type: str
+    type: str  # fixed type, or the fallback when ``type_path`` is set
+    type_path: str | None = None  # per-item type, mapped onto the vocabulary
     attrs: dict[str, str] = Field(default_factory=dict)
+
+
+# Source type names (KB extractor labels etc.) → Lens vocabulary. Keys are lower-case.
+TYPE_ALIASES = {
+    "organization": "organization", "organisation": "organization", "company": "organization",
+    "person": "person", "people": "person",
+    "location": "location", "geographiclocation": "location", "place": "location",
+    "country": "location", "city": "location",
+    "event": "event", "eventoraction": "event",
+    "concept": "topic", "topic": "topic",
+    "document": "document", "email": "document", "url": "document",
+}
 
 
 class RelationRule(BaseModel):
@@ -97,12 +111,32 @@ def _one(item: Any, path: str, ctx: _Ctx) -> str | None:
     return _scalar(m[0][1]) if len(m) == 1 else None
 
 
+def _expand(matches: list[tuple[str, Any]]) -> list[tuple[str, Any]]:
+    """``each`` that hits ONE list (``$.entities`` instead of ``$.entities[*]``) means
+    its elements — LLMs write it that way often enough to be worth forgiving."""
+    if len(matches) == 1 and isinstance(matches[0][1], list):
+        base, lst = matches[0]
+        return [(f"{base}[{i}]", v) for i, v in enumerate(lst)]
+    return matches
+
+
 def _items(ctx: _Ctx, each: str | None) -> list[tuple[str, Any]]:
-    return _scoped(ctx.payload, each, ctx) if each else [("$", ctx.payload)]
+    return _expand(_scoped(ctx.payload, each, ctx)) if each else [("$", ctx.payload)]
+
+
+def _item_type(rule: ObjectRule, item: Any, ctx: _Ctx, vocabulary: Collection[str]) -> str:
+    if rule.type_path is None:
+        return rule.type
+    raw = _one(item, rule.type_path, ctx)
+    if raw is None:
+        return rule.type
+    mapped = TYPE_ALIASES.get(raw.lower(), raw.lower())
+    return mapped if mapped in vocabulary else rule.type
 
 
 def _objects_for(
     rule: ObjectRule, ctx: _Ctx, ns: str, call_id: str, errors: list[str],
+    vocabulary: Collection[str],
 ) -> dict[str, ObjectEl] | None:
     """Objects of one rule, deduplicated by key (refs merged)."""
     try:
@@ -131,8 +165,8 @@ def _objects_for(
             if key in built:
                 built[key].refs.append(ref)
             else:
-                built[key] = ObjectEl(key=key, type=rule.type, label=label_v, attrs=attrs,
-                                      refs=[ref])
+                built[key] = ObjectEl(key=key, type=_item_type(rule, item, ctx, vocabulary),
+                                      label=label_v, attrs=attrs, refs=[ref])
     except PathError as e:
         errors.append(f"object rule {rule.name!r}: {e}")
         return None
@@ -163,7 +197,10 @@ def materialize(
     aggregate_threshold: int,
     args: dict | None = None,
     known_keys: Collection[str] = (),
+    aggregate_preview: int = 0,
 ) -> Materialized:
+    """``aggregate_preview``: when a rule is aggregated, its first N objects still go on
+    the canvas so a big list is never a black box."""
     ctx = _Ctx(payload=payload, args=args or {})
     errors: list[str] = []
     out = Materialized()
@@ -175,7 +212,7 @@ def materialize(
                 f"{sorted(vocabulary)}"
             )
             continue
-        built = _objects_for(rule, ctx, namespace, call_id, errors)
+        built = _objects_for(rule, ctx, namespace, call_id, errors, vocabulary)
         if built is None:
             continue
         if rule.each and len(built) > aggregate_threshold:
@@ -194,15 +231,16 @@ def materialize(
                 if v.startswith(("$root", "$args")):
                     continue
                 columns.append(Column(name=k, path=v))
+            item_type = Counter(o.type for o in built.values()).most_common(1)[0][0]
             out.aggregates.append(AggregateEl(
                 key=f"agg:{call_id}:{rule.name}",
-                label=f"{rule.type} · {len(built)}",
-                item_type=rule.type,
+                label=f"{item_type} · {len(built)}",
+                item_type=item_type,
                 count=len(built),
                 rows_ref=Ref(call_id=call_id, path=rule.each),
                 columns=columns,
             ))
-            continue
+            built = dict(list(built.items())[:aggregate_preview])
         for key, o in built.items():
             if key in objects:
                 objects[key].refs.extend(o.refs)
@@ -213,7 +251,7 @@ def materialize(
     relations: dict[str, RelationEl] = {}
     for rule in spec.relations:
         try:
-            items = _scoped(payload, rule.each, ctx)
+            items = _expand(_scoped(payload, rule.each, ctx))
             if not items:
                 errors.append(f"relation {rule.kind!r}: each {rule.each!r} matched nothing")
                 continue
@@ -227,8 +265,11 @@ def materialize(
                     fk, tk = f"{namespace}:{from_v}", f"{namespace}:{to_v}"
                     if to_v is None or fk == tk or fk not in endpoints or tk not in endpoints:
                         continue
+                    kind = rule.kind
+                    if kind.startswith("$"):  # LLMs sometimes give the kind as a path
+                        kind = _one(item, kind, ctx) or "связан"
                     _add_relation(relations, RelationEl(
-                        from_key=fk, to_key=tk, kind=rule.kind,
+                        from_key=fk, to_key=tk, kind=kind,
                         refs=[Ref(call_id=call_id, path=base)]))
         except PathError as e:
             errors.append(f"relation {rule.kind!r}: {e}")

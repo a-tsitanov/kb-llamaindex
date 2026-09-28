@@ -65,3 +65,32 @@ async def test_chat_skips_custom_tool_calls_and_passes_tool_choice():
                                                tool_choice="none")
     assert [c.id for c in reply.tool_calls] == ["t1"]
     assert comp.kwargs["tool_choice"] == "none"
+
+
+class _NoJsonModeCompletions:
+    """Backend without response_format support (e.g. MLX in Unsloth Studio)."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def create(self, **kwargs):
+        import httpx
+        from openai import BadRequestError
+
+        self.calls.append(kwargs)
+        if "response_format" in kwargs:
+            req = httpx.Request("POST", "http://x/v1/chat/completions")
+            raise BadRequestError(
+                "response_format needs the llama.cpp grammar engine",
+                response=httpx.Response(400, request=req), body=None)
+        msg = SimpleNamespace(content='Вот:\n```json\n{"objects": []}\n```', tool_calls=None)
+        return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+
+
+async def test_json_falls_back_when_backend_rejects_response_format():
+    comp = _NoJsonModeCompletions()
+    llm = OpenAICompatLLM(SimpleNamespace(chat=SimpleNamespace(completions=comp)))
+    assert await llm.json(model="m", messages=[]) == {"objects": []}
+    assert await llm.json(model="m", messages=[]) == {"objects": []}
+    # first call: rejected + retried; second call goes straight to plain mode
+    assert ["response_format" in c for c in comp.calls] == [True, False, False]

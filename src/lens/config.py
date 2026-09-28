@@ -47,6 +47,7 @@ class LensSettings(BaseSettings):
     max_tool_steps: int = 6
     sample_chars: int = 6000
     aggregate_threshold: int = 25
+    aggregate_preview: int = 10  # objects shown on canvas when a list is aggregated
     tool_timeout_s: float = 120.0
     reconnect_backoff_s: float = 10.0
     vocabulary: list[str] = Field(default_factory=lambda: list(DEFAULT_VOCABULARY))
