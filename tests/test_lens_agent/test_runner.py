@@ -45,6 +45,8 @@ async def test_happy_path_sources_injected_and_note_written():
         assert len(st.relations) == 1
         assert [n.cites for n in st.notes] == [["kb:e2"]]
         assert (await w.store.get_payload(run.id, "c2")).payload["entities"][0]["id"] == "E1"
+        assert (await w.store.get_payload(run.id, "c3")).payload["added"] == 2
+        assert [r["summary"]["items"] for r in of(evs, "tool_result")][2:] == [2, 1]
 
 
 async def test_unknown_call_id_is_rejected_back_to_the_model():

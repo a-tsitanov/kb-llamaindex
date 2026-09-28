@@ -56,6 +56,8 @@ def _summary(result: Any, text: str) -> dict[str, Any]:
     items = None
     if isinstance(result, list):
         items = len(result)
+    elif isinstance(result, dict) and isinstance(result.get("added"), int):
+        items = result["added"]  # board writes: what actually landed
     elif isinstance(result, dict):
         items = next((len(v) for v in result.values() if isinstance(v, list)), None)
     return {"items": items, "bytes": len(text.encode()), "preview": text[:200]}
@@ -188,6 +190,9 @@ class RunCalls:
             result = {**result, "rejected": rejected + list(result.get("rejected", []))}
         else:
             result = await self._call(cid, t0, call_tool, name, args)
+        await self.store.save_payload(CallPayload(run_id=self.run_id, call_id=cid,
+                                                  server="board", tool=name, args=args,
+                                                  payload=result))
         if name == "add_note":
             self.note_written = True
         elif name == "undo":
