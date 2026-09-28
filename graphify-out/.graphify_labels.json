@@ -1083,5 +1083,9 @@
   "1081": "test_search_deps_lock.py",
   "1082": "_no_entity_mirror",
   "1083": "test_value_kind_families_partition_the_enumeration",
-  "1084": "vite.config.ts"
+  "1084": "vite.config.ts",
+  "1085": "test_ingest_priority.py",
+  "1086": "_FlakyStore",
+  "1087": "test_rerank_runs_over_unified_pool_and_truncates",
+  "1088": "pg_sync_pool.py"
 }
