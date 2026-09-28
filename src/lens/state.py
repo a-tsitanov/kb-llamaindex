@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.lens.model import NoteEl, ObjectEl, Op, RelationEl
+from src.lens.model import NoteEl, ObjectEl, Op, RelationEl, Source
 
 
 @dataclass
@@ -21,6 +21,7 @@ class CanvasState:
     mode: str = "canvas"
     aliases: dict[str, str] = field(default_factory=dict)
     inputs: list[str] = field(default_factory=list)
+    touched: dict[str, int] = field(default_factory=dict)  # key → seq of last add/merge
     last_seq: int = 0
 
     def canon(self, key: str) -> str:
@@ -31,11 +32,23 @@ class CanvasState:
         return key
 
 
+def _merge_sources(into: list[Source], other: list[Source]) -> None:
+    known = {(s.call_id, s.run_id) for s in into}
+    into.extend(s for s in other if (s.call_id, s.run_id) not in known)
+
+
 def _merge_obj(into: ObjectEl, other: ObjectEl) -> None:
     for k, v in other.attrs.items():
         into.attrs.setdefault(k, v)
     known = {(r.call_id, r.path) for r in into.refs}
     into.refs.extend(r for r in other.refs if (r.call_id, r.path) not in known)
+    _merge_sources(into.sources, other.sources)
+    if other.description:
+        into.description = other.description  # latest non-empty wins; history in the op log
+    if other.type != into.type:
+        seen = into.attrs.setdefault("types_seen", [into.type])
+        if other.type not in seen:
+            seen.append(other.type)
 
 
 def _add_input(st: CanvasState, key: str, input_id: str | None) -> None:
@@ -54,6 +67,7 @@ def _put_relation(st: CanvasState, rel: RelationEl) -> None:
         known = {(r.call_id, r.path) for r in st.relations[rel.key].refs}
         st.relations[rel.key].refs.extend(
             r for r in rel.refs if (r.call_id, r.path) not in known)
+        _merge_sources(st.relations[rel.key].sources, rel.sources)
     else:
         st.relations[rel.key] = rel
 
@@ -69,13 +83,16 @@ def _apply(st: CanvasState, op: Op) -> None:
             else:
                 st.objects[o.key] = o
             _add_input(st, o.key, op.input_id)
+            st.touched[o.key] = op.seq
     elif op.kind == "add_relations":
         for d in p["relations"]:
             _put_relation(st, RelationEl.model_validate(d))
     elif op.kind == "add_view":
         st.views[p["view"]["key"]] = dict(p["view"])
     elif op.kind == "add_note":
-        st.notes.append(NoteEl.model_validate(p["note"]))
+        note = NoteEl.model_validate(p["note"])
+        st.notes = [n for n in st.notes if n.key != note.key]  # one note per key (per run)
+        st.notes.append(note)
     elif op.kind == "hide":
         st.hidden |= {st.canon(k) for k in p["keys"]}
     elif op.kind == "show":
@@ -87,7 +104,9 @@ def _apply(st: CanvasState, op: Op) -> None:
     elif op.kind == "set_mode":
         st.mode = p["mode"]
     elif op.kind == "merge":
-        _merge(st, st.canon(p["keep"]), st.canon(p["drop"]))
+        keep = st.canon(p["keep"])
+        _merge(st, keep, st.canon(p["drop"]))
+        st.touched[keep] = op.seq
 
 
 def _merge(st: CanvasState, keep: str, drop: str) -> None:
@@ -112,6 +131,7 @@ def _merge(st: CanvasState, keep: str, drop: str) -> None:
         st.hidden.add(keep)
     if drop in st.pins:
         st.pins.setdefault(keep, st.pins.pop(drop))
+    st.touched.pop(drop, None)
 
 
 def fold(ops: Sequence[Op]) -> CanvasState:
@@ -144,5 +164,6 @@ def state_to_dict(st: CanvasState) -> dict[str, Any]:
         "notes": [n.model_dump(mode="json") for n in st.notes],
         "mode": st.mode,
         "inputs": list(st.inputs),
+        "aliases": dict(st.aliases),
         "last_seq": st.last_seq,
     }

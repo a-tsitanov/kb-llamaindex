@@ -122,3 +122,62 @@ def test_repeated_relation_merges_refs():
     st = fold([op("add_relations", {"relations": [rel("c1")]}, "i1"),
                op("add_relations", {"relations": [rel("c2")]}, "i2")])
     assert [r.call_id for r in st.relations["kb:1|k|kb:2"].refs] == ["c1", "c2"]
+
+
+def src(call, run="r1"):
+    return {"server": "kb-tools", "tool": "t", "call_id": call, "run_id": run,
+            "namespace": "kb"}
+
+
+def test_v2_merge_description_sources_and_type_conflict():
+    st = fold([
+        op("add_objects", {"objects": [{"key": "kb:москва", "type": "location",
+                                        "label": "Москва", "description": "город",
+                                        "sources": [src("c1")]}]}, "r1"),
+        op("add_objects", {"objects": [{"key": "kb:москва", "type": "organization",
+                                        "label": "Москва", "description": "",
+                                        "sources": [src("c2", "r2")]}]}, "r2"),
+        op("add_objects", {"objects": [{"key": "kb:москва", "type": "location",
+                                        "label": "Москва", "description": "столица",
+                                        "sources": [src("c1")]}]}, "r3"),
+    ])
+    o = st.objects["kb:москва"]
+    assert o.type == "location"
+    assert o.attrs["types_seen"] == ["location", "organization"]
+    assert o.description == "столица"
+    assert [(s.call_id, s.run_id) for s in o.sources] == [("c1", "r1"), ("c2", "r2")]
+
+
+def test_v1_ops_without_new_fields_still_fold():
+    st = fold([op("add_objects", {"objects": [obj("kb:1")]})])
+    assert st.objects["kb:1"].description is None and st.objects["kb:1"].sources == []
+
+
+def test_note_with_same_key_is_replaced():
+    st = fold([
+        op("add_note", {"note": {"key": "note:r1", "text": "первый"}}, "r1"),
+        op("add_note", {"note": {"key": "note:r1", "text": "второй"}}, "r1"),
+        op("add_note", {"note": {"key": "note:r2", "text": "другой"}}, "r2"),
+    ])
+    assert [n.text for n in st.notes] == ["второй", "другой"]
+
+
+def test_touched_and_aliases_in_output():
+    ops = [
+        op("add_objects", {"objects": [obj("kb:a"), obj("kb:b")]}, "r1"),
+        op("add_objects", {"objects": [obj("kb:a")]}, "r2"),
+        op("merge", {"keep": "kb:a", "drop": "kb:b"}, "r3"),
+    ]
+    st = fold(ops)
+    assert st.touched == {"kb:a": ops[-1].seq}
+    assert state_to_dict(st)["aliases"] == {"kb:b": "kb:a"}
+
+
+def test_relation_sources_merge():
+    rel = {"from_key": "kb:1", "to_key": "kb:2", "kind": "связан"}
+    st = fold([
+        op("add_objects", {"objects": [obj("kb:1"), obj("kb:2")]}),
+        op("add_relations", {"relations": [dict(rel, sources=[src("c1")])]}, "r1"),
+        op("add_relations", {"relations": [dict(rel, sources=[src("c2", "r2")])]}, "r2"),
+    ])
+    assert [s.call_id for s in st.relations["kb:1|связан|kb:2"].sources] == ["c1", "c2"]

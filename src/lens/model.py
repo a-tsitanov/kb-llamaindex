@@ -13,6 +13,16 @@ class Ref(BaseModel):
     path: str
 
 
+class Source(BaseModel):
+    """Where a board item came from. Injected by lens-agent (never written by the model)."""
+
+    server: str
+    tool: str
+    call_id: str
+    run_id: str | None = None
+    namespace: str
+
+
 class Column(BaseModel):
     name: str
     path: str  # relative to one row, starts with "$"
@@ -22,8 +32,10 @@ class ObjectEl(BaseModel):
     key: str
     type: str
     label: str
+    description: str | None = None
     attrs: dict[str, Any] = Field(default_factory=dict)
-    refs: list[Ref] = Field(default_factory=list)
+    refs: list[Ref] = Field(default_factory=list)  # v1 (path refs); v2 uses ``sources``
+    sources: list[Source] = Field(default_factory=list)
 
 
 class RelationEl(BaseModel):
@@ -31,7 +43,9 @@ class RelationEl(BaseModel):
     to_key: str
     kind: str
     confidence: float = 1.0
+    attrs: dict[str, Any] = Field(default_factory=dict)
     refs: list[Ref] = Field(default_factory=list)
+    sources: list[Source] = Field(default_factory=list)
 
     @property
     def key(self) -> str:
