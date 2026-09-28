@@ -336,3 +336,30 @@ async def test_board_call_id_cannot_be_cited_as_a_source():
         assert run.status == "done"
         assert "неизвестный call_id 'c1'" in tool_returns(seen[-1])[1]
         assert (await w.board.state(w.ws.id)).objects == {}
+
+
+async def test_exhausted_tool_retries_fail_the_run_as_a_tool_error():
+    async with world() as w:
+        run, evs = await w.run(scripted([("kb_boom", {})]))  # the model never gives up
+        assert run.status == "failed"
+        (err,) = of(evs, "error")
+        assert err["where"] == "tool" and "kb_boom" in err["message"]
+
+
+async def test_failed_deterministic_note_is_reported(monkeypatch):
+    from tests.test_lens_agent.helpers import AsgiMCPServer
+
+    real = AsgiMCPServer.direct_call_tool
+
+    async def direct_call_tool(self, name, args, *a, **kw):
+        if name == "add_note":
+            raise RuntimeError("доска не ответила")
+        return await real(self, name, args, *a, **kw)
+
+    monkeypatch.setattr(AsgiMCPServer, "direct_call_tool", direct_call_tool)
+    async with world() as w:
+        run, evs = await w.run(scripted("ответ"))
+        assert run.status == "done" and types(evs)[-3:] == ["final", "error", "done"]
+        (err,) = of(evs, "error")
+        assert err["where"] == "tool" and err["message"].startswith("заметка не записана: ")
+        assert "доска не ответила" in err["message"]

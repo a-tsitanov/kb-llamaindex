@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 import time
 from collections.abc import Callable
 from contextlib import AsyncExitStack
@@ -50,6 +51,10 @@ from src.lens_agent.store import AgentStore, RunRecord
 from src.lens_agent.stream import RunEmitter
 
 log = logging.getLogger(__name__)
+
+# pydantic-ai 1.30 (_tool_manager.py): "Tool 'x' exceeded max retries count of N" — the model
+# kept calling a failing tool; a tool problem, not a model one.
+_TOOL_RETRIES = re.compile(r"^Tool '.+' exceeded max retries count of \d+")
 
 ServerFactory = Callable[[McpEntry, dict[str, str], Any], MCPServer]
 
@@ -205,6 +210,9 @@ class Runner:
                     await board.direct_call_tool("add_note", {"text": answer})
                 except Exception as e:
                     log.warning("run %s: add_note failed: %s", run.id, e)
+                    err = _unwrap(e)
+                    await em.emit("error", where="tool", message=(
+                        f"заметка не записана: {type(err).__name__}: {err}")[:1000])
             return usage
 
     def _classify(self, run: RunRecord, e: BaseException) -> tuple[str, RunFailure | None]:
@@ -221,6 +229,8 @@ class Runner:
             return "failed", e
         if isinstance(e, UsageLimitExceeded):
             return "failed", RunFailure("limit", str(e))
+        if isinstance(e, UnexpectedModelBehavior) and _TOOL_RETRIES.match(e.message):
+            return "failed", RunFailure("tool", str(e))
         if isinstance(e, ModelAPIError | UnexpectedModelBehavior):
             return "failed", RunFailure("model", str(e))
         log.error("run %s failed", run.id, exc_info=e)
