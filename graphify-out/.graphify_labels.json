@@ -532,6 +532,7 @@
   "530": "File Structure",
   "531": "nuextract_backend.py",
   "532": "test_stats_routes.py",
+  "533": "Global Constraints",
   "534": "Changelog",
   "535": "ADR-0001: Temporal для надёжной оркестрации",
   "536": "ADR-0003: Изоляция очередей задач во избежание head-of-line блокировки",
@@ -1066,6 +1067,7 @@
   "1065": "test_documents_in_response.py",
   "1066": "_FlakyClient",
   "1067": "_Cast",
+  "1068": "_split_for_translation",
   "1069": "._validate_iso_date",
   "1070": ".achat",
   "1071": "_pages_to_delete",
@@ -1077,9 +1079,9 @@
   "1077": "test_publisher.py",
   "1078": "_verdict_key",
   "1079": "input.ts",
+  "1080": "test_search_pooled_llm.py",
   "1081": "_Boom",
+  "1082": "test_community_build_hardening.py",
   "1083": "test_value_kind_families_partition_the_enumeration",
-  "1084": "vite.config.ts",
-  "1085": "handle_repeat",
-  "1087": "test_rollups.py"
+  "1084": "vite.config.ts"
 }
