@@ -1077,15 +1077,9 @@
   "1075": "handle_repeat",
   "1076": "ingest_metrics_extractor.py",
   "1077": "test_publisher.py",
-  "1078": "_McpErrorClient",
   "1079": "input.ts",
-  "1080": "test_config_wave2.py",
-  "1081": "test_search_deps_lock.py",
-  "1082": "_no_entity_mirror",
   "1083": "test_value_kind_families_partition_the_enumeration",
   "1084": "vite.config.ts",
-  "1085": "test_ingest_priority.py",
   "1086": "_FlakyStore",
-  "1087": "test_rerank_runs_over_unified_pool_and_truncates",
   "1088": "pg_sync_pool.py"
 }
