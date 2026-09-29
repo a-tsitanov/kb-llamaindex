@@ -267,6 +267,19 @@ async def find_entity_by_name(
     )
 
 
+async def _rank_neighbours(ranker: GraphRanker, query: str, entity_name: str,
+                           entities: list[dict], relations: list[dict]):
+    """Rank a neighbourhood by the question without the centre's own name: a cross-encoder
+    otherwise rewards look-alike names ("Алексей Чихачев" for "Алексей Лихачёв"). The centre
+    entity itself stays first, unranked."""
+    centre = {w.casefold() for w in entity_name.split()}
+    rank_query = " ".join(w for w in query.split() if w.casefold() not in centre) or query
+    head = [e for e in entities if e.get("entity_name") == entity_name]
+    rest = [e for e in entities if e.get("entity_name") != entity_name]
+    ranked, relations = await ranker.rank(rank_query, rest, relations)
+    return head + ranked, relations
+
+
 async def find_neighbours(
     graph_retriever: GraphRetrieverProtocol | None,
     *,
@@ -292,7 +305,8 @@ async def find_neighbours(
     entities = getattr(data, "entities", []) or []
     relations = getattr(data, "relations", []) or []
     if ranker is not None and query.strip():
-        entities, relations = await ranker.rank(query, entities, relations)
+        entities, relations = await _rank_neighbours(ranker, query, entity_name,
+                                                     entities, relations)
     return ToolResult(
         sources=[],
         observation=json.dumps(

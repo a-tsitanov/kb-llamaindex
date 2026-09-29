@@ -112,3 +112,24 @@ async def test_vector_search_applies_the_chunk_reranker_before_top_k():
     assert [s["chunk_id"] for s in json.loads(r.observation)] == ["n5", "n4"]
     r = await atomic_tools.vector_search(_R(), query="q", top_k=2)
     assert [s["chunk_id"] for s in json.loads(r.observation)] == ["n0", "n1"]
+
+
+@pytest.mark.asyncio
+async def test_neighbours_ranking_ignores_the_centre_name_and_keeps_it_first():
+    seen = []
+
+    async def scorer(query, texts):
+        seen.append(query)
+        # rewards look-alike names if the centre's name leaks into the query
+        return [5.0 if "Лихач" in t or ("Алексей" in t and "Алексей" in query) else
+                (3.0 if "госкорпорация" in t else 0.0) for t in texts]
+
+    data = _Data()
+    data.entities = [{"entity_name": "Алексей Лихачёв", "entity_type": "Person"},
+                     {"entity_name": "Алексей Чихачев", "entity_type": "Person"}, *ENTS]
+    r = await atomic_tools.find_neighbours(_G(data), entity_name="Алексей Лихачёв",
+                                           query="с кем связан Алексей Лихачёв",
+                                           ranker=GraphRanker(rerank=scorer))
+    names = [e["entity_name"] for e in json.loads(r.observation)["entities"]]
+    assert names[0] == "Алексей Лихачёв" and names[1] == "Rosatom"
+    assert seen == ["с кем связан"]
