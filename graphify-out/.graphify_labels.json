@@ -532,7 +532,6 @@
   "530": "File Structure",
   "531": "nuextract_backend.py",
   "532": "test_stats_routes.py",
-  "533": "test_message_stats_queries.py",
   "534": "Changelog",
   "535": "ADR-0001: Temporal для надёжной оркестрации",
   "536": "ADR-0003: Изоляция очередей задач во избежание head-of-line блокировки",
@@ -1067,7 +1066,6 @@
   "1065": "test_documents_in_response.py",
   "1066": "_FlakyClient",
   "1067": "_Cast",
-  "1068": "test_tg_ingest_groups.py",
   "1069": "._validate_iso_date",
   "1070": ".achat",
   "1071": "_pages_to_delete",
@@ -1079,12 +1077,9 @@
   "1077": "test_publisher.py",
   "1078": "_verdict_key",
   "1079": "input.ts",
-  "1080": "Neo4jDynamicsGraphOps",
   "1081": "_Boom",
-  "1082": "WikiSettings",
   "1083": "test_value_kind_families_partition_the_enumeration",
   "1084": "vite.config.ts",
   "1085": "handle_repeat",
-  "1086": "_FlakyStore",
   "1087": "test_rollups.py"
 }
