@@ -161,35 +161,62 @@ LIMIT $limit
 """
 
 
+def _name_terms(query: str) -> list[str]:
+    """Prefix terms for the name index: the whole phrase (multi-word), then every token, each
+    also with a capitalised first letter (the index is case-sensitive: "лихачёв")."""
+    tokens = [t for t in (query or "").split() if t.strip()]
+    base = ([" ".join(tokens)] if len(tokens) > 1 else []) + tokens
+    terms: list[str] = []
+    for t in base:
+        for v in (t, t[:1].upper() + t[1:]):
+            if v not in terms:
+                terms.append(v)
+    return terms
+
+
+def _name_fetch_cap(limit: int) -> int:
+    """Over-fetch: the OR of prefixes is unranked, so the entity matching every word can sit
+    past ``limit`` ("Алексей Лихачёв" came back as ten other Алексей)."""
+    return min(max(int(limit) * 5, 50), 500)
+
+
+def _rank_by_name(entities: list[dict], query: str) -> list[dict]:
+    """Best name matches first: exact, starts with the whole phrase, more query words present
+    (as word prefixes), then shorter names. Stable for ties."""
+    q = " ".join((query or "").split()).casefold()
+    words = q.split()
+
+    def key(e: dict) -> tuple:
+        name = str(e.get("entity_name") or "").casefold()
+        name_words = name.replace("«", " ").replace("»", " ").replace("(", " ").split()
+        hits = sum(any(nw.startswith(w) for nw in name_words) for w in words)
+        return (name != q, not name.startswith(q), -hits, len(name))
+
+    return sorted(entities, key=key)
+
+
 def _find_by_name_ngql(query: str, *, limit: int) -> str:
     """PREFIX name lookup under nebula, over the ``entity_name_idx`` index.
 
-    Whitespace-split the input and OR a ``STARTS WITH`` per token. Exact
-    and prefix both work: "Украина" finds itself, "Иванов" finds "Иванов
-    Иван Иванович".
+    ORs a ``STARTS WITH`` per term (see ``_name_terms``): the whole phrase and each token,
+    plus capitalised variants. Exact and prefix both work: "Украина" finds itself, "Иванов"
+    finds "Иванов Иван Иванович". The caller over-fetches (``limit`` here is the fetch cap)
+    and ranks with ``_rank_by_name``.
 
-    KNOWN LIMIT: a token matching mid-name does NOT match. "Ромаш" will
-    not find "ООО Ромашка", which the previous ``CONTAINS`` version
-    promised. That promise was not kept in practice — ``CONTAINS`` cannot
-    use an index, so the query was a full scan of every Entity vertex,
-    and on a 161k-entity graph it failed outright with
-    ``GraphMemoryExceeded (-2600)``. Measured 2026-08-18: this form
-    answers in under two seconds where ``CONTAINS`` failed in three.
-    Prefix matching that works beats substring matching that does not.
-
-    True substring search needs an index built for it — a trigram table
-    of entity names in Postgres, the way the statistics registry is
-    searched. That is a separate piece of work; do not reintroduce
-    ``CONTAINS`` here instead.
+    KNOWN LIMIT: a token matching mid-name does NOT match. "Лихачёв" will not find
+    "Алексей Лихачёв", "Ромаш" will not find "ООО Ромашка". ``CONTAINS`` cannot use an
+    index — on a 161k-entity graph it was a full scan that failed with
+    ``GraphMemoryExceeded (-2600)`` (measured 2026-08-18: prefix answers in under two
+    seconds where ``CONTAINS`` failed in three). True substring search needs an index built
+    for it — a trigram table of entity names in Postgres. Do not reintroduce ``CONTAINS``.
 
     Returns ``""`` for blank input so the caller short-circuits.
-    Case-sensitive, like the index.
     """
-    tokens = [t for t in (query or "").split() if t.strip()]
-    if not tokens:
+    terms = _name_terms(query)
+    if not terms:
         return ""
     clauses = " OR ".join(
-        f"`Entity`.name STARTS WITH {_nebula_q(t)}" for t in tokens
+        f"`Entity`.name STARTS WITH {_nebula_q(t)}" for t in terms
     )
     return (
         f"LOOKUP ON `Entity` WHERE {clauses} "
@@ -525,7 +552,7 @@ class GraphRetriever:
             return RoundGraphData()
         if settings.graph.backend == "nebula":
             cap = limit if limit is not None else self._similarity_top_k
-            ngql = _find_by_name_ngql(query, limit=int(cap))
+            ngql = _find_by_name_ngql(query, limit=_name_fetch_cap(int(cap)))
             if not ngql:  # blank query -> nothing to look up
                 return RoundGraphData()
             try:
@@ -539,7 +566,7 @@ class GraphRetriever:
                 # not run".
                 return RoundGraphData(error=str(exc)[:200])
             out = RoundGraphData()
-            for row in (rows or [])[: int(cap)]:
+            for row in rows or []:
                 # LOOKUP yields flat columns; accept the older `p` map too
                 # so a caller or fake feeding either shape still works.
                 p = (row or {}).get("p") or row or {}
@@ -551,7 +578,7 @@ class GraphRetriever:
                     "entity_type": p.get("label") or "",
                     "description": p.get("description") or "",
                 })
-            out.entities = _dedupe_entities(out.entities)
+            out.entities = _rank_by_name(_dedupe_entities(out.entities), query)[: int(cap)]
             return out
         lucene = build_fulltext_query(query)
         if not lucene:

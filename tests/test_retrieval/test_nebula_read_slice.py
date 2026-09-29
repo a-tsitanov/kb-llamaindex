@@ -62,7 +62,7 @@ async def test_find_by_name_nebula_lookup(monkeypatch):
     assert '`Entity`.name STARTS WITH "Иванов"' in store.last_query
     assert "CONTAINS" not in store.last_query
     assert "MATCH" not in store.last_query
-    assert "LIMIT 5" in store.last_query
+    assert "LIMIT 50" in store.last_query  # over-fetch, ranked and cut to `limit` in Python
     assert out.entities == [{"entity_name": "Иванов Иван",
                              "entity_type": "PERSON", "description": "инженер"}]
     assert out.error == ""
@@ -75,8 +75,41 @@ async def test_find_by_name_nebula_ors_the_tokens(monkeypatch):
     )
     store = _FakeStore(rows=[])
     await GraphRetriever.for_store(store).afind_entities_by_name("Иванов Москва")
-    assert store.last_query.count("STARTS WITH") == 2
-    assert " OR " in store.last_query
+    q = store.last_query
+    # the whole phrase first, then every token
+    for term in ("Иванов Москва", "Иванов", "Москва"):
+        assert f'`Entity`.name STARTS WITH "{term}"' in q
+    assert " OR " in q
+
+
+@pytest.mark.asyncio
+async def test_find_by_name_nebula_is_case_tolerant(monkeypatch):
+    """The index is case-sensitive; a lower-case request also tries the capitalised form."""
+    monkeypatch.setattr(
+        "src.graph.retriever.settings.graph.backend", "nebula", raising=False,
+    )
+    store = _FakeStore(rows=[])
+    await GraphRetriever.for_store(store).afind_entities_by_name("лихачёв")
+    assert '`Entity`.name STARTS WITH "лихачёв"' in store.last_query
+    assert '`Entity`.name STARTS WITH "Лихачёв"' in store.last_query
+
+
+@pytest.mark.asyncio
+async def test_find_by_name_nebula_ranks_the_full_name_first(monkeypatch):
+    """"Алексей Лихачёв" used to return ten other Алексей (the OR of prefixes filled the
+    LIMIT unranked); the entity matching every word must come first."""
+    monkeypatch.setattr(
+        "src.graph.retriever.settings.graph.backend", "nebula", raising=False,
+    )
+    rows = ([{"name": f"Алексей Кущ{i}", "label": "Person"} for i in range(12)]
+            + [{"name": "Алексей Лихачёв", "label": "Person", "description": "глава Росатома"},
+               {"name": "Алексей Лихачёв (однофамилец)", "label": "Person"}])
+    store = _FakeStore(rows=rows)
+    out = await GraphRetriever.for_store(store).afind_entities_by_name("Алексей Лихачёв",
+                                                                        limit=3)
+    assert [e["entity_name"] for e in out.entities][:2] == [
+        "Алексей Лихачёв", "Алексей Лихачёв (однофамилец)"]
+    assert len(out.entities) == 3
 
 
 @pytest.mark.asyncio
