@@ -33,6 +33,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
+import os
 from calendar import monthrange
 from datetime import date, timedelta
 from typing import Any
@@ -48,6 +50,7 @@ from src.mcp._shared import (
     parse_args,
 )
 from src.retrieval import atomic_tools
+from src.retrieval.graph_rank import GraphRanker
 from src.stats.align import GRANULARITIES
 
 mcp = FastMCP(
@@ -91,6 +94,7 @@ async def _init() -> None:
         store = build_vector_store()
         index = build_vector_index(store, embed)
         _deps["retriever"] = index.as_retriever(similarity_top_k=10)
+        _deps["index"], _deps["embed"] = index, embed
 
         from src.retrieval.llm_pool import get_llm_pool
         llm = get_llm_pool().get("search")
@@ -146,6 +150,65 @@ async def _r():
     return _deps["retriever"]
 
 
+# ── relevance ranking (dense prefilter → bge cross-encoder) ───────────
+# Needs the `rerank` image extra (sentence-transformers + CPU torch + the baked
+# BAAI/bge-reranker-v2-m3). Without it the cross-encoder is skipped (fail-soft) and only
+# the dense prefilter / the store order remain. MCP_TOOLS_RERANK=false turns it all off.
+_RERANK_ON = os.environ.get("MCP_TOOLS_RERANK", "true").strip().lower() == "true"
+_RERANK_KEEP = int(os.environ.get("MCP_TOOLS_RERANK_KEEP", "32"))
+_PREFILTER_KEEP = int(os.environ.get("MCP_TOOLS_PREFILTER_KEEP", "128"))
+_VECTOR_POOL = int(os.environ.get("MCP_TOOLS_VECTOR_POOL", "30"))
+
+
+def _cross_encoder():
+    if "cross_encoder" not in _deps:
+        try:
+            from src.retrieval.reranker import build_reranker
+            _deps["cross_encoder"] = build_reranker(top_n=_VECTOR_POOL)
+        except Exception as exc:  # no torch in a lean image, model missing, ...
+            logger.warning("MCP-2: reranker unavailable, results stay unranked: {e}", e=exc)
+            _deps["cross_encoder"] = None
+    return _deps["cross_encoder"]
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    na, nb = math.sqrt(sum(x * x for x in a)), math.sqrt(sum(x * x for x in b))
+    return sum(x * y for x, y in zip(a, b, strict=False)) / (na * nb) if na and nb else 0.0
+
+
+async def _dense_scores(query: str, texts: list[str]) -> list[float]:
+    embed = _deps["embed"]
+    q = await embed.aget_query_embedding(query)
+    vs = await embed.aget_text_embedding_batch(texts)
+    return [_cosine(q, v) for v in vs]
+
+
+async def _cross_scores(query: str, texts: list[str]) -> list[float]:
+    ce = _cross_encoder()
+    if ce is None:
+        raise RuntimeError("cross-encoder unavailable")
+    scores = await asyncio.to_thread(ce._model.predict, [(query, t) for t in texts])
+    return [float(x) for x in scores]
+
+
+async def _ranker() -> GraphRanker | None:
+    if not _RERANK_ON:
+        return None
+    await _init()
+    await asyncio.to_thread(_cross_encoder)  # load once, off the event loop
+    return GraphRanker(prefilter=_dense_scores,
+                       rerank=_cross_scores if _deps.get("cross_encoder") else None,
+                       prefilter_keep=_PREFILTER_KEEP, rerank_keep=_RERANK_KEEP)
+
+
+async def _rerank_chunks(query: str, nodes: list, top_k: int) -> list:
+    ce = _deps.get("cross_encoder")
+    if ce is None:
+        return nodes[:top_k]
+    ranked = await asyncio.to_thread(ce.postprocess_nodes, nodes, query_str=query)
+    return ranked[:top_k]
+
+
 async def _g():
     await _init()
     return _deps["graph"]
@@ -166,8 +229,10 @@ async def _gs():
 
 @mcp.tool(timeout=1800)
 async def vector_search(query: str, top_k: int = 10) -> dict[str, Any]:
-    """Hybrid (BM25 + dense vector + RRF) semantic search over document
-    chunks. Returns the top_k matching chunks with text + metadata.
+    """Dense vector (embedding) semantic search over document chunks, re-ranked
+    by a cross-encoder when available (a wider pool is retrieved and the best
+    `top_k` kept). Returns the top_k chunks with text + metadata. Not keyword /
+    BM25 search: exact rare terms may be missed — try `graph_search` too.
 
     USE FOR: factual / "what / how / why" questions answered by the text
     of documents. This is the default for content questions.
@@ -176,7 +241,13 @@ async def vector_search(query: str, top_k: int = 10) -> dict[str, Any]:
     NEXT STEP: to read more around a good hit, call `get_chunks_by_doc_id`
     with its `doc_id`.
     """
-    r = await atomic_tools.vector_search(await _r(), query=query, top_k=top_k)
+    await _init()
+    if _RERANK_ON and await _ranker() is not None and _deps.get("cross_encoder"):
+        pool = _deps["index"].as_retriever(similarity_top_k=max(_VECTOR_POOL, top_k))
+        r = await atomic_tools.vector_search(pool, query=query, top_k=top_k,
+                                             rerank=_rerank_chunks)
+    else:
+        r = await atomic_tools.vector_search(await _r(), query=query, top_k=top_k)
     return {"sources": json.loads(r.observation)}
 
 
@@ -194,8 +265,11 @@ async def graph_search(query: str, depth: int = 1) -> dict[str, Any]:
     PREFER INSTEAD: `find_entity_by_id` (you have an exact identifier),
     `find_entity_by_name` (you have a partial name), `find_neighbours`
     (you have a known entity, want 1 hop), `graph_walk` (known entity,
-    multi-hop chains). Returns empty lists if Neo4j is unavailable."""
-    r = await atomic_tools.graph_search(await _g(), query=query, depth=depth)
+    multi-hop chains). Entities come back most relevant to `query` first
+    (`relevance` = cross-encoder score). Returns empty lists if the graph is
+    unavailable."""
+    r = await atomic_tools.graph_search(await _g(), query=query, depth=depth,
+                                        ranker=await _ranker())
     return json.loads(r.observation)
 
 
@@ -259,7 +333,7 @@ async def find_entity_by_name(
 
 @mcp.tool(timeout=1800)
 async def find_neighbours(
-    entity_name: str, hops: int = 1,
+    entity_name: str, hops: int = 1, query: str = "",
 ) -> dict[str, Any]:
     """Neighbours + relations of a KNOWN entity, up to `hops` triplet-hops.
 
@@ -269,9 +343,13 @@ async def find_neighbours(
     dossier.
     PREFER INSTEAD: `graph_walk` for deterministic edge-following with
     rel-type filtering; `graph_search` if the entity isn't pinned down
-    yet; `find_entity_*` to resolve the entity first."""
+    yet; `find_entity_*` to resolve the entity first.
+    Pass the user's question as `query` to get the neighbours most relevant to
+    it first (a well-known person has hundreds of neighbours; without `query`
+    they come in arbitrary order)."""
     r = await atomic_tools.find_neighbours(
-        await _g(), entity_name=entity_name, hops=hops,
+        await _g(), entity_name=entity_name, hops=hops, query=query,
+        ranker=await _ranker() if query.strip() else None,
     )
     return json.loads(r.observation)
 

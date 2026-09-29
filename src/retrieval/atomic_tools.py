@@ -32,6 +32,8 @@ from llama_index.core.schema import NodeWithScore, TextNode
 from loguru import logger
 from pydantic import BaseModel
 
+from src.retrieval.graph_rank import GraphRanker
+
 # ── protocols ────────────────────────────────────────────────────────
 
 
@@ -110,9 +112,18 @@ async def vector_search(
     *,
     query: str,
     top_k: int = 10,
+    rerank: Any = None,
 ) -> ToolResult:
-    """Hybrid (BM25 + dense) retrieval over corpus chunks."""
+    """Dense vector retrieval over corpus chunks (no BM25 — the production retriever is
+    dense-only), optionally re-ranked: ``rerank(query, nodes, top_k) -> nodes`` gets the
+    retriever's whole pool, so give the retriever a wider ``similarity_top_k`` than
+    ``top_k`` for it to matter."""
     nodes = await retriever.aretrieve(query)
+    if rerank is not None:
+        try:
+            nodes = await rerank(query, list(nodes), top_k)
+        except Exception as exc:  # best-effort: keep the dense order
+            logger.warning("vector_search rerank failed: {e}", e=repr(exc))
     observation = json.dumps(
         [
             {
@@ -136,6 +147,7 @@ async def graph_search(
     *,
     query: str,
     depth: int = 1,
+    ranker: GraphRanker | None = None,
 ) -> ToolResult:
     """Knowledge-graph traversal: matched entities + their neighbours up
     to ``depth`` triplet-hops + related chunks.
@@ -151,6 +163,8 @@ async def graph_search(
     data = await graph_retriever.aretrieve(query, path_depth=depth)
     entities = getattr(data, "entities", []) or []
     relations = getattr(data, "relations", []) or []
+    if ranker is not None:
+        entities, relations = await ranker.rank(query, entities, relations)
     chunks = list(getattr(data, "chunks", []) or [])
     return ToolResult(
         sources=chunks,
@@ -258,9 +272,12 @@ async def find_neighbours(
     *,
     entity_name: str,
     hops: int = 1,
+    query: str = "",
+    ranker: GraphRanker | None = None,
 ) -> ToolResult:
     """Neighbours of an entity: matched node + relations up to ``hops``
-    triplet-hops out.
+    triplet-hops out. With a ``query`` and a ``ranker`` the neighbours come
+    back most relevant to the question first.
 
     ``hops`` maps to the retriever's ``path_depth`` (clamped 1-3). 1 =
     immediate neighbours. For deterministic edge-following from a known
@@ -272,13 +289,14 @@ async def find_neighbours(
             observation=json.dumps({"entities": [], "relations": []}),
         )
     data = await graph_retriever.aretrieve(entity_name, path_depth=hops)
+    entities = getattr(data, "entities", []) or []
+    relations = getattr(data, "relations", []) or []
+    if ranker is not None and query.strip():
+        entities, relations = await ranker.rank(query, entities, relations)
     return ToolResult(
         sources=[],
         observation=json.dumps(
-            {
-                "entities": getattr(data, "entities", []) or [],
-                "relations": getattr(data, "relations", []) or [],
-            },
+            {"entities": entities, "relations": relations},
             ensure_ascii=False,
         ),
     )
