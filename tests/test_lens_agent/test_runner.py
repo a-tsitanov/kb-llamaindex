@@ -412,3 +412,21 @@ async def test_usage_is_kept_when_the_run_fails():
     async with world(run_timeout_s=0.5) as w:
         run, _ = await w.run(scripted([("kb_slow", {})], "не дойдёт"))
         assert run.status == "failed" and run.usage["requests"] == 1
+
+
+async def test_writes_that_add_nothing_count_as_stalls():
+    async with world(stall_calls=3, board_calls=100) as w:
+        bad = [("board_add_objects", {"objects": objs("c99")[:1]})]
+        run, evs = await w.run(scripted(bad, bad))  # rejected every time, forever
+        assert run.status == "failed" and "зациклился" in of(evs, "error")[0]["message"]
+        assert len(of(evs, "tool_call")) == 3
+
+
+async def test_hidden_board_objects_are_found_as_similar():
+    async with world() as w:
+        await w.run(scripted([("kb_find_entity", {"name": "Р"})],
+                             [("board_add_objects", {"objects": objs("c1")[:1]})], "ok"))
+        await w.board.hide(w.ws.id, None, ["kb:e1"])
+        seen = []
+        await w.run(scripted("ok", seen=seen), text="ростатом")
+        assert "kb:e1 — Росатом" in seen[0][0].parts[-1].content

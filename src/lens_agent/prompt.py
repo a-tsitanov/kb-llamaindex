@@ -26,20 +26,30 @@ board_add_objects с id, type, label, call_id (из строки «call_id=…»
 упоминай как [[ключ]]."""
 
 
+def _words(s: str) -> list[str]:
+    return [w for w in normalize_id(s).replace("«", " ").replace("»", " ").split() if len(w) >= 4]
+
+
+def _coverage(a: list[str], b: list[str]) -> float:
+    """Mean over the words of ``a`` of their best similarity to a word of ``b``."""
+    if not a or not b:
+        return 0.0
+    return sum(max(SequenceMatcher(None, x, y).ratio() for y in b) for x in a) / len(a)
+
+
 def _score(query: str, label: str) -> float:
-    """Typo-tolerant similarity: whole label, or the best word pair (words of ≥4 chars)."""
-    q, lab = normalize_id(query), normalize_id(label)
-    best = SequenceMatcher(None, q, lab).ratio()
-    for qw in (w for w in q.split() if len(w) >= 4):
-        for lw in (w for w in lab.split() if len(w) >= 4):
-            best = max(best, SequenceMatcher(None, qw, lw).ratio())
-    return best
+    """Typo-tolerant similarity: the whole strings, or how well the words of one side are
+    covered by the other (so one shared common word in a long request is not a match)."""
+    q, lab = _words(query), _words(label)
+    whole = SequenceMatcher(None, normalize_id(query), normalize_id(label)).ratio()
+    return max(whole, _coverage(q, lab), _coverage(lab, q))
 
 
 def similar_objects(query: str, objects: list[dict], *, limit: int = 5,
-                    cutoff: float = 0.8) -> list[dict]:
+                    cutoff: float = 0.85) -> list[dict]:
     """Board objects whose label looks like the request (typos, ё/е, word order): the model
-    otherwise "corrects" a typo to some other entity instead of the one on the board."""
+    otherwise "corrects" a typo to some other entity instead of the one on the board.
+    ``cutoff`` keeps near-misses of a different entity out («ростатом» → «Росстат» is 0.8)."""
     if not query.strip():
         return []
     scored = [(s, o) for o in objects if (s := _score(query, str(o.get("label") or ""))) >= cutoff]

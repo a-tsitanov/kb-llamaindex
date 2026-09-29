@@ -274,6 +274,7 @@ services:
       LENS_AGENT_SOURCE_CALLS: ${LENS_AGENT_SOURCE_CALLS:-8}
       LENS_AGENT_BOARD_CALLS: ${LENS_AGENT_BOARD_CALLS:-20}
       LENS_AGENT_RESULT_CHARS: ${LENS_AGENT_RESULT_CHARS:-4000}
+      LENS_AGENT_STALL_CALLS: ${LENS_AGENT_STALL_CALLS:-4}
       LENS_AGENT_MCP: >-
         [{"name":"kb-tools","namespace":"kb","url":"http://mcp-tools:9002/mcp","token":"${LENS_MCP_TOKEN:?set LENS_MCP_TOKEN to a key from API_KEYS}","role":"source"},
          {"name":"kb-stats","namespace":"kb","url":"http://mcp-stats:9003/mcp","token":"${LENS_MCP_TOKEN:?set LENS_MCP_TOKEN to a key from API_KEYS}","role":"source"},

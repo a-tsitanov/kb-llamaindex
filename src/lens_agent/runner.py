@@ -160,7 +160,7 @@ class Runner:
     async def _similar(self, board: MCPServer, text: str) -> list[dict]:
         """Board objects whose label resembles the request (outside the model's budgets)."""
         try:
-            b = await board.direct_call_tool("get_board", {"limit": 200})
+            b = await board.direct_call_tool("get_board", {"limit": 200, "include_hidden": True})
         except Exception:
             return []
         objects = b.get("objects", []) if isinstance(b, dict) else []
@@ -210,8 +210,10 @@ class Runner:
             board = servers.get(board_entry.name) if board_entry else None
             if board is None:
                 raise RunFailure("internal", "доска недоступна (board MCP)")
-            prompt = user_prompt(run.text, await self._mentions(board, run.mentions),
-                                 similar=await self._similar(board, run.text))
+            mentioned = await self._mentions(board, run.mentions)
+            similar = [o for o in await self._similar(board, run.text)
+                       if o["key"] not in run.mentions]
+            prompt = user_prompt(run.text, mentioned, similar=similar)
             agent = Agent(self.model_factory(), instructions=INSTRUCTIONS,
                           toolsets=list(servers.values()))
             answer, usage = await asyncio.wait_for(

@@ -36,6 +36,13 @@ _BOARD_WRITES = {"add_objects": "objects", "add_relations": "relations"}
 _BOARD_READS = ("get_board", "find_on_board", "get_object")
 
 
+def _changed(name: str, result: Any) -> bool:
+    """Did this board call change the board? Writes count only if something landed."""
+    if name not in _BOARD_WRITES:
+        return True  # note, hide/show, merge, undo
+    return isinstance(result, dict) and (bool(result.get("added")) or bool(result.get("merged")))
+
+
 class RunStalled(Exception):
     """The agent keeps making calls that bring nothing new."""
 
@@ -123,6 +130,10 @@ class RunCalls:
         self.stalls += 1
         if self.stalls >= self.limits.stall_calls:
             raise RunStalled(self.stalls)
+
+    def _stall_after_board(self, name: str, result: Any) -> None:
+        if name in _BOARD_WRITES and not _changed(name, result):
+            self._stall()  # everything was rejected: the model is stuck on a dead end
 
     async def _result(self, cid: str, *, ok: bool, t0: float, text: str = "",
                       result: Any = None, truncated: bool = False, error: str | None = None,
@@ -239,7 +250,7 @@ class RunCalls:
                                                   payload=result))
         if read_key is not None:
             self._board_reads[read_key] = cid
-        else:  # every board write or command changes what a read would return
+        elif _changed(name, result):  # a real change: reads must see it; the run moves on
             self._board_version += 1
             self._progress()
         if name == "add_note":
@@ -247,4 +258,5 @@ class RunCalls:
         elif name == "undo":
             self.undone = True
         await self._result(cid, ok=True, t0=t0, text=_text(result), result=result)
+        self._stall_after_board(name, result)
         return result
