@@ -183,11 +183,14 @@ def _name_fetch_cap(limit: int) -> int:
 def _rank_by_name(entities: list[dict], query: str) -> list[dict]:
     """Best name matches first: exact, starts with the whole phrase, more query words present
     (as word prefixes), then shorter names. Stable for ties."""
-    q = " ".join((query or "").split()).casefold()
+    def norm(x: str) -> str:
+        return " ".join(x.split()).casefold().replace("ё", "е")
+
+    q = norm(query or "")
     words = q.split()
 
     def key(e: dict) -> tuple:
-        name = str(e.get("entity_name") or "").casefold()
+        name = norm(str(e.get("entity_name") or ""))
         name_words = name.replace("«", " ").replace("»", " ").replace("(", " ").split()
         hits = sum(any(nw.startswith(w) for nw in name_words) for w in words)
         return (name != q, not name.startswith(q), -hits, len(name))
@@ -195,35 +198,31 @@ def _rank_by_name(entities: list[dict], query: str) -> list[dict]:
     return sorted(entities, key=key)
 
 
-def _find_by_name_ngql(query: str, *, limit: int) -> str:
-    """PREFIX name lookup under nebula, over the ``entity_name_idx`` index.
+def _find_by_name_ngqls(query: str, *, limit: int) -> list[str]:
+    """PREFIX name lookups under nebula, over the ``entity_name_idx`` index — one single-term
+    ``LOOKUP`` per term (see ``_name_terms``: the whole phrase first, then each token, plus
+    capitalised variants). Exact and prefix both work: "Украина" finds itself, "Иванов" finds
+    "Иванов Иван Иванович". The caller unions the rows and ranks with ``_rank_by_name``.
 
-    ORs a ``STARTS WITH`` per term (see ``_name_terms``): the whole phrase and each token,
-    plus capitalised variants. Exact and prefix both work: "Украина" finds itself, "Иванов"
-    finds "Иванов Иван Иванович". The caller over-fetches (``limit`` here is the fetch cap)
-    and ranks with ``_rank_by_name``.
+    One statement per term, not an ``OR``: measured 2026-09-29 on the live graph, an OR of
+    three prefixes took 1–9 s where the same three single-term lookups took 0.04 s in
+    total — and the OR's shared LIMIT let 200 "Алексей …" rows hide "Алексей Лихачёв".
 
     KNOWN LIMIT: a token matching mid-name does NOT match. "Лихачёв" will not find
     "Алексей Лихачёв", "Ромаш" will not find "ООО Ромашка". ``CONTAINS`` cannot use an
     index — on a 161k-entity graph it was a full scan that failed with
-    ``GraphMemoryExceeded (-2600)`` (measured 2026-08-18: prefix answers in under two
-    seconds where ``CONTAINS`` failed in three). True substring search needs an index built
-    for it — a trigram table of entity names in Postgres. Do not reintroduce ``CONTAINS``.
+    ``GraphMemoryExceeded (-2600)``. True substring search needs an index built for it — a
+    trigram table of entity names in Postgres. Do not reintroduce ``CONTAINS``.
 
-    Returns ``""`` for blank input so the caller short-circuits.
+    Returns ``[]`` for blank input so the caller short-circuits.
     """
-    terms = _name_terms(query)
-    if not terms:
-        return ""
-    clauses = " OR ".join(
-        f"`Entity`.name STARTS WITH {_nebula_q(t)}" for t in terms
-    )
-    return (
-        f"LOOKUP ON `Entity` WHERE {clauses} "
+    return [
+        f"LOOKUP ON `Entity` WHERE `Entity`.name STARTS WITH {_nebula_q(t)} "
         "YIELD id(vertex) AS vid, `Entity`.name AS name, "
         "`Entity`.label AS label, `Entity`.description AS description "
         f"| LIMIT {int(limit)};"
-    )
+        for t in _name_terms(query)
+    ]
 
 
 # Lucene special chars that must be backslash-escaped inside a query term.
@@ -552,13 +551,15 @@ class GraphRetriever:
             return RoundGraphData()
         if settings.graph.backend == "nebula":
             cap = limit if limit is not None else self._similarity_top_k
-            ngql = _find_by_name_ngql(query, limit=_name_fetch_cap(int(cap)))
-            if not ngql:  # blank query -> nothing to look up
+            statements = _find_by_name_ngqls(query, limit=_name_fetch_cap(int(cap)))
+            if not statements:  # blank query -> nothing to look up
                 return RoundGraphData()
             try:
-                rows = await asyncio.to_thread(
-                    self._graph_store.structured_query, ngql,
-                )
+                rows: list = []
+                for ngql in statements:
+                    rows += await asyncio.to_thread(
+                        self._graph_store.structured_query, ngql,
+                    ) or []
             except Exception as exc:
                 logger.warning("find_entities_by_name (nebula) failed: {e}", e=repr(exc))
                 # Report it. Returning a bare empty result told the caller

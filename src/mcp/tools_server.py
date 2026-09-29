@@ -239,8 +239,11 @@ async def find_entity_by_id(
 async def find_entity_by_name(
     query: str, limit: int = 10,
 ) -> dict[str, Any]:
-    """Fuzzy / partial NAME search via the full-text index ("Иванов" →
-    "Иванов Иван Иванович"; "Ромаш" → "ООО Ромашка").
+    """Entity lookup by NAME prefix ("Иванов" → "Иванов Иван Иванович";
+    "Алексей Лихачёв" → itself first). Pass the name only — "Алексей Лихачёв",
+    not "Лихачёв Алексей Росатом генеральный директор": extra words match
+    unrelated names ("Генеральный директор"). A surname alone does not find
+    "Имя Фамилия" (prefix index) — use `graph_search` for that and for questions.
 
     USE FOR: resolving an approximate / partial name into canonical
     entities — usually the first step before drilling in with
