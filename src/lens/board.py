@@ -117,7 +117,18 @@ class BoardService:
                 raise BoardError(
                     f"лимит объектов за запуск ({self.limits.objects_per_run}) — "
                     "заверши ответ с тем, что уже на доске")
-            by_label = {(o.type, normalize_id(o.label)): k for k, o in st.objects.items()}
+            # label -> [(type, key)]: a near-duplicate has the same label and the same type,
+            # or one of the two is "other" (a model that omitted the type)
+            by_label: dict[str, list[tuple[str, str]]] = {}
+            for k, o in st.objects.items():
+                by_label.setdefault(normalize_id(o.label), []).append((o.type, k))
+
+            def near_dup(otype: str, label: str) -> str | None:
+                for t, k in by_label.get(normalize_id(label), []):
+                    if t == otype or "other" in (t, otype):
+                        return k
+                return None
+
             built: list[ObjectEl] = []
             keys, merged, rejected = [], [], []
             added = 0
@@ -133,9 +144,11 @@ class BoardService:
                     continue
                 otype = normalize_type(item.get("type"))
                 key = st.canon(make_key(src.namespace, oid))
-                if key not in st.objects and (otype, normalize_id(label)) in by_label:
-                    key = by_label[(otype, normalize_id(label))]
+                if key not in st.objects and (dup := near_dup(otype, label)) is not None:
+                    key = dup
                 if key in st.objects:
+                    if otype == "other":  # take the known type instead of recording a conflict
+                        otype = st.objects[key].type
                     merged.append({"id": oid, "merged_into": key})
                 elif key not in keys:
                     added += 1
@@ -147,7 +160,7 @@ class BoardService:
                     if item.get("description") else None,
                     attrs=attrs,
                     sources=[src]))
-                by_label.setdefault((otype, normalize_id(label)), key)
+                by_label.setdefault(normalize_id(label), []).append((otype, key))
                 keys.append(key)
             await self._append(ws, run_id, [(
                 "add_objects", {"objects": [o.model_dump(mode="json") for o in built]})]

@@ -45,7 +45,9 @@ def _merge_obj(into: ObjectEl, other: ObjectEl) -> None:
     _merge_sources(into.sources, other.sources)
     if other.description:
         into.description = other.description  # latest non-empty wins; history in the op log
-    if other.type != into.type:
+    if into.type == "other" and other.type != "other":
+        into.type = other.type  # "other" means unknown: a known type refines it
+    elif other.type != into.type and other.type != "other":
         seen = into.attrs.get("types_seen")
         # Tolerate a non-list value: the model can write into attrs directly, and a
         # non-list types_seen must never brick every future read/write of this key.

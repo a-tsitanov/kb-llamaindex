@@ -459,3 +459,29 @@ async def test_mentioned_object_carries_its_source_id_into_the_prompt():
         await w.run(scripted("ok", seen=seen), text="с кем связан?", mentions=["kb:e2"])
         prompt = seen[0][0].parts[-1].content
         assert "kb:e2 — Лихачёв (person), в источнике: E2" in prompt
+
+
+async def test_relations_accept_object_ids_and_infer_a_missing_call_id():
+    async with world() as w:
+        await w.run(scripted(
+            [("kb_find_entity", {"name": "Росатом"})],
+            [("board_add_objects", {"objects": objs("c1")})],
+            # ids instead of keys, and no call_id: both ends came from c1
+            [("board_add_relations", {"relations": [
+                {"from": "E2", "to": "kb:e1", "kind": "работает_в"}]})],
+            "ok"))
+        st = await w.board.state(w.ws.id)
+        (rel,) = st.relations.values()
+        assert (rel.from_key, rel.to_key, rel.kind) == ("kb:e2", "kb:e1", "работает_в")
+        assert rel.sources[0].call_id == "c1"
+
+
+async def test_relation_without_any_known_source_is_still_rejected():
+    async with world() as w:
+        seen = []
+        await w.run(scripted(
+            [("board_add_relations", {"relations": [
+                {"from": "kb:x", "to": "kb:y", "kind": "связан"}]})],
+            "ok", seen=seen))
+        assert "call_id" in tool_returns(seen[-1])[0]
+        assert (await w.board.state(w.ws.id)).relations == {}

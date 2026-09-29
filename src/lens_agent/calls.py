@@ -31,7 +31,7 @@ from typing import Any
 
 from pydantic_ai import ModelRetry
 
-from src.lens.keys import normalize_id
+from src.lens.keys import make_key, normalize_id
 from src.lens_agent.config import McpEntry
 from src.lens_agent.store import AgentStore, CallPayload
 from src.lens_agent.stream import RunEmitter
@@ -121,6 +121,7 @@ class RunCalls:
         self._n = 0
         self._cache: dict[str, tuple[str, str]] = {}
         self._payloads: dict[str, Any] = {}  # source call id -> full result (for source ids)
+        self._object_src: dict[str, CallInfo] = {}  # board key written this run -> its source
         self._board_version = 0  # bumped by every board change this run makes
         self._board_reads: dict[str, str] = {}  # read key (incl. version) -> first call id
         self.stalls = 0  # consecutive calls that brought nothing new
@@ -220,7 +221,23 @@ class RunCalls:
         await self._result(cid, ok=True, t0=t0, text=text, result=result, truncated=truncated)
         return model_text
 
-    def _attach_sources(self, items: Any) -> tuple[list[dict], list[dict]]:
+    def _namespaces(self) -> list[str]:
+        return list(dict.fromkeys(i.namespace for i in self.registry.values()))
+
+    def _as_key(self, value: Any, ns: str | None) -> str:
+        """A relation end as a board key: keep ``ns:…`` keys, turn an object id / label into
+        ``make_key(ns, …)`` (models write "Алексей Лихачёв" where the board wants
+        "kb:алексей лихачев")."""
+        v = str(value or "").strip()
+        spaces = self._namespaces()
+        if any(v.startswith(f"{n}:") for n in spaces) or not v:
+            return v
+        if ns is None:  # no call_id: the namespace whose key for it was written this run
+            ns = next((n for n in spaces if make_key(n, v) in self._object_src),
+                      spaces[0] if len(spaces) == 1 else None)
+        return make_key(ns, v) if ns else v
+
+    def _attach_sources(self, items: Any, kind: str = "objects") -> tuple[list[dict], list[dict]]:
         ok, rejected = [], []
         for it in items if isinstance(items, list) else []:
             if not isinstance(it, dict):
@@ -228,15 +245,24 @@ class RunCalls:
                 continue
             ref = str(it.get("call_id") or "").strip()
             info = self.registry.get(ref)
+            clean = {k: v for k, v in it.items() if k not in ("call_id", "source")}
+            if kind == "relations":
+                ns = info.namespace if info else None
+                clean["from"] = self._as_key(it.get("from"), ns)
+                clean["to"] = self._as_key(it.get("to"), ns)
+                if info is None and not ref:  # evidence: the source both ends came from
+                    a, b = self._object_src.get(clean["from"]), self._object_src.get(clean["to"])
+                    info = a if a is not None and (b is None or a == b) else (a or b)
             if info is None:
                 rejected.append({"item": it, "reason": f"неизвестный call_id {ref!r} — укажи "
                                  "call_id из результата инструмента-источника этого запроса"})
                 continue
-            clean = {k: v for k, v in it.items() if k not in ("call_id", "source")}
-            sid = _source_id(self._payloads.get(info.call_id), it)
-            if sid is not None:
-                attrs = clean.get("attrs") if isinstance(clean.get("attrs"), dict) else {}
-                clean["id"], clean["attrs"] = sid, {**attrs, "source_id": sid}
+            if kind == "objects":
+                sid = _source_id(self._payloads.get(info.call_id), it)
+                if sid is not None:
+                    attrs = clean.get("attrs") if isinstance(clean.get("attrs"), dict) else {}
+                    clean["id"], clean["attrs"] = sid, {**attrs, "source_id": sid}
+                self._object_src.setdefault(make_key(info.namespace, str(clean.get("id"))), info)
             clean["source"] = {"server": info.server, "tool": info.tool,
                                "call_id": info.call_id, "namespace": info.namespace}
             ok.append(clean)
@@ -267,12 +293,18 @@ class RunCalls:
         self.counts["board"] += 1
         if name in _BOARD_WRITES:
             field = _BOARD_WRITES[name]
-            items, rejected = self._attach_sources(args.get(field))
+            items, rejected = self._attach_sources(args.get(field), field)
             if items:
                 result = await self._call(cid, t0, call_tool, name, {field: items})
             else:
                 result = {"added": 0, "rejected": []}
             result = {**result, "rejected": rejected + list(result.get("rejected", []))}
+            for m in result.get("merged", []) or []:  # near-duplicates live under another key
+                src = next((i for i in items if str(i.get("id")) == str(m.get("id"))), None)
+                if src is not None:
+                    info = self.registry.get(src["source"]["call_id"])
+                    if info is not None:
+                        self._object_src.setdefault(str(m.get("merged_into")), info)
         else:
             result = await self._call(cid, t0, call_tool, name, args)
         await self.store.save_payload(CallPayload(run_id=self.run_id, call_id=cid,

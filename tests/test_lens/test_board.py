@@ -192,3 +192,22 @@ async def test_parallel_calls_in_one_workspace_do_not_duplicate():
         b.add_objects(ws.id, "r1", [obj("id-2", label="РОСАТОМ")]))
     assert r1["added"] + r2["added"] == 1
     assert len((await b.state(ws.id)).objects) == 1
+
+
+async def test_near_duplicate_with_type_other_matches_any_type(board):
+    b, ws, _ = board
+    await b.add_objects(ws, "r1", [obj("likhachev", label="Алексей Лихачёв", type_="person")])
+    r = await b.add_objects(ws, "r2", [obj("Алексей Лихачёв", label="Алексей Лихачёв",
+                                           type_="other")])
+    assert r["merged"] == [{"id": "Алексей Лихачёв", "merged_into": "kb:likhachev"}]
+    await b.add_objects(ws, "r3", [obj("tass", label="ТАСС", type_="other")])
+    r = await b.add_objects(ws, "r4", [obj("tass-org", label="ТАСС", type_="organization")])
+    assert r["merged"] == [{"id": "tass-org", "merged_into": "kb:tass"}]
+    st = await b.state(ws)
+    assert st.objects["kb:tass"].type == "organization"  # "other" is refined, not kept
+    assert st.objects["kb:likhachev"].type == "person"
+    assert "types_seen" not in st.objects["kb:likhachev"].attrs
+    # two specific different types are still different entities
+    r = await b.add_objects(ws, "r5", [obj("likh-place", label="Алексей Лихачёв",
+                                           type_="location")])
+    assert r["added"] == 1
