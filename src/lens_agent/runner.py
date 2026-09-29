@@ -42,11 +42,12 @@ from pydantic_ai.messages import (
     ThinkingPartDelta,
 )
 from pydantic_ai.models import Model
+from pydantic_ai.usage import RunUsage
 
 from src.lens.events import EventBus
-from src.lens_agent.calls import CallLimits, RunCalls
+from src.lens_agent.calls import CallLimits, RunCalls, RunStalled
 from src.lens_agent.config import AgentSettings, McpEntry
-from src.lens_agent.prompt import INSTRUCTIONS, user_prompt
+from src.lens_agent.prompt import INSTRUCTIONS, similar_objects, user_prompt
 from src.lens_agent.store import AgentStore, RunRecord
 from src.lens_agent.stream import RunEmitter
 
@@ -72,6 +73,10 @@ def http_server_factory(settings: AgentSettings) -> ServerFactory:
             process_tool_call=hook, timeout=settings.connect_timeout_s,
             read_timeout=settings.tool_timeout_s + 30, max_retries=3)
     return make
+
+
+def _usage_dict(u: RunUsage) -> dict[str, int]:
+    return {"requests": u.requests, "tokens_in": u.input_tokens, "tokens_out": u.output_tokens}
 
 
 def _unwrap(e: BaseException) -> BaseException:
@@ -152,14 +157,23 @@ class Runner:
             out.append({"key": key, "label": o.get("label"), "type": o.get("type")})
         return out
 
+    async def _similar(self, board: MCPServer, text: str) -> list[dict]:
+        """Board objects whose label resembles the request (outside the model's budgets)."""
+        try:
+            b = await board.direct_call_tool("get_board", {"limit": 200})
+        except Exception:
+            return []
+        objects = b.get("objects", []) if isinstance(b, dict) else []
+        return similar_objects(text, objects)
+
     async def _heartbeat(self, run_id: str) -> None:
         while True:
             await asyncio.sleep(self.settings.heartbeat_s)
             with contextlib.suppress(Exception):
                 await self.store.heartbeat(run_id)
 
-    async def _agent_run(self, agent: Agent, prompt: str, em: RunEmitter,
-                         calls: RunCalls) -> tuple[str, dict[str, int]]:
+    async def _agent_run(self, agent: Agent, prompt: str, em: RunEmitter, calls: RunCalls,
+                         usage: RunUsage) -> tuple[str, dict[str, int]]:
         async def on_events(_ctx, events) -> None:
             async for ev in events:
                 if isinstance(ev, PartStartEvent):
@@ -181,14 +195,12 @@ class Runner:
 
         limits = UsageLimits(request_limit=self.settings.request_limit)
         with Agent.sequential_tool_calls():  # no detached tool-call tasks: see module doc
-            result = await agent.run(prompt, usage_limits=limits,
+            result = await agent.run(prompt, usage_limits=limits, usage=usage,
                                      event_stream_handler=on_events)
-        u = result.usage()
-        return str(result.output), {"requests": u.requests, "tokens_in": u.input_tokens,
-                                    "tokens_out": u.output_tokens}
+        return str(result.output), _usage_dict(result.usage())
 
     async def _execute(self, run: RunRecord, em: RunEmitter, calls: RunCalls,
-                       t0: float) -> dict[str, int]:
+                       t0: float, run_usage: RunUsage) -> dict[str, int]:
         s = self.settings
         async with AsyncExitStack() as stack:
             servers, statuses = await self._connect(stack, run, calls)
@@ -198,11 +210,12 @@ class Runner:
             board = servers.get(board_entry.name) if board_entry else None
             if board is None:
                 raise RunFailure("internal", "доска недоступна (board MCP)")
-            prompt = user_prompt(run.text, await self._mentions(board, run.mentions))
+            prompt = user_prompt(run.text, await self._mentions(board, run.mentions),
+                                 similar=await self._similar(board, run.text))
             agent = Agent(self.model_factory(), instructions=INSTRUCTIONS,
                           toolsets=list(servers.values()))
-            answer, usage = await asyncio.wait_for(self._agent_run(agent, prompt, em, calls),
-                                                   s.run_timeout_s)
+            answer, usage = await asyncio.wait_for(
+                self._agent_run(agent, prompt, em, calls, run_usage), s.run_timeout_s)
             await em.emit("final", answer=answer, usage=usage,
                           duration_ms=int((time.monotonic() - t0) * 1000))
             if answer.strip() and not calls.note_written and not calls.undone:
@@ -227,6 +240,8 @@ class Runner:
             return "cancelled", None
         if isinstance(e, RunFailure):
             return "failed", e
+        if isinstance(e, RunStalled):
+            return "failed", RunFailure("limit", str(e))
         if isinstance(e, UsageLimitExceeded):
             return "failed", RunFailure("limit", str(e))
         if isinstance(e, UnexpectedModelBehavior) and _TOOL_RETRIES.match(e.message):
@@ -253,15 +268,19 @@ class Runner:
         em = RunEmitter(self.store, self.bus, run.id)
         calls = RunCalls(run.id, self.store, em, CallLimits(
             result_chars=s.result_chars, source_calls=s.source_calls,
-            board_calls=s.board_calls, tool_timeout_s=s.tool_timeout_s))
+            board_calls=s.board_calls, tool_timeout_s=s.tool_timeout_s,
+            stall_calls=s.stall_calls))
         t0 = time.monotonic()
         status, failure, usage = "failed", None, None
+        run_usage = RunUsage()  # filled in place by agent.run — kept even if the run fails
         side = [asyncio.create_task(self._heartbeat(run.id)), asyncio.create_task(em.autoflush())]
         try:
-            usage = await self._execute(run, em, calls, t0)
+            usage = await self._execute(run, em, calls, t0, run_usage)
             status = "done"
         except BaseException as e:  # every run must end with `done`
             status, failure = self._classify(run, e)
+            if run_usage.requests:
+                usage = _usage_dict(run_usage)
         # The bookkeeping must survive a further cancellation (shutdown during a cancel):
         # it runs shielded and this task waits it out.
         fin = asyncio.ensure_future(self._finalize(run, em, side, status, failure, usage))

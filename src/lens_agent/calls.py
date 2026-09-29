@@ -11,7 +11,11 @@ What the model cannot be trusted with happens here:
 - soft budgets per kind (source / board): over budget the call is not made and the model is
   told to finish with what it has;
 - board writes: ``call_id`` is checked against this run's source calls and replaced by the
-  full ``source {server, tool, call_id, namespace}``; unknown ids are rejected with a reason.
+  full ``source {server, tool, call_id, namespace}``; unknown ids are rejected with a reason;
+- board reads repeated while this run has not changed the board are answered from the cache
+  with a nudge to add objects or answer (a weak model otherwise re-reads the board in a loop);
+- consecutive calls that bring nothing new (cache hits, over-budget calls) are counted; at
+  ``stall_calls`` the run is stopped (``RunStalled``) instead of burning the run timeout.
 """
 
 from __future__ import annotations
@@ -29,6 +33,15 @@ from src.lens_agent.store import AgentStore, CallPayload
 from src.lens_agent.stream import RunEmitter
 
 _BOARD_WRITES = {"add_objects": "objects", "add_relations": "relations"}
+_BOARD_READS = ("get_board", "find_on_board", "get_object")
+
+
+class RunStalled(Exception):
+    """The agent keeps making calls that bring nothing new."""
+
+    def __init__(self, calls: int):
+        super().__init__(f"агент зациклился: {calls} вызовов подряд без новых данных")
+        self.calls = calls
 
 
 @dataclass(frozen=True)
@@ -45,6 +58,7 @@ class CallLimits:
     source_calls: int = 8
     board_calls: int = 20
     tool_timeout_s: float = 120.0
+    stall_calls: int = 4
 
 
 def _text(result: Any) -> str:
@@ -75,6 +89,9 @@ class RunCalls:
         self._seen: set[str] = set()
         self._n = 0
         self._cache: dict[str, tuple[str, str]] = {}
+        self._board_version = 0  # bumped by every board change this run makes
+        self._board_reads: dict[str, str] = {}  # read key (incl. version) -> first call id
+        self.stalls = 0  # consecutive calls that brought nothing new
 
     def short_id(self, provider_id: str | None) -> str:
         """A fresh id for every hook invocation (never reused, even for a repeated provider
@@ -97,6 +114,15 @@ class RunCalls:
                 return await self._board(cid, call_tool, name, args)
             return await self._source(entry, cid, call_tool, name, args)
         return process_tool_call
+
+    def _progress(self) -> None:
+        self.stalls = 0
+
+    def _stall(self) -> None:
+        """Count a call that brought nothing new; stop the run at ``stall_calls``."""
+        self.stalls += 1
+        if self.stalls >= self.limits.stall_calls:
+            raise RunStalled(self.stalls)
 
     async def _result(self, cid: str, *, ok: bool, t0: float, text: str = "",
                       result: Any = None, truncated: bool = False, error: str | None = None,
@@ -133,14 +159,17 @@ class RunCalls:
             first, model_text = self._cache[key]
             self.registry[cid] = self.registry[first]
             await self._result(cid, ok=True, t0=t0, text=model_text, cached_from=first)
+            self._stall()
             return f"(повтор вызова {first}, тот же результат)\n{model_text}"
         if self.counts["source"] >= self.limits.source_calls:
             msg = (f"лимит вызовов источников исчерпан ({self.limits.source_calls}) — "
                    "завершай с тем, что есть")
             await self._result(cid, ok=False, t0=t0, error=msg)
+            self._stall()
             return msg
         self.counts["source"] += 1
         result = await self._call(cid, t0, call_tool, name, args)
+        self._progress()
         await self.store.save_payload(CallPayload(run_id=self.run_id, call_id=cid,
                                                   server=entry.name, tool=name, args=args,
                                                   payload=result))
@@ -178,7 +207,22 @@ class RunCalls:
             msg = (f"лимит вызовов доски исчерпан ({self.limits.board_calls}) — "
                    "заверши ответ")
             await self._result(cid, ok=False, t0=t0, error=msg)
+            self._stall()
             return msg
+        read_key = None
+        if name in _BOARD_READS:
+            # get_board is a repeat whatever its limit/include_hidden: the board is the same
+            read_args = {} if name == "get_board" else args
+            read_key = json.dumps([name, read_args, self._board_version], sort_keys=True,
+                                  ensure_ascii=False, default=str)
+            first = self._board_reads.get(read_key)
+            if first is not None:
+                msg = (f"(повтор {first}: доска не менялась с того вызова) — снова её не "
+                       "запрашивай. Добавь объекты (board_add_objects с call_id из результатов "
+                       "источников) или заверши ответ.")
+                await self._result(cid, ok=True, t0=t0, text=msg, cached_from=first)
+                self._stall()
+                return msg
         self.counts["board"] += 1
         if name in _BOARD_WRITES:
             field = _BOARD_WRITES[name]
@@ -193,6 +237,11 @@ class RunCalls:
         await self.store.save_payload(CallPayload(run_id=self.run_id, call_id=cid,
                                                   server="board", tool=name, args=args,
                                                   payload=result))
+        if read_key is not None:
+            self._board_reads[read_key] = cid
+        else:  # every board write or command changes what a read would return
+            self._board_version += 1
+            self._progress()
         if name == "add_note":
             self.note_written = True
         elif name == "undo":

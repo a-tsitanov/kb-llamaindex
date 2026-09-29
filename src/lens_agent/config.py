@@ -50,6 +50,7 @@ class AgentSettings(BaseSettings):
     result_chars: int = 4000  # source result cut before it reaches the model
     source_calls: int = 8  # soft budget per run
     board_calls: int = 20  # soft budget per run
+    stall_calls: int = 4  # consecutive calls with nothing new → stop the run
     request_limit: int = 30  # hard: model requests per run
     run_timeout_s: float = 600.0
     tool_timeout_s: float = 120.0

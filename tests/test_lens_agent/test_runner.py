@@ -365,3 +365,50 @@ async def test_failed_deterministic_note_is_reported(monkeypatch):
         (err,) = of(evs, "error")
         assert err["where"] == "tool" and err["message"].startswith("заметка не записана: ")
         assert "доска не ответила" in err["message"]
+
+
+async def test_unchanged_board_read_is_answered_from_cache_with_a_nudge():
+    async with world() as w:
+        seen = []
+        run, evs = await w.run(scripted(
+            [("board_get_board", {"include_hidden": True})],
+            [("board_get_board", {"limit": 50, "include_hidden": True})],
+            [("kb_find_entity", {"name": "Р"})],
+            [("board_add_objects", {"objects": objs("c3")[:1]})],
+            [("board_get_board", {})],
+            "ok", seen=seen))
+        assert run.status == "done"
+        rets = tool_returns(seen[-1])
+        assert "доска не менялась" in rets[1] and "board_add_objects" in rets[1]
+        results = of(evs, "tool_result")
+        assert results[1]["cached_from"] == "c1"
+        # after a write the board is read again for real
+        assert "cached_from" not in results[4] and "kb:e1" in rets[4]
+
+
+async def test_stalled_agent_is_stopped_early():
+    async with world(stall_calls=3) as w:
+        run, evs = await w.run(scripted(
+            [("board_get_board", {})],
+            [("board_get_board", {})]))  # repeats forever
+        assert run.status == "failed"
+        (err,) = of(evs, "error")
+        assert err["where"] == "limit" and "зациклился" in err["message"]
+        assert len(of(evs, "tool_call")) == 4  # 1 real read + 3 repeats, then stop
+        assert run.usage and run.usage["requests"] == 4
+
+
+async def test_similar_board_objects_are_named_in_the_prompt():
+    async with world() as w:
+        await w.run(scripted([("kb_find_entity", {"name": "Р"})],
+                             [("board_add_objects", {"objects": objs("c1")[:1]})], "ok"))
+        seen = []
+        await w.run(scripted("ok", seen=seen), text="ростатом")
+        prompt = seen[0][0].parts[-1].content
+        assert "Похожие объекты на доске" in prompt and "kb:e1 — Росатом" in prompt
+
+
+async def test_usage_is_kept_when_the_run_fails():
+    async with world(run_timeout_s=0.5) as w:
+        run, _ = await w.run(scripted([("kb_slow", {})], "не дойдёт"))
+        assert run.status == "failed" and run.usage["requests"] == 1
