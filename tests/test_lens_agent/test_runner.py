@@ -430,3 +430,32 @@ async def test_hidden_board_objects_are_found_as_similar():
         seen = []
         await w.run(scripted("ok", seen=seen), text="ростатом")
         assert "kb:e1 — Росатом" in seen[0][0].parts[-1].content
+
+
+async def test_object_id_is_taken_from_the_cited_source_result():
+    async with world() as w:
+        await w.run(scripted(
+            [("kb_find_entity", {"name": "Росатом"})],
+            [("board_add_objects", {"objects": [
+                {"id": "rosatom", "type": "organization", "label": "Росатом", "call_id": "c1"},
+                {"id": "invented", "type": "person", "label": "Нет в источнике", "call_id": "c1"},
+            ]})],
+            "ok"))
+        st = await w.board.state(w.ws.id)
+        # the model invented "rosatom"; the source row for label «Росатом» has id E1
+        assert "kb:e1" in st.objects and "kb:rosatom" not in st.objects
+        assert st.objects["kb:e1"].attrs["source_id"] == "E1"
+        # nothing matched in the source: kept as the model wrote it
+        assert "kb:invented" in st.objects and "source_id" not in st.objects["kb:invented"].attrs
+
+
+async def test_mentioned_object_carries_its_source_id_into_the_prompt():
+    async with world() as w:
+        await w.run(scripted([("kb_find_entity", {"name": "Р"})],
+                             [("board_add_objects", {"objects": [
+                                 {"id": "x", "type": "person", "label": "Лихачёв",
+                                  "call_id": "c1"}]})], "ok"))
+        seen = []
+        await w.run(scripted("ok", seen=seen), text="с кем связан?", mentions=["kb:e2"])
+        prompt = seen[0][0].parts[-1].content
+        assert "kb:e2 — Лихачёв (person), в источнике: E2" in prompt

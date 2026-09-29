@@ -19,8 +19,10 @@ INSTRUCTIONS = """\
 инструментами доски (board_hide, board_show, board_undo, board_merge), без поиска в источниках.
 3. Ищи в источниках; соседей бери на 1 шаг; не повторяй одинаковые вызовы.
 4. На доску клади только то, что отвечает на вопрос (обычно до 20 объектов): \
-board_add_objects с id, type, label, call_id (из строки «call_id=…» результата источника), \
-затем board_add_relations между ключами из ответа board_add_objects.
+board_add_objects с id, type, label, call_id (из строки «call_id=…» результата источника); \
+id бери из результата источника (поле id или entity_name), не придумывай; затем \
+board_add_relations между ключами из ответа board_add_objects. Для объектов доски с \
+пометкой «в источнике: X» используй X как имя сущности в инструментах источника.
 5. Не добавляй фактов, которых нет в результатах инструментов.
 6. Закончи коротким ответом (до 5 предложений) на языке пользователя; объекты с доски \
 упоминай как [[ключ]]."""
@@ -57,9 +59,14 @@ def similar_objects(query: str, objects: list[dict], *, limit: int = 5,
     return [o for _, o in scored[:limit]]
 
 
+def _line(o: dict) -> str:
+    sid = o.get("source_id") or (o.get("attrs") or {}).get("source_id")
+    tail = f", в источнике: {sid}" if sid else ""
+    return f"- {o['key']} — {o.get('label') or '?'} ({o.get('type') or '?'}){tail}"
+
+
 def _lines(objs: list[dict]) -> str:
-    return "\n".join(f"- {o['key']} — {o.get('label') or '?'} ({o.get('type') or '?'})"
-                     for o in objs)
+    return "\n".join(_line(o) for o in objs)
 
 
 def user_prompt(text: str, mentions: list[dict], similar: list[dict] | None = None) -> str:

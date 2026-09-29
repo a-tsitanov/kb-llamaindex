@@ -154,7 +154,9 @@ class Runner:
             except Exception:
                 o = None
             o = o if isinstance(o, dict) else {}
-            out.append({"key": key, "label": o.get("label"), "type": o.get("type")})
+            attrs = o.get("attrs") if isinstance(o.get("attrs"), dict) else {}
+            out.append({"key": key, "label": o.get("label"), "type": o.get("type"),
+                        "source_id": attrs.get("source_id")})
         return out
 
     async def _similar(self, board: MCPServer, text: str) -> list[dict]:

@@ -12,6 +12,9 @@ What the model cannot be trusted with happens here:
   told to finish with what it has;
 - board writes: ``call_id`` is checked against this run's source calls and replaced by the
   full ``source {server, tool, call_id, namespace}``; unknown ids are rejected with a reason;
+  the object ``id`` is taken from the cited source result when a row there matches the
+  item's id or label (models invent ids like "likhachev"; the source's own id keeps one
+  entity on one key and lets a later run call the source with it) — ``attrs.source_id``;
 - board reads repeated while this run has not changed the board are answered from the cache
   with a nudge to add objects or answer (a weak model otherwise re-reads the board in a loop);
 - consecutive calls that bring nothing new (cache hits, over-budget calls) are counted; at
@@ -28,6 +31,7 @@ from typing import Any
 
 from pydantic_ai import ModelRetry
 
+from src.lens.keys import normalize_id
 from src.lens_agent.config import McpEntry
 from src.lens_agent.store import AgentStore, CallPayload
 from src.lens_agent.stream import RunEmitter
@@ -41,6 +45,26 @@ def _changed(name: str, result: Any) -> bool:
     if name not in _BOARD_WRITES:
         return True  # note, hide/show, merge, undo
     return isinstance(result, dict) and (bool(result.get("added")) or bool(result.get("merged")))
+
+
+_ID_FIELDS = ("id", "entity_name", "name")  # preference order within one source row
+
+
+def _source_id(payload: Any, item: dict) -> str | None:
+    """The id of the row in ``payload`` whose id / name matches the item's id or label."""
+    want = {normalize_id(str(v)) for v in (item.get("id"), item.get("label")) if v}
+    want.discard("")
+    stack = [payload]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, list):
+            stack.extend(reversed(node))
+        elif isinstance(node, dict):
+            values = [node.get(f) for f in _ID_FIELDS]
+            if any(isinstance(v, str) and normalize_id(v) in want for v in values):
+                return next(v for v in values if isinstance(v, str) and v.strip())
+            stack.extend(reversed(list(node.values())))
+    return None
 
 
 class RunStalled(Exception):
@@ -96,6 +120,7 @@ class RunCalls:
         self._seen: set[str] = set()
         self._n = 0
         self._cache: dict[str, tuple[str, str]] = {}
+        self._payloads: dict[str, Any] = {}  # source call id -> full result (for source ids)
         self._board_version = 0  # bumped by every board change this run makes
         self._board_reads: dict[str, str] = {}  # read key (incl. version) -> first call id
         self.stalls = 0  # consecutive calls that brought nothing new
@@ -190,6 +215,7 @@ class RunCalls:
         body = text[:n] + (f"\n…усечено, полный результат: call_id={cid}" if truncated else "")
         model_text = f"call_id={cid}\n{body}"
         self.registry[cid] = CallInfo(cid, entry.name, name, entry.ns)
+        self._payloads[cid] = result
         self._cache[key] = (cid, model_text)
         await self._result(cid, ok=True, t0=t0, text=text, result=result, truncated=truncated)
         return model_text
@@ -207,6 +233,10 @@ class RunCalls:
                                  "call_id из результата инструмента-источника этого запроса"})
                 continue
             clean = {k: v for k, v in it.items() if k not in ("call_id", "source")}
+            sid = _source_id(self._payloads.get(info.call_id), it)
+            if sid is not None:
+                attrs = clean.get("attrs") if isinstance(clean.get("attrs"), dict) else {}
+                clean["id"], clean["attrs"] = sid, {**attrs, "source_id": sid}
             clean["source"] = {"server": info.server, "tool": info.tool,
                                "call_id": info.call_id, "namespace": info.namespace}
             ok.append(clean)
