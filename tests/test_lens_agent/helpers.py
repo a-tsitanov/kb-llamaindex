@@ -72,6 +72,15 @@ def kb_source() -> tuple[FastMCP, dict[str, int]]:
                                "label": "работает_в"}]}
 
     @mcp.tool
+    def resolve_names(text: str) -> dict:
+        hit("resolve_names")
+        if "сломай" in text:
+            raise ToolError("resolver down")
+        names = [{"span": "Росатомом", "name": "Rosatom", "label": "Organization",
+                  "matched_via": ["stem+translit"], "score": 0.84}] if "Росатом" in text else []
+        return {"names": names}
+
+    @mcp.tool
     def neighbours(entity_name: str) -> dict:
         """kb-tools shaped: resolution + ranked entities + relations (60 neighbours)."""
         hit("neighbours")
@@ -148,7 +157,8 @@ class World:
         self.app.mount("/mcp", board_app)
         self.kb_app = self.kb.http_app(path="/mcp")
         self.store, self.bus = MemoryAgentStore(), EventBus()
-        mcp = [McpEntry(name="kb", url="http://kb/mcp", namespace="kb", token=KB_TOKEN),
+        mcp = [McpEntry(name="kb", url="http://kb/mcp", namespace="kb", token=KB_TOKEN,
+                        resolve_tool="resolve_names"),
                McpEntry(name="board", url="http://lens/mcp/mcp", token=BOARD_TOKEN,
                         role="board")]
         self.settings = AgentSettings(mcp=settings.pop("mcp", mcp), **settings)

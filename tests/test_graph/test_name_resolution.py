@@ -204,3 +204,22 @@ async def test_only_weak_guesses_is_not_found_with_them_as_alternatives():
     res = await resolver().resolve("Росатомище")
     assert res.status == "not_found" and res.name is None
     assert res.alternatives and all(c.score < 0.5 for c in res.alternatives)
+
+
+@pytest.mark.asyncio
+async def test_inflected_names_resolve_through_their_stem():
+    res = await resolver().resolve("Росатома")
+    assert res.name == "Rosatom" and res.chosen.matched_via == ["stem+translit"]
+    res = await resolver().resolve("лихачевым")
+    assert res.name == "Алексей Лихачёв" and "stem+word" in res.chosen.matched_via
+
+
+@pytest.mark.asyncio
+async def test_resolve_spans_finds_entity_names_in_a_request_without_guessing():
+    from src.graph.name_resolution import resolve_spans
+    got = await resolve_spans(resolver(), "Выведи людей, связанных с Росатомом")
+    assert [(g["span"], g["name"]) for g in got] == [("Росатомом", "Rosatom")]
+    got = await resolve_spans(resolver(), "кто руководит Роснано и где Алексей Лихачёв?")
+    assert [(g["span"], g["name"]) for g in got] == [("Алексей Лихачёв", "Алексей Лихачёв"),
+                                                     ("Роснано", "Роснано")]
+    assert await resolve_spans(resolver(), "что нового?") == []

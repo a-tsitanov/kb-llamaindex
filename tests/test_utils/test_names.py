@@ -15,3 +15,12 @@ def test_translit_key_joins_scripts_and_spellings():
     assert translit_key("Роснано") == translit_key("RUSNANO".replace("U", "O")) == "rosnano"
     assert translit_key("Щукин") == translit_key("Shchukin") == "shukin"
     assert translit_key("Росатом") != translit_key("Роснано")
+
+
+def test_stem_ru_strips_one_case_ending():
+    from src.utils.names import stem_ru
+    assert stem_ru("росатома") == stem_ru("росатомом") == "росатом"
+    assert stem_ru("путина") == "путин" and stem_ru("лихачевым") == "лихачев"
+    assert stem_ru("алексея лихачева") == "алексе лихачев"
+    assert stem_ru("роснано") == "роснано" and stem_ru("rosatom") == "rosatom"
+    assert stem_ru("мира") == "мира"  # stems shorter than 4 are not cut

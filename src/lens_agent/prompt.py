@@ -77,12 +77,25 @@ def _lines(objs: list[dict]) -> str:
     return "\n".join(_line(o) for o in objs)
 
 
-def user_prompt(text: str, mentions: list[dict], similar: list[dict] | None = None) -> str:
+def _resolved_line(r: dict) -> str:
+    kind = f"{r['label']}, " if r.get("label") else ""
+    via = ", ".join(r.get("matched_via") or [])
+    same = normalize_id(r["span"]) == normalize_id(r["name"])
+    head = f"«{r['name']}»" if same else f"«{r['span']}» → «{r['name']}»"
+    return f"- {head} ({kind}{r.get('source', '?')}; совпадение: {via})"
+
+
+def user_prompt(text: str, mentions: list[dict], similar: list[dict] | None = None,
+                resolved: list[dict] | None = None) -> str:
     """``mentions``: ``[{key, label, type}]`` resolved from the board (label may be None);
-    ``similar``: board objects whose label resembles the request."""
+    ``similar``: board objects whose label resembles the request; ``resolved``: names of the
+    request found in a source before the run (``[{span, name, label, matched_via, source}]``)."""
     out = text
     if mentions:
         out += "\n\nУпомянутые объекты доски:\n" + _lines(mentions)
     if similar:
         out += "\n\nПохожие объекты на доске (вероятно, речь о них):\n" + _lines(similar)
+    if resolved:
+        out += ("\n\nИмена из запроса, найденные в источниках (в инструментах используй имя "
+                "справа):\n" + "\n".join(_resolved_line(r) for r in resolved))
     return out

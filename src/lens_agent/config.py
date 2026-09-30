@@ -28,6 +28,9 @@ class McpEntry(BaseModel):
     token: SecretStr | None = None
     role: Literal["source", "board"] = "source"
     enabled: bool = True
+    # optional pre-resolution tool of a source: (text) -> {"names": [{span, name, …}]}; the
+    # runner calls it before the model starts and hides it from the model
+    resolve_tool: str | None = None
 
     @field_validator("token", mode="before")
     @classmethod
@@ -55,6 +58,7 @@ class AgentSettings(BaseSettings):
     run_timeout_s: float = 600.0
     tool_timeout_s: float = 120.0
     connect_timeout_s: float = 10.0
+    resolve_timeout_s: float = 5.0  # pre-resolution of request names (resolve_tool)
     retention_days: int = 30
     heartbeat_s: float = 15.0
 

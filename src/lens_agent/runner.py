@@ -168,6 +168,29 @@ class Runner:
         objects = b.get("objects", []) if isinstance(b, dict) else []
         return similar_objects(text, objects)
 
+    async def _resolved(self, servers: dict[str, MCPServer], text: str) -> list[dict]:
+        """Names of the request that sources resolve (their ``resolve_tool``), outside the
+        model's budgets; a slow or failing source is skipped."""
+        out: list[dict] = []
+        seen: set[str] = set()
+        for entry in self.settings.enabled():
+            srv = servers.get(entry.name)
+            if not entry.resolve_tool or srv is None:
+                continue
+            try:
+                r = await asyncio.wait_for(
+                    srv.direct_call_tool(entry.resolve_tool, {"text": text}),
+                    self.settings.resolve_timeout_s)
+            except Exception as e:
+                log.warning("pre-resolution via %s failed: %s", entry.name, e)
+                continue
+            for n in r.get("names", []) if isinstance(r, dict) else []:
+                if isinstance(n, dict) and n.get("name") and n.get("span") \
+                        and n["name"] not in seen:
+                    seen.add(n["name"])
+                    out.append({**n, "source": entry.name})
+        return out
+
     async def _heartbeat(self, run_id: str) -> None:
         while True:
             await asyncio.sleep(self.settings.heartbeat_s)
@@ -214,14 +237,17 @@ class Runner:
                 raise RunFailure("internal", "доска недоступна (board MCP)")
             calls.board_direct = board.direct_call_tool
             # hook-only board ops stay out of the model's tool list
-            hidden = {f"{board_entry.name}_redirect"}
+            hidden = {f"{board_entry.name}_redirect"} | {
+                f"{e.name}_{e.resolve_tool}" for e in s.enabled() if e.resolve_tool}
             toolsets = [srv.filtered(lambda _ctx, td: td.name not in hidden)
-                        if name == board_entry.name else srv
-                        for name, srv in servers.items()]
+                        for srv in servers.values()]
             mentioned = await self._mentions(board, run.mentions)
             similar = [o for o in await self._similar(board, run.text)
                        if o["key"] not in run.mentions]
-            prompt = user_prompt(run.text, mentioned, similar=similar)
+            resolved = await self._resolved(servers, run.text)
+            if resolved:
+                await em.emit("resolved", names=resolved)
+            prompt = user_prompt(run.text, mentioned, similar=similar, resolved=resolved)
             async def more(call_id: str, offset: int = 0) -> str:
                 """Следующие строки уже полученного результата источника, начиная с offset
                 (номер строки из «ещё: more(...)»). Не новый вызов источника: лимит не тратит."""

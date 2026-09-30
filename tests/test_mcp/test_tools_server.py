@@ -16,6 +16,7 @@ _EXPECTED_TOOLS = {
     "find_entity_by_id",
     "find_entity_by_name",
     "find_neighbours",
+    "resolve_names",
     "get_chunks_by_doc_id",
     "read_full_document",
     # Track 7b: read-only GDS graph-analysis tools.

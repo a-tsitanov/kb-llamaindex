@@ -391,6 +391,19 @@ async def find_entity_by_name(
     return json.loads(r.observation)
 
 
+@mcp.tool(timeout=120)
+async def resolve_names(text: str) -> dict[str, Any]:
+    """Names in a free-text request that are KB entities, with the entity each resolves to
+    (exact / case / ё-е / merged-away name / other script / legal form / case ending — no
+    fuzzy guesses). For clients that prepare a request before a model sees it; a model
+    should use `find_entity_by_name`."""
+    from src.graph.name_resolution import resolve_spans
+    resolver = await _resolver()
+    if resolver is None:
+        return {"names": [], "error": "name resolution unavailable"}
+    return {"names": await resolve_spans(resolver, text)}
+
+
 @mcp.tool(timeout=1800)
 async def find_neighbours(
     entity_name: str, hops: int = 1, query: str = "", types: list[str] | None = None,

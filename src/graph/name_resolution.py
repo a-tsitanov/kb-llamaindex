@@ -12,6 +12,7 @@ Cascade, cheap → expensive, stopping at the first step that yields a live enti
     alias     entity_alias.alias_norm = norm(q) → canonical    ≤0.95 (confidence)
     translit  name_translit / alias_translit = translit(q)     0.90
     (legal)   the three above again without a legal form       ×0.95  («ГК «Росатом»» → Rosatom)
+    (stem)    … and on the case-stripped words                 ×0.93  («Росатома» → Rosatom)
     word      q is a word of the name (pg_trgm word_similarity) 0.80·ws·len
     tword     the same over name_translit (other script)       0.75·ws·len
     prefix    name_norm LIKE q%                                0.70·len
@@ -30,13 +31,14 @@ from __future__ import annotations
 
 import asyncio
 import math
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from loguru import logger
 
-from src.utils.names import norm_name, strip_legal_form, translit_key
+from src.utils.names import norm_name, stem_ru, strip_legal_form, translit_key
 
 # name -> props ({label, description, mention_count}) for names that are vertices;
 # None when the graph could not be asked
@@ -170,9 +172,12 @@ class NameResolver:
             ]
 
         core = strip_legal_form(norm)
+        stem = stem_ru(core)
         steps = exact_steps(norm, "", 1.0)
         if core != norm:
             steps += exact_steps(core, "legal_form+", 0.95)
+        if stem != core:
+            steps += exact_steps(stem, "stem+", 0.93)
         found = bool(cands) and raw in props
         for via, run, score in steps:
             if found:
@@ -185,7 +190,9 @@ class NameResolver:
                 self._step("tword", lambda: self.lexicon.by_translit_word(
                     translit_key(core), pool)),
                 self._step("prefix", lambda: self.lexicon.by_prefix(core, pool)),
-                self._step("trigram", lambda: self.lexicon.by_trigram(core, pool)))
+                self._step("trigram", lambda: self.lexicon.by_trigram(core, pool)),
+                self._step("word", lambda: self.lexicon.by_word(stem, pool)
+                           if stem != core else _none()))
             nq = len(core.split())
 
             def inside(r: dict, prior: float) -> float:
@@ -195,6 +202,7 @@ class NameResolver:
             add(fuzzy[1], "tword", lambda r: inside(r, 0.75))
             add(fuzzy[2], "prefix", lambda r: inside(r, 0.70))
             add(fuzzy[3], "trigram", lambda r: 0.70 * float(r.get("sim") or 0.0))
+            add(fuzzy[4], "stem+word", lambda r: inside(r, 0.78))
             await live()
 
         ranked = []
@@ -235,6 +243,10 @@ class NameResolver:
             return []
 
 
+async def _none() -> list[dict]:
+    return []
+
+
 def _ambiguous(ranked: list[Candidate]) -> bool:
     top = ranked[0]
     if len(ranked) < 2 or top.score >= SURE:
@@ -243,6 +255,50 @@ def _ambiguous(ranked: list[Candidate]) -> bool:
     if top.score - second.score > EPS:
         return False
     return top.mention_count < DOMINANT * max(second.mention_count, 1)
+
+
+# Question / command words that never start or end an entity span in a request.
+_STOP_WORDS = """
+а без в во вот все всех всё где для до его ее её же за и из или их к как какие какой
+когда кого кто ли мне на над не ни о об обо он она они оно от по под покажи про с со
+связан связана связаны связанных связанные связь связи так там то только у что чем чей
+это эти этот я выведи найди расскажи дай люди людей человек кем чего кому ему ей
+"""
+_STOP = frozenset(_STOP_WORDS.split())
+_TOKEN = re.compile(r"[\w«»\"'-]+", re.U)
+SPAN_SCORE = 0.82  # exact-level only (exact / casefold / alias / translit / legal / stem)
+
+
+async def resolve_spans(resolver: NameResolver, text: str, *, max_words: int = 3,
+                        max_spans: int = 20) -> list[dict[str, Any]]:
+    """Names in a free-text request that resolve to a KB entity at an exact level:
+    word n-grams (longest first, no stop word at either edge, not overlapping an earlier
+    hit), each resolved ``strict`` (no fuzzy guesses: «руководит» must not become
+    "ИТ-руководители")."""
+    words = _TOKEN.findall(text or "")
+    spans = [(i, n) for n in range(max_words, 0, -1) for i in range(len(words) - n + 1)]
+    taken: set[int] = set()
+    out: list[dict[str, Any]] = []
+    tried = 0
+    for i, n in spans:
+        part = words[i:i + n]
+        idx = set(range(i, i + n))
+        if idx & taken or norm_name(part[0]) in _STOP or norm_name(part[-1]) in _STOP:
+            continue
+        if n == 1 and len(norm_name(part[0])) < 3:
+            continue
+        if tried >= max_spans:
+            break
+        tried += 1
+        span = " ".join(part)
+        res = await resolver.resolve(span, strict=True)
+        c = res.chosen
+        if res.status != "ok" or c is None or c.score < SPAN_SCORE:
+            continue
+        taken |= idx
+        out.append({"span": span, "name": c.name, "label": c.label,
+                    "matched_via": c.matched_via, "score": round(c.score, 3)})
+    return out
 
 
 def nebula_fetch(store: Any) -> Fetch:
@@ -269,4 +325,4 @@ def nebula_fetch(store: Any) -> Fetch:
     return fetch
 
 
-__all__ = ["Candidate", "NameResolver", "Resolution", "nebula_fetch"]
+__all__ = ["Candidate", "NameResolver", "Resolution", "nebula_fetch", "resolve_spans"]

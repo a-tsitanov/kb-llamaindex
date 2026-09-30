@@ -71,4 +71,26 @@ def strip_legal_form(norm: str) -> str:
     return " ".join(words) or norm
 
 
-__all__ = ["norm_name", "strip_legal_form", "translit_key"]
+# Russian case endings, longest first: «Росатома» / «Росатомом» → «росатом», «Путина» →
+# «путин», «лихачевым» → «лихачев». A crude stemmer on purpose — the resolver re-checks every
+# stem hit against the graph and ranks it below an exact hit.
+_ENDINGS = ("ями", "ами", "его", "ого", "ему", "ому", "ыми", "ими", "ов", "ев", "ой", "ей",
+            "ом", "ем", "ам", "ям", "ах", "ях", "ую", "юю", "ым", "им", "а", "я", "у", "ю",
+            "е", "ы", "и")
+_CYRILLIC = re.compile(r"[а-яё]")
+
+
+def stem_ru(norm: str) -> str:
+    """Strip one case ending from each Cyrillic word of a ``norm_name`` string (stem ≥ 4)."""
+    out = []
+    for w in norm.split():
+        if _CYRILLIC.search(w) and len(w) > 4:
+            for e in _ENDINGS:
+                if w.endswith(e) and len(w) - len(e) >= 4:
+                    w = w[: -len(e)]
+                    break
+        out.append(w)
+    return " ".join(out)
+
+
+__all__ = ["norm_name", "stem_ru", "strip_legal_form", "translit_key"]

@@ -543,3 +543,22 @@ async def test_no_redirect_when_the_asked_name_is_not_on_the_board():
                              seen=seen))
         assert "доска:" not in tool_returns(seen[-1])[0]
         assert (await w.board.state(w.ws.id)).objects == {}
+
+
+async def test_request_names_are_resolved_before_the_model_starts():
+    async with world() as w:
+        seen, tools = [], []
+        _, evs = await w.run(scripted("ok", seen=seen, tools=tools),
+                             text="Выведи людей, связанных с Росатомом")
+        prompt = seen[0][0].parts[-1].content
+        assert "Имена из запроса, найденные в источниках" in prompt
+        assert "«Росатомом» → «Rosatom» (Organization, kb; совпадение: stem+translit)" in prompt
+        assert of(evs, "resolved")[0]["names"][0]["name"] == "Rosatom"
+        assert "kb_resolve_names" not in tools[0] and "kb_find_entity" in tools[0]
+
+
+async def test_a_failing_pre_resolution_does_not_stop_the_run():
+    async with world() as w:
+        seen = []
+        run, _ = await w.run(scripted("ok", seen=seen), text="сломай Росатом")
+        assert run.status == "done" and "Имена из запроса" not in seen[0][0].parts[-1].content
