@@ -51,6 +51,15 @@ def q_word(norm: str, limit: int) -> tuple[str, list[Any]]:
             [norm, norm, limit])
 
 
+def q_translit_word(key: str, limit: int) -> tuple[str, list[Any]]:
+    # a word of the name in the other script ("likhachev" in «Алексей Лихачёв»)
+    return (f"SELECT {_ENTITY}, name AS matched_text, "
+            "word_similarity(%s, name_translit) AS sim "
+            f"FROM entity WHERE %s <%% name_translit AND {_LIVE} "
+            "ORDER BY sim DESC, mention_count DESC LIMIT %s",
+            [key, key, limit])
+
+
 def q_prefix(norm: str, limit: int) -> tuple[str, list[Any]]:
     return (f"SELECT {_ENTITY}, name AS matched_text FROM entity "
             f"WHERE name_norm LIKE %s AND {_LIVE} ORDER BY mention_count DESC LIMIT %s",
@@ -87,6 +96,9 @@ class EntityLexicon:
 
     async def by_word(self, norm: str, limit: int) -> list[dict[str, Any]]:
         return await self._rows(q_word(norm, limit))
+
+    async def by_translit_word(self, key: str, limit: int) -> list[dict[str, Any]]:
+        return await self._rows(q_translit_word(key, limit))
 
     async def by_prefix(self, norm: str, limit: int) -> list[dict[str, Any]]:
         return await self._rows(q_prefix(norm, limit))

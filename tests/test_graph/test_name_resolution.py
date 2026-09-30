@@ -15,6 +15,8 @@ GRAPH = {  # live vertices
     "Российский суд": {"label": "Organization", "description": "", "mention_count": 30},
     "Роснано": {"label": "Organization", "description": "", "mention_count": 12},
     "АО «Роснано": {"label": "Organization", "description": "", "mention_count": 3},
+    "передать контракт российской корпорации «Росатом»": {"label": "EventOrAction",
+                                                          "mention_count": 1},
 }
 MIRROR = [*GRAPH, "Росатом", "Лихачев"]  # + dead rows
 ALIASES = []  # (alias, canonical, confidence)
@@ -50,6 +52,11 @@ class FakeLexicon:
         self._log("word")
         return [{**row(n), "sim": 1.0} for n in MIRROR
                 if norm in norm_name(n).split() and norm != norm_name(n)]
+
+    async def by_translit_word(self, key, limit):
+        self._log("tword")
+        return [{**row(n), "sim": 1.0} for n in MIRROR
+                if key in translit_key(n).split() and key != translit_key(n)]
 
     async def by_prefix(self, norm, limit):
         self._log("prefix")
@@ -171,3 +178,29 @@ async def test_to_dict_shape():
     assert d["status"] == "ok" and d["chosen"]["name"] == "Rosatom"
     assert d["chosen"]["matched_via"] == ["translit"] and d["query"] == "Росатом"
     assert (await resolver().resolve("  ")).to_dict()["status"] == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_legal_form_is_stripped_before_matching():
+    res = await resolver().resolve("ГК «Росатом»")
+    assert res.name == "Rosatom" and res.chosen.matched_via == ["legal_form+translit"]
+    assert (await resolver().resolve("Госкорпорация Росатом")).name == "Rosatom"
+
+
+@pytest.mark.asyncio
+async def test_surname_in_the_other_script():
+    res = await resolver().resolve("Likhachev")
+    assert res.name == "Алексей Лихачёв" and res.chosen.matched_via[0] == "tword"
+
+
+@pytest.mark.asyncio
+async def test_a_query_inside_a_long_name_scores_below_a_short_one():
+    res = await resolver().resolve("российской")  # only inside the long event name
+    assert res.chosen.score < 0.8 * 0.9
+
+
+@pytest.mark.asyncio
+async def test_only_weak_guesses_is_not_found_with_them_as_alternatives():
+    res = await resolver().resolve("Росатомище")
+    assert res.status == "not_found" and res.name is None
+    assert res.alternatives and all(c.score < 0.5 for c in res.alternatives)

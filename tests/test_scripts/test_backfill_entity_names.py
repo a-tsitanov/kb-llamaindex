@@ -37,4 +37,5 @@ def test_most_mentioned_partner_wins_and_case_variants_are_skipped():
 def test_resolution_ddl_is_idempotent():
     assert "ADD COLUMN IF NOT EXISTS name_norm" in _ENTITY_RESOLUTION_DDL
     assert "CREATE TABLE IF NOT EXISTS entity_alias" in _ENTITY_RESOLUTION_DDL
-    assert _ENTITY_RESOLUTION_DDL.count("IF NOT EXISTS") == 9
+    statements = [x for x in _ENTITY_RESOLUTION_DDL.split(";") if x.strip()]
+    assert all("IF NOT EXISTS" in x for x in statements)

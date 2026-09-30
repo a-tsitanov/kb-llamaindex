@@ -325,6 +325,8 @@ CREATE INDEX IF NOT EXISTS entity_name_norm_idx ON entity (name_norm);
 CREATE INDEX IF NOT EXISTS entity_name_translit_idx ON entity (name_translit);
 CREATE INDEX IF NOT EXISTS entity_name_norm_trgm_idx
     ON entity USING GIN (name_norm gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS entity_name_translit_trgm_idx
+    ON entity USING GIN (name_translit gin_trgm_ops);
 CREATE TABLE IF NOT EXISTS entity_alias (
     alias          TEXT NOT NULL,
     alias_norm     TEXT NOT NULL,

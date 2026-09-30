@@ -11,9 +11,15 @@ Cascade, cheap → expensive, stopping at the first step that yields a live enti
     casefold  name_norm = norm(q)                              0.97
     alias     entity_alias.alias_norm = norm(q) → canonical    ≤0.95 (confidence)
     translit  name_translit / alias_translit = translit(q)     0.90
-    word      q is a word of the name (pg_trgm word_similarity) 0.80·ws
-    prefix    name_norm LIKE q%                                0.70
+    (legal)   the three above again without a legal form       ×0.95  («ГК «Росатом»» → Rosatom)
+    word      q is a word of the name (pg_trgm word_similarity) 0.80·ws·len
+    tword     the same over name_translit (other script)       0.75·ws·len
+    prefix    name_norm LIKE q%                                0.70·len
     trigram   name_norm % q                                    0.70·sim
+
+``len`` = (query words / name words)^0.25: a query found inside a long name («Госкорпорация
+Росатом» in "передать контракт … «Росатом»») scores below a short one. A best score under
+``FLOOR`` is a guess: ``not_found``, with the guesses as alternatives.
 
 ``strict`` stops after translit (exact-lookup tools). Every candidate is re-checked against the
 graph (``fetch``: name → props, only for existing vertices), so a dead mirror row or a stale
@@ -30,13 +36,13 @@ from typing import Any, Protocol
 
 from loguru import logger
 
-from src.utils.names import norm_name, translit_key
+from src.utils.names import norm_name, strip_legal_form, translit_key
 
 # name -> props ({label, description, mention_count}) for names that are vertices;
 # None when the graph could not be asked
 Fetch = Callable[[list[str]], Awaitable[dict[str, dict[str, Any]] | None]]
 
-FLOOR = 0.5  # below: a guess, reported as ambiguous
+FLOOR = 0.5  # below: a guess, reported as not_found (with the guesses as alternatives)
 EPS = 0.05  # top-2 this close (and not an exact-level hit): ambiguous
 SURE = 0.9  # exact-level hits: ties are broken by mention count, not reported as ambiguous
 DOMINANT = 5.0  # a top candidate this many times more mentioned than the next is not ambiguous
@@ -47,6 +53,7 @@ class Lexicon(Protocol):
     async def by_alias(self, norm: str, limit: int) -> list[dict[str, Any]]: ...
     async def by_translit(self, key: str, limit: int) -> list[dict[str, Any]]: ...
     async def by_word(self, norm: str, limit: int) -> list[dict[str, Any]]: ...
+    async def by_translit_word(self, key: str, limit: int) -> list[dict[str, Any]]: ...
     async def by_prefix(self, norm: str, limit: int) -> list[dict[str, Any]]: ...
     async def by_trigram(self, norm: str, limit: int) -> list[dict[str, Any]]: ...
 
@@ -153,13 +160,19 @@ class NameResolver:
             props.update(got)
             add([{"name": raw, "matched_text": raw}], "exact", lambda r: 1.0)
 
-        steps: list[tuple[str, Callable[[], Awaitable[list[dict]]], Callable[[dict], float]]] = [
-            ("casefold", lambda: self.lexicon.by_norm(norm, pool), lambda r: 0.97),
-            ("alias", lambda: self.lexicon.by_alias(norm, pool),
-             lambda r: min(0.95, float(r.get("confidence") or 0.0))),
-            ("translit", lambda: self.lexicon.by_translit(translit_key(raw), pool),
-             lambda r: 0.90 * min(1.0, float(r.get("confidence") or 1.0))),
-        ]
+        def exact_steps(n: str, via: str, k: float):
+            return [
+                (f"{via}casefold", lambda: self.lexicon.by_norm(n, pool), lambda r: 0.97 * k),
+                (f"{via}alias", lambda: self.lexicon.by_alias(n, pool),
+                 lambda r: k * min(0.95, float(r.get("confidence") or 0.0))),
+                (f"{via}translit", lambda: self.lexicon.by_translit(translit_key(n), pool),
+                 lambda r: k * 0.90 * min(1.0, float(r.get("confidence") or 1.0))),
+            ]
+
+        core = strip_legal_form(norm)
+        steps = exact_steps(norm, "", 1.0)
+        if core != norm:
+            steps += exact_steps(core, "legal_form+", 0.95)
         found = bool(cands) and raw in props
         for via, run, score in steps:
             if found:
@@ -168,12 +181,20 @@ class NameResolver:
             found = await live()
         if not found and not strict:
             fuzzy = await asyncio.gather(
-                self._step("word", lambda: self.lexicon.by_word(norm, pool)),
-                self._step("prefix", lambda: self.lexicon.by_prefix(norm, pool)),
-                self._step("trigram", lambda: self.lexicon.by_trigram(norm, pool)))
-            add(fuzzy[0], "word", lambda r: 0.80 * float(r.get("sim") or 0.0))
-            add(fuzzy[1], "prefix", lambda r: 0.70)
-            add(fuzzy[2], "trigram", lambda r: 0.70 * float(r.get("sim") or 0.0))
+                self._step("word", lambda: self.lexicon.by_word(core, pool)),
+                self._step("tword", lambda: self.lexicon.by_translit_word(
+                    translit_key(core), pool)),
+                self._step("prefix", lambda: self.lexicon.by_prefix(core, pool)),
+                self._step("trigram", lambda: self.lexicon.by_trigram(core, pool)))
+            nq = len(core.split())
+
+            def inside(r: dict, prior: float) -> float:
+                nn = max(len(str(r.get("name") or "").split()), 1)
+                return prior * float(r.get("sim", 1.0) or 0.0) * min(1.0, nq / nn) ** 0.25
+            add(fuzzy[0], "word", lambda r: inside(r, 0.80))
+            add(fuzzy[1], "tword", lambda r: inside(r, 0.75))
+            add(fuzzy[2], "prefix", lambda r: inside(r, 0.70))
+            add(fuzzy[3], "trigram", lambda r: 0.70 * float(r.get("sim") or 0.0))
             await live()
 
         ranked = []
@@ -190,6 +211,9 @@ class NameResolver:
         ranked.sort(key=lambda c: (-c.score, -math.log1p(c.mention_count)))
         res.verified = verified
         if not ranked:
+            return res
+        if ranked[0].score < FLOOR:  # only guesses: not found, the guesses shown
+            res.alternatives = ranked[:k]
             return res
         res.chosen, res.alternatives = ranked[0], ranked[1:k]
         res.ambiguous = _ambiguous(ranked)
@@ -213,8 +237,6 @@ class NameResolver:
 
 def _ambiguous(ranked: list[Candidate]) -> bool:
     top = ranked[0]
-    if top.score < FLOOR:
-        return True
     if len(ranked) < 2 or top.score >= SURE:
         return False
     second = ranked[1]

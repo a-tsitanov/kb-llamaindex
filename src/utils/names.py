@@ -47,4 +47,28 @@ def translit_key(raw: str) -> str:
     return _SPACES.sub(" ", s).strip()
 
 
-__all__ = ["norm_name", "translit_key"]
+# Legal-form / generic corporate words around an organization name («ГК «Росатом»», "ПАО
+# Газпром", "Rosatom Corp"): the graph usually stores the bare name.
+_LEGAL_PHRASES = ("государственная корпорация", "группа компаний")
+_LEGAL_WORDS = frozenset({
+    "гк", "госкорпорация", "ао", "пао", "оао", "зао", "ооо", "нао", "фгуп", "гуп", "муп",
+    "ано", "нко", "компания", "корпорация", "llc", "ltd", "inc", "plc", "corp", "corporation",
+    "company", "jsc", "pjsc", "ojsc", "gmbh", "ag",
+})
+
+
+def strip_legal_form(norm: str) -> str:
+    """``norm_name`` output without leading / trailing legal-form words; unchanged if nothing
+    else would be left."""
+    s = norm
+    for ph in _LEGAL_PHRASES:
+        s = s.replace(ph, " ")
+    words = s.split()
+    while words and words[0] in _LEGAL_WORDS:
+        words = words[1:]
+    while words and words[-1] in _LEGAL_WORDS:
+        words = words[:-1]
+    return " ".join(words) or norm
+
+
+__all__ = ["norm_name", "strip_legal_form", "translit_key"]
