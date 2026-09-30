@@ -145,8 +145,8 @@
     "semantic_hash": "a18f9757ac7abaed67db9050e3782cbd"
   },
   "scripts/setup_db.py": {
-    "mtime": 1790098400.174783,
-    "ast_hash": "8844ecffe1e15ec2d32b6b7d1922d8a1",
+    "mtime": 1790798985.9045944,
+    "ast_hash": "8515cf665199f6d06e6d189e61530139",
     "semantic_hash": ""
   },
   "scripts/setup_monitor_schedule.py": {
@@ -810,8 +810,8 @@
     "semantic_hash": ""
   },
   "src/mcp/tools_server.py": {
-    "mtime": 1790774388.3416736,
-    "ast_hash": "127e61c80faaa9adf626b1b4016c5127",
+    "mtime": 1790799169.2681193,
+    "ast_hash": "89979b8b60850a853adc23c487c1c171",
     "semantic_hash": ""
   },
   "src/models/__init__.py": {
@@ -870,8 +870,8 @@
     "semantic_hash": "99515a10eebf41988cf23654dabe9957"
   },
   "src/retrieval/atomic_tools.py": {
-    "mtime": 1790774388.342173,
-    "ast_hash": "c72452375b58b1936b86464259c23a80",
+    "mtime": 1790799131.7646835,
+    "ast_hash": "6247097069189a90b9ff4cf382f0bd4e",
     "semantic_hash": ""
   },
   "src/retrieval/date_filters.py": {
@@ -4270,8 +4270,8 @@
     "semantic_hash": ""
   },
   "src/graph/entity_table.py": {
-    "mtime": 1790098400.192728,
-    "ast_hash": "ebc7cde5eda82f27c672d6e0a21f55df",
+    "mtime": 1790798912.5769932,
+    "ast_hash": "42fa8396ed31db4344093f2415b1c383",
     "semantic_hash": ""
   },
   "src/storage/entity_search.py": {
@@ -4545,8 +4545,8 @@
     "semantic_hash": ""
   },
   "src/lens/keys.py": {
-    "mtime": 1790619474.3403282,
-    "ast_hash": "dfdd8a445706f8342e6369148429bb82",
+    "mtime": 1790798889.0767553,
+    "ast_hash": "6e5ff5a90523c925733806531a0b05e1",
     "semantic_hash": ""
   },
   "tests/test_lens/test_board.py": {
@@ -4810,8 +4810,8 @@
     "semantic_hash": ""
   },
   "src/lens_agent/rows.py": {
-    "mtime": 1790771525.7303238,
-    "ast_hash": "c48a810b79f44dd50ed5a19c0ff92691",
+    "mtime": 1790799235.6348944,
+    "ast_hash": "fa834c4b1088758ac84769348a0bb6ae",
     "semantic_hash": ""
   },
   "tests/fixtures/lens_eval/likhachev_gemma.json": {
@@ -4840,13 +4840,63 @@
     "semantic_hash": ""
   },
   "tests/test_lens_agent/test_rows.py": {
-    "mtime": 1790771535.8583655,
-    "ast_hash": "c1d08f55d04f57d1948161a616db528b",
+    "mtime": 1790799235.640158,
+    "ast_hash": "1b0a5171f73631f6d2a091735b284c54",
     "semantic_hash": ""
   },
   "docs/superpowers/specs/2026-09-30-kb-name-resolution-design.md": {
     "mtime": 1790769329.3087206,
     "ast_hash": "5091b7ef76d5dee5cc196cbef323bbdb",
+    "semantic_hash": ""
+  },
+  "src/graph/name_resolution.py": {
+    "mtime": 1790799046.3760452,
+    "ast_hash": "3fccc3a7e944311d127fd0127647f97a",
+    "semantic_hash": ""
+  },
+  "src/storage/entity_lexicon.py": {
+    "mtime": 1790798985.9100623,
+    "ast_hash": "6001b167ebab3ba52d497a55b6f127ac",
+    "semantic_hash": ""
+  },
+  "src/utils/names.py": {
+    "mtime": 1790798868.5942957,
+    "ast_hash": "5f5a7e9bd86f82cf576b91e5897553c1",
+    "semantic_hash": ""
+  },
+  "tests/test_graph/test_entity_table_names.py": {
+    "mtime": 1790798924.0729613,
+    "ast_hash": "dc1ad4e65b055dd0c412af8b508b6bc2",
+    "semantic_hash": ""
+  },
+  "tests/test_graph/test_name_resolution.py": {
+    "mtime": 1790799055.0833135,
+    "ast_hash": "a15648c03f05bfb5424f12391e43bba4",
+    "semantic_hash": ""
+  },
+  "tests/test_mcp/test_tools_resolution.py": {
+    "mtime": 1790799215.1464365,
+    "ast_hash": "4e12e310ad7ecf21e032fb6fa1245ba0",
+    "semantic_hash": ""
+  },
+  "tests/test_retrieval/test_tools_resolution.py": {
+    "mtime": 1790799200.424484,
+    "ast_hash": "288f6088aa8749785d5c66d0fb634bb2",
+    "semantic_hash": ""
+  },
+  "tests/test_storage/test_entity_lexicon.py": {
+    "mtime": 1790799055.0867245,
+    "ast_hash": "86d33511210421f689b642d202e9ba86",
+    "semantic_hash": ""
+  },
+  "tests/test_utils/__init__.py": {
+    "mtime": 1790798868.5795138,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "tests/test_utils/test_names.py": {
+    "mtime": 1790798879.0594757,
+    "ast_hash": "2e7c7100032a9540370097a64f5f602f",
     "semantic_hash": ""
   }
 }

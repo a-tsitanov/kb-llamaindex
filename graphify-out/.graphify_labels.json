@@ -1084,10 +1084,20 @@
   "1082": "_ParamCheckingStore",
   "1083": "test_value_kind_families_partition_the_enumeration",
   "1084": "vite.config.ts",
+  "1085": "test_stats_pipeline.py",
+  "1086": "_CompositeERGraphOps",
+  "1087": "_pages_to_delete",
+  "1088": "build_burst_cypher",
   "1089": "build_search_query",
+  "1090": "test_stats_routes.py",
   "1091": "_NameRetriever",
   "1092": "build_property_graph_index",
+  "1093": "WikiSettings",
+  "1094": "ingest_metrics_extractor.py",
   "1095": "schema.py",
+  "1096": "build_tool_schema",
   "1097": "_GenClient",
-  "1098": "test_completion_no_walltime_cap.py"
+  "1098": "test_completion_no_walltime_cap.py",
+  "1099": ".get",
+  "1100": "__init__.py"
 }
