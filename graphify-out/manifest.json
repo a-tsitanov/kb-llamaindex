@@ -4535,13 +4535,13 @@
     "semantic_hash": ""
   },
   "src/lens/board.py": {
-    "mtime": 1790714209.308805,
-    "ast_hash": "f3e0c2e2138f8283158d7029d8595a32",
+    "mtime": 1790773785.1471233,
+    "ast_hash": "10b44a6b158cc0985c89d1261e859b4f",
     "semantic_hash": ""
   },
   "src/lens/board_mcp.py": {
-    "mtime": 1790621860.113691,
-    "ast_hash": "88e465104970e6cdc83e8525544ee02e",
+    "mtime": 1790773806.110399,
+    "ast_hash": "5d43f8a91cdd8fda760bb0e2bc8731d3",
     "semantic_hash": ""
   },
   "src/lens/keys.py": {
@@ -4550,8 +4550,8 @@
     "semantic_hash": ""
   },
   "tests/test_lens/test_board.py": {
-    "mtime": 1790714209.3084304,
-    "ast_hash": "2e6a6b20accd4a39042a47da5820ae62",
+    "mtime": 1790773707.2883592,
+    "ast_hash": "6bce637daa62209bd7d31a2c6b893d87",
     "semantic_hash": ""
   },
   "tests/test_lens/test_board_mcp.py": {
@@ -4600,8 +4600,8 @@
     "semantic_hash": ""
   },
   "src/lens_agent/calls.py": {
-    "mtime": 1790714235.9254444,
-    "ast_hash": "365521d10f5495eaf472984b879acde2",
+    "mtime": 1790771595.986965,
+    "ast_hash": "e1759ef5e3f8ebcafd00a86c175ef3a4",
     "semantic_hash": ""
   },
   "src/lens_agent/config.py": {
@@ -4610,8 +4610,8 @@
     "semantic_hash": ""
   },
   "src/lens_agent/prompt.py": {
-    "mtime": 1790713011.7279754,
-    "ast_hash": "029077c391a308e65ca36958b0291dd8",
+    "mtime": 1790773586.7117796,
+    "ast_hash": "b81282a2b8d5e6a5ecd0aaa3bc15de6b",
     "semantic_hash": ""
   },
   "src/lens_agent/runner.py": {
@@ -4635,8 +4635,8 @@
     "semantic_hash": ""
   },
   "tests/test_lens_agent/helpers.py": {
-    "mtime": 1790623711.1367767,
-    "ast_hash": "6a3b31977d2e77170cda7c078a6624ac",
+    "mtime": 1790773586.7122986,
+    "ast_hash": "5dc205d9c52efdb85e735b1712a0e759",
     "semantic_hash": ""
   },
   "tests/test_lens_agent/test_app.py": {
@@ -4645,8 +4645,8 @@
     "semantic_hash": ""
   },
   "tests/test_lens_agent/test_runner.py": {
-    "mtime": 1790714248.7114918,
-    "ast_hash": "ab463f1699a07b73f2ab73749c46eae4",
+    "mtime": 1790773724.3472068,
+    "ast_hash": "d303f42dfeab5b69540366fa7a7b6a35",
     "semantic_hash": ""
   },
   "tests/test_lens_agent/test_store.py": {
@@ -4807,6 +4807,46 @@
   "tests/test_retrieval/test_graph_rank.py": {
     "mtime": 1790713645.635697,
     "ast_hash": "c676391b777890c00ddf3af5f453db6d",
+    "semantic_hash": ""
+  },
+  "src/lens_agent/rows.py": {
+    "mtime": 1790771525.7303238,
+    "ast_hash": "c48a810b79f44dd50ed5a19c0ff92691",
+    "semantic_hash": ""
+  },
+  "tests/fixtures/lens_eval/likhachev_gemma.json": {
+    "mtime": 1790771463.876072,
+    "ast_hash": "7547e7ad0006c97babd456465c7f6d76",
+    "semantic_hash": ""
+  },
+  "tests/fixtures/lens_eval/likhachev_gemma_ranked.json": {
+    "mtime": 1790771463.886135,
+    "ast_hash": "22e983b3c595b9c40b830181528a2dd4",
+    "semantic_hash": ""
+  },
+  "tests/fixtures/lens_eval/rosatom_head_ornith.json": {
+    "mtime": 1790771463.8958929,
+    "ast_hash": "b3277af9cad0e99304a16706cabdd0b8",
+    "semantic_hash": ""
+  },
+  "tests/fixtures/lens_eval/rosatom_people.json": {
+    "mtime": 1790771463.8815165,
+    "ast_hash": "bb412d7006c26de68780270870db257e",
+    "semantic_hash": ""
+  },
+  "tests/test_lens_agent/test_eval_replay.py": {
+    "mtime": 1790773780.3550107,
+    "ast_hash": "c268748b31645a966ded8fc03fadbd02",
+    "semantic_hash": ""
+  },
+  "tests/test_lens_agent/test_rows.py": {
+    "mtime": 1790771535.8583655,
+    "ast_hash": "c1d08f55d04f57d1948161a616db528b",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/specs/2026-09-30-kb-name-resolution-design.md": {
+    "mtime": 1790769329.3087206,
+    "ast_hash": "5091b7ef76d5dee5cc196cbef323bbdb",
     "semantic_hash": ""
   }
 }
