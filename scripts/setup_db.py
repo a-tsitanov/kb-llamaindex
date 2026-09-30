@@ -323,6 +323,8 @@ ALTER TABLE entity ADD COLUMN IF NOT EXISTS name_translit TEXT;
 ALTER TABLE entity ADD COLUMN IF NOT EXISTS alive BOOLEAN NOT NULL DEFAULT TRUE;
 CREATE INDEX IF NOT EXISTS entity_name_norm_idx ON entity (name_norm);
 CREATE INDEX IF NOT EXISTS entity_name_translit_idx ON entity (name_translit);
+CREATE INDEX IF NOT EXISTS entity_name_norm_trgm_idx
+    ON entity USING GIN (name_norm gin_trgm_ops);
 CREATE TABLE IF NOT EXISTS entity_alias (
     alias          TEXT NOT NULL,
     alias_norm     TEXT NOT NULL,
