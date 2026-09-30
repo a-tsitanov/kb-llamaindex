@@ -102,16 +102,17 @@ def build_board_mcp(board_of: Callable[[], BoardService]) -> FastMCP:
 
     @mcp.tool
     async def add_objects(objects: list[dict[str, Any]]) -> dict:
-        """Добавить объекты: [{id, type, label, description?, attrs?, call_id}].
-        call_id — вызов инструмента-источника, из результата которого взят объект.
+        """Добавить объекты из результатов источников: [{call_id, id}] (или label вместо id).
+        call_id — вызов инструмента-источника; id — точно как строка в его результате.
+        Название, тип и описание берутся из источника; сущности не из результата отклоняются.
         Не больше 50 за вызов. Возвращает ключи (key) для связей и заметки."""
         board, ws, run = await ctx()
         return await call(board.add_objects, ws, run, objects)
 
     @mcp.tool
     async def add_relations(relations: list[dict[str, Any]]) -> dict:
-        """Связи между объектами доски: [{from, to, kind, call_id}], from/to — ключи.
-        kind: участник, связан, владеет, входит_в, работает_в, место, упоминает."""
+        """Связи между объектами доски: [{from, to, call_id}], from/to — ключи.
+        Проходят только связи, которые есть в результате источника; вид связи берётся оттуда."""
         board, ws, run = await ctx()
         return await call(board.add_relations, ws, run, relations)
 
@@ -132,12 +133,6 @@ def build_board_mcp(board_of: Callable[[], BoardService]) -> FastMCP:
         """Вернуть скрытые объекты."""
         board, ws, run = await ctx()
         return await board.show(ws, run, keys)
-
-    @mcp.tool
-    async def merge(keep: str, drop: str) -> dict:
-        """Слить дубликат drop в keep."""
-        board, ws, run = await ctx()
-        return await call(board.merge, ws, run, keep, drop)
 
     @mcp.tool
     async def undo() -> dict:

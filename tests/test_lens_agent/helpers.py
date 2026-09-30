@@ -67,7 +67,9 @@ def kb_source() -> tuple[FastMCP, dict[str, int]]:
     @mcp.tool
     def find_entity(name: str) -> dict:
         hit("find_entity")
-        return {"entities": [ROSATOM, LIKHACHEV]}
+        return {"entities": [ROSATOM, LIKHACHEV],
+                "relations": [{"src_id": LIKHACHEV["name"], "tgt_id": ROSATOM["name"],
+                               "label": "работает_в"}]}
 
     @mcp.tool
     def big() -> str:

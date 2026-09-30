@@ -1,0 +1,2882 @@
+{
+ "run_id": "128a74dbde0d47fa",
+ "input": {
+  "text": "с кем связан?",
+  "mentions": [
+   "kb:likhachev"
+  ]
+ },
+ "calls": {
+  "c1": {
+   "server": "kb-tools",
+   "tool": "find_neighbours",
+   "args": {
+    "query": "с кем связан?",
+    "entity_name": "Алексей Лихачёв"
+   },
+   "payload": {
+    "entities": [
+     {
+      "description": "Глава госкорпорации «Росатом».\n---\nГлава «Росатома», заявивший о готовности росс",
+      "entity_name": "Алексей Лихачёв",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.009,
+      "description": "Личность, с которой сотрудничал Сергей Ковалев во время Первой чеченской войны.\n",
+      "entity_name": "Джохар Дудаев",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.008,
+      "description": "Глава Чечни, который назвал Сулеймана Керимова «братом» и занял сторону Татьяны ",
+      "entity_name": "Рамзан Кадыров",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.007,
+      "description": "Лицо, находившееся под воздействием наркотиков, которое избило 7-летнего ребенка",
+      "entity_name": "Абу-бандит",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.006,
+      "description": "Не задекларированная компания в офшорной зоне, принадлежащая Алексею Чепе.",
+      "entity_name": "Офшор",
+      "entity_type": "Organization"
+     },
+     {
+      "relevance": 0.006,
+      "description": "Телеканал, принадлежащий Ринату Ахметову, на котором состоится ток-шоу с участие",
+      "entity_name": "Телеканал Рината Ахметова",
+      "entity_type": "Organization"
+     },
+     {
+      "relevance": 0.005,
+      "description": "Руководитель команды, в которой работали Олег Андреев и Олег Илларионов; внесен ",
+      "entity_name": "Павел Валерьевич",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.004,
+      "description": "Лицо, вокруг которого сформирована команда, пытающаяся осуществить национализаци",
+      "entity_name": "Николай Пашинян",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.004,
+      "description": "Лицо, основавшее Telegram, чьи личные финансы и имущество могут подвергнуться ог",
+      "entity_name": "Основатель Telegram",
+      "entity_type": "Role"
+     },
+     {
+      "relevance": 0.004,
+      "description": "Экс-руководитель администрации президента РФ, который, по слухам, представлял Ро",
+      "entity_name": "Александр Волошин",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.004,
+      "description": "Глава офиса президента, в отношении которого САП подготовила второе подозрение.\n",
+      "entity_name": "Єрмак",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.004,
+      "description": "Военный, один из трех подозреваемых в подбросе наркотиков в автомобиль Ширшина; ",
+      "entity_name": "Алієв",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.003,
+      "description": "Управляющий партнер HR-агентства А2.",
+      "entity_name": "Алексей Чихачев",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.003,
+      "description": "Помощник Губернатора Орловской области, который незаконно удерживается в тюрьме ",
+      "entity_name": "С.В. Лежнев",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.003,
+      "description": "Лицо, продемонстрировавшее работу нового дрона-перехватчика.\n---\nПрезидент, кото",
+      "entity_name": "Зеленський В.О.",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.003,
+      "description": "Бывший высокопоставленный помощник и бывший глава администрации президента, в от",
+      "entity_name": "Андрей Богдан",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.003,
+      "description": "Президент, участвующий в неформальном общении с Путиным после переговоров.\n---\nЛ",
+      "entity_name": "Абдул-Фаттах Ас-Сиси",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.002,
+      "description": "Бизнесмен, которому Илья Трапезник принес извинения за драку.",
+      "entity_name": "Аркадий Новиков",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.002,
+      "description": "Блогер, выражающий мнение о деле Костылева и отношении государства к молодым про",
+      "entity_name": "Алексей Ларкин",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.002,
+      "description": "Первый зампред комитета Госдумы по обороне, депутат и парламентарий.\n---\nДепутат",
+      "entity_name": "Алексей Журавлёв",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.002,
+      "description": "Блогер, автор высказываний о политических заявлениях Трампа и причинах конфликта",
+      "entity_name": "Тарас Щербина",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.002,
+      "description": "Директор ГБР, озвучивший инициативу по упрощению возвращения военнослужащих в ар",
+      "entity_name": "Алексей Сухачев",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.001,
+      "description": "Руководитель Ассоциации профсоюзов правоохранительных органов, эксперт, рассказа",
+      "entity_name": "Алексей Лобарев",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.001,
+      "description": "Сооснователь проекта «Долгожитель».\n---\nСооснователь проекта, который характериз",
+      "entity_name": "Алексей Анико",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.001,
+      "description": "Выпускник программы «Герои земли Орловской», назначенный губернатором на должнос",
+      "entity_name": "Сергей Клешнев",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.001,
+      "description": "Истец, обратившийся в мировой суд для защиты своих прав как потребителя.",
+      "entity_name": "Алексей З.",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.001,
+      "description": "Пострадавший автомобилист, чья машина была повреждена упавшими деревьями в Линду",
+      "entity_name": "Алексей",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.0,
+      "description": "рассказал в интервью",
+      "entity_name": "рассказал в интервью",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "relevance": 0.0,
+      "description": "Инвестор, поделившийся опытом использования сервиса MOEX Мост для перевода акций",
+      "entity_name": "Алексей Мин",
+      "entity_type": "Person"
+     },
+     {
+      "relevance": 0.0,
+      "description": "Информационное агентство, представившее интервью с Владиславом Овчинским.\n---\nИн",
+      "entity_name": "ИС \"Вести",
+      "entity_type": "Organization"
+     },
+     {
+      "relevance": 0.0,
+      "description": "Идентификатор Telegram-канала, указанный в тексте.\n---\nИдентификатор пользовател",
+      "entity_name": "@banki_economy",
+      "entity_type": "Other"
+     },
+     {
+      "relevance": 0.0,
+      "description": "заявил в интервью",
+      "entity_name": "заявил в интервью",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "relevance": 0.0,
+      "description": "73-летний пенсионер, который нырнул в бочку с вином и чуть не утонул в собственн",
+      "entity_name": "Дед",
+      "entity_type": "Person"
+     },
+     {
+      "description": "Сын Алексея Чепы, получивший британское гражданство.\n---\nСын Алексея Чепы, получ",
+      "entity_name": "Даниил Чепа",
+      "entity_type": "Person"
+     },
+     {
+      "description": "распорядился отправлять в леса на границу с Украиной чиновников",
+      "entity_name": "распорядился отправлять в леса на границу с Украиной чиновников",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Номер телефона для связи с Алексеем.",
+      "entity_name": "+79661476507",
+      "entity_type": "PhoneNumber"
+     },
+     {
+      "description": "Экономист, который подсчитал, что украинская нация может фактически исчезнуть за",
+      "entity_name": "Алексей Кущ",
+      "entity_type": "Person"
+     },
+     {
+      "description": "Должность Алексея Чихачева в HR-агентстве А2.",
+      "entity_name": "Управляющий партнер",
+      "entity_type": "Role"
+     },
+     {
+      "description": "Судебный или следственный процесс в отношении Костылева, вызывающий дискуссии о ",
+      "entity_name": "Дело Костылева",
+      "entity_type": "Issue"
+     },
+     {
+      "description": "провёл политический эксперимент",
+      "entity_name": "провёл политический эксперимент",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Государственный орган, которому пытались подчинить НАБУ и САП.\n---\nГосударственн",
+      "entity_name": "Офис генпрокурора Украины",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Сенатор, который, по сообщениям, является фактическим владельцем активов Ишутина",
+      "entity_name": "Карлин",
+      "entity_type": "Person"
+     },
+     {
+      "description": "Президент России, заявивший о сохранении угроз и расширении НАТО.\n---\nПутин — ли",
+      "entity_name": "Володимир Путін",
+      "entity_type": "Person"
+     },
+     {
+      "description": "Информационный продукт или серия выпусков, в которых разбираются актуальные геоп",
+      "entity_name": "Рыбарь поясняет",
+      "entity_type": "Product"
+     },
+     {
+      "description": "Дональд Трамп анонсировал создание «ИИ-войск» в США и планирует выбрать для них ",
+      "entity_name": "Трампа",
+      "entity_type": "Person"
+     },
+     {
+      "description": "Политический деятель, роль которого является предметом дискуссий; автор считает,",
+      "entity_name": "Борис Николаевич",
+      "entity_type": "Person"
+     },
+     {
+      "description": "Лицо, которому не рекомендуется появляться в Литве и на Брайтон-Бич.\n---\nРоссийс",
+      "entity_name": "Александр Овечкин",
+      "entity_type": "Person"
+     },
+     {
+      "description": "направил соответствующее официальное предложение",
+      "entity_name": "направил соответствующее официальное предложение",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "озвучил инициативу",
+      "entity_name": "озвучил инициативу",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Судебный процесс, по итогам которого Дмитрий Протопопов получил условный срок.\n-",
+      "entity_name": "Дело о распространении литературы с пропагандой ЛГБТ",
+      "entity_type": "Issue"
+     },
+     {
+      "description": "Военный конфликт в Чечне, фотография которого хранится у Ильи Джамалутдинова.\n--",
+      "entity_name": "Первая чеченская война",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Настоящее имя пострадавшего 7-летнего ребенка.",
+      "entity_name": "Богдан",
+      "entity_type": "Person"
+     },
+     {
+      "description": "Канал, автором и администратором которого является Олег.\n---\nTelegram-канал, выс",
+      "entity_name": "Злой Пруф Телеграм",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "заявил, что страна может обзавестись собственными малыми спутниками",
+      "entity_name": "заявил, что страна может обзавестись собственными малыми спутниками",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Город, в который прилетел политик для переговоров.",
+      "entity_name": "Анкоридж",
+      "entity_type": "Location"
+     },
+     {
+      "description": "Страна, в которой наблюдается конфликт.\n---\nГосударство, подписавшее Конвенцию С",
+      "entity_name": "р.Украины",
+      "entity_type": "Location"
+     },
+     {
+      "description": "19-летний ребенок погибших, находящийся в состоянии средней тяжести.\n---\nРебёнок",
+      "entity_name": "Трехмесячный сын",
+      "entity_type": "Person"
+     },
+     {
+      "description": "Второй судебный иск, поданный Алексеем З. против организатора концертов Канье Уэ",
+      "entity_name": "Иск к организатору концерта",
+      "entity_type": "Document"
+     },
+     {
+      "description": "Старший директор по рейтингам кредитных институтов в «Эксперт РА».",
+      "entity_name": "Алексей Янин",
+      "entity_type": "Person"
+     },
+     {
+      "description": "Автор фильма, в котором фигурирует Елена Милашина.",
+      "entity_name": "Юрий Дудь",
+      "entity_type": "Person"
+     },
+     {
+      "description": "Государственная корпорация по атомной энергии, глава которой призвал IAEA называ",
+      "entity_name": "Rosatom",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Территория, над которой были перехвачены и уничтожены БПЛА.\n---\nСубъект Российск",
+      "entity_name": "Рязанская",
+      "entity_type": "Location"
+     },
+     {
+      "description": "Сектор экономики, который, по мнению автора, обогащается за счет использования т",
+      "entity_name": "Военно-промышленный Комплекс",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Структурное подразделение Государственной Думы, возглавляемое Леонидом Слуцким.\n",
+      "entity_name": "Комитет Госдумы по международной политике",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Судебное дело о вымогательстве у топ-менеджера Промсвязьбанка, по которому была ",
+      "entity_name": "Дело о вымогательстве",
+      "entity_type": "Issue"
+     },
+     {
+      "description": "Группа лиц в Донецке, обладающая способностью запоминать лица, которые встречали",
+      "entity_name": "Информаторы",
+      "entity_type": "Role"
+     },
+     {
+      "description": "Заместитель председателя комитета Госдумы по международным делам, давший коммент",
+      "entity_name": "Алексей Чепа",
+      "entity_type": "Person"
+     },
+     {
+      "description": "Журналистка, которая вышла на свободу.",
+      "entity_name": "Александра Баязитова",
+      "entity_type": "Person"
+     },
+     {
+      "description": "Ссылка на профиль Алексея в Телеграмм для связи.\n---\nСсылка на профиль Алексея в",
+      "entity_name": "t.me/Aleks_Voloh",
+      "entity_type": "Other"
+     },
+     {
+      "description": "обратилась к Лукашенко с просьбой",
+      "entity_name": "обратилась к Лукашенко с просьбой",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Дочь Алексея Чепы, резидент Великобритании и бенефициар компании Aperse Ltd.",
+      "entity_name": "Анастасия Чепа",
+      "entity_type": "Person"
+     },
+     {
+      "description": "",
+      "entity_name": "Директора компании",
+      "entity_type": "Other"
+     },
+     {
+      "description": "Оппозиционный телеграм-канал/сообщество, признанное экстремистским; источник инф",
+      "entity_name": "1ADAT",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "СМИ, сообщившее о схеме вывода технологического актива Neuton.",
+      "entity_name": "Газета.Ru",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Материал, посвященный Джохару Дудаеву и анализу его восприятия в мире.",
+      "entity_name": "Статья Елены Милашиной",
+      "entity_type": "Document"
+     },
+     {
+      "description": "встрече с президентом",
+      "entity_name": "встрече с президентом",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Дипломатическое подразделение при посольстве Швейцарии в России, где ранее работ",
+      "entity_name": "Секция интересов Грузии",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Социальная группа, взаимодействие с которой характеризуется как неинтересное и х",
+      "entity_name": "Крестьяне",
+      "entity_type": "Concept"
+     },
+     {
+      "description": "Информационное агентство, которому Анна Субчева предоставила ответ.\n---\nИнформац",
+      "entity_name": "ТАСС / Москва",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Банк, повысивший процентные ставки по долгосрочным вкладам.\n---\nОрганизация, ока",
+      "entity_name": "Группа ВТБ",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "анонсировал запуск еще как минимум трех аналогичных фабрик",
+      "entity_name": "анонсировал запуск еще как минимум трех аналогичных фабрик",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "30-летняя женщина, которая подверглась нападению группы школьниц в парке города ",
+      "entity_name": "Ангелина",
+      "entity_type": "Person"
+     },
+     {
+      "description": "Платформа бронирования пансионатов для пожилых людей, работающая в 15 городах.",
+      "entity_name": "Долгожитель",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Врио губернатора Белгородской области, который еще не победил на губернаторских ",
+      "entity_name": "Александр Шуваев",
+      "entity_type": "Person"
+     },
+     {
+      "description": "Действия Киева по преследованию персонала ЗАЭС после неудачных попыток заставить",
+      "entity_name": "Атака на электриков",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "призвал вернуть долг",
+      "entity_name": "призвал вернуть долг",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Государственное бюро расследований, сообщившее о подозрении в отношении военносл",
+      "entity_name": "ГБР",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "просила возбудить против него уголовное дело",
+      "entity_name": "просила возбудить против него уголовное дело",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Политическая партия, оказавшая поддержку автору в ситуации с запретом фотографии",
+      "entity_name": "СПРАВЕДЛИВАЯ РОССИЯ",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Генеральный директор ТАСС.\n---\nГенеральный директор агентства ТАСС.",
+      "entity_name": "Кондрашов",
+      "entity_type": "Person"
+     },
+     {
+      "description": "Метафорическое обозначение США или западных стран.\n---\nГосударство, обладающее в",
+      "entity_name": "Соединенные Штаты Америки",
+      "entity_type": "Location"
+     },
+     {
+      "description": "Мероприятие, на котором Владимир Путин сделал заявления о развитии атомной отрас",
+      "entity_name": "Совещание по атомной энергетике",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Выставка, представляющая олимпийские артефакты из коллекции Владимира Потанина, ",
+      "entity_name": "От Афин до Астаны. Олимпийские артефакты из коллекции Владимира Потанина",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Столица Сербии, место проведения визита Зеленского и встречи с Вучичем.\n---\nГоро",
+      "entity_name": "Belgrade",
+      "entity_type": "Location"
+     },
+     {
+      "description": "заявил о требовании компенсации",
+      "entity_name": "заявил о требовании компенсации",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Министр обороны Беларуси, который опроверг информацию о возведении оборонительны",
+      "entity_name": "Виктор Хренин",
+      "entity_type": "Person"
+     },
+     {
+      "description": "сообщил о затонувшем",
+      "entity_name": "сообщил о затонувшем",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Депутат, который выразил желание участвовать в боевых действиях, но отметил нево",
+      "entity_name": "Свинцов",
+      "entity_type": "Person"
+     },
+     {
+      "description": "Спортивное мероприятие, в рамках которого появились Овечкин, Панарин и Сергачёв.",
+      "entity_name": "Матч года",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "подтвердил готовность к диалогу",
+      "entity_name": "подтвердил готовность к диалогу",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Проблема с сухими деревьями в Линдуловской роще, которая, по мнению пострадавших",
+      "entity_name": "Сухостой",
+      "entity_type": "Issue"
+     },
+     {
+      "description": "Страна, в которой изменилось общественное восприятие Украины и России под влияни",
+      "entity_name": "Великая Британия",
+      "entity_type": "Location"
+     },
+     {
+      "description": "назначили новым послом",
+      "entity_name": "назначили новым послом",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Правоохранительный орган, вызвавший наряд, составивший протокол и изъявший яблок",
+      "entity_name": "Полиция",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Парламентский комитет, руководство которого провело встречу с представителями СМ",
+      "entity_name": "Комитет по гуманитарной политике",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "объявили в розыск",
+      "entity_name": "объявили в розыск",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "обратилась к главному прокурору с просьбой рассмотреть вопрос о возбуждении угол",
+      "entity_name": "обратилась к главному прокурору с просьбой рассмотреть вопрос о возбуждении уголовного дела",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Театральная организация, характеризуемая как «вечно проблемная», в которую может",
+      "entity_name": "Ногинский театр",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Учреждение, куда Алексей был отправлен на принудительное лечение.",
+      "entity_name": "Психиатрическая больница",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Организация, руководителем которой является Алексей Лобарев.",
+      "entity_name": "Ассоциация профсоюзов правоохранительных органов",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Издательство, чей бывший глава был приговорен к четырем годам условно.",
+      "entity_name": "Popcorn Books",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Конференция, которая пройдет 26 сентября в Москве, где топ-менеджеры различных к",
+      "entity_name": "Avito.Tech.Conf",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "назначил",
+      "entity_name": "назначил",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Проблема, из-за которой Алексей и его дочь избегали купания в море.",
+      "entity_name": "Загрязнение воды",
+      "entity_type": "Issue"
+     },
+     {
+      "description": "провел первый саммит",
+      "entity_name": "провел первый саммит",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Мессенджер, где доступна программа.\n---\nПлатформа (Telegram), где присутствует Б",
+      "entity_name": "Telegram LLC",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Угроза безопасности, из-за которой Алексей и его дочь избегали моря.\n---\nПричина",
+      "entity_name": "Угроза дронов",
+      "entity_type": "Issue"
+     },
+     {
+      "description": "Мероприятие, в ходе которого Vladimir Putin сделал заявления о стабильности росс",
+      "entity_name": "совещание по экономическим вопросам",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "назвали пособником киевского режима",
+      "entity_name": "назвали пособником киевского режима",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "прошла закрытая встреча",
+      "entity_name": "прошла закрытая встреча",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Мессенджер, где доступна программа.\n---\nПлатформа (Telegram), где присутствует Б",
+      "entity_name": "Телеграмская сеть",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Военная структура, в состав которой входит 37-я отдельная десантно-штурмовая бри",
+      "entity_name": "Силы Специальных Операций",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Медицинская процедура, которую перенёс Алексей в текущем году.",
+      "entity_name": "Операция по удалению онкологии",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Государство, проводящее военные учения с танками и механизированными подразделен",
+      "entity_name": "Республика Білорусь",
+      "entity_type": "Location"
+     },
+     {
+      "description": "Лицо, занимающее выборную должность, которое вспоминает о своем избирателе лишь ",
+      "entity_name": "Депутат",
+      "entity_type": "Role"
+     },
+     {
+      "description": "Региональный Telegram-канал.",
+      "entity_name": "Е-область",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "прилетел из Казани",
+      "entity_name": "прилетел из Казани",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "расскажет о кровавом диктаторе",
+      "entity_name": "расскажет о кровавом диктаторе",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "заявил, что подаст в отставку",
+      "entity_name": "заявил, что подаст в отставку",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Кандидат по 201 округу, член ЛДПР.",
+      "entity_name": "Алексей Лапшов",
+      "entity_type": "Person"
+     },
+     {
+      "description": "перенёс операцию по удалению онкологии",
+      "entity_name": "перенёс операцию по удалению онкологии",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "заявил о готовности",
+      "entity_name": "заявил о готовности",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Место, где произошло избиение ребенка.",
+      "entity_name": "Компьютерный клуб",
+      "entity_type": "Location"
+     },
+     {
+      "description": "заявил, что Telegram необходимо сесть за стол переговоров",
+      "entity_name": "заявил, что Telegram необходимо сесть за стол переговоров",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "обличал Великобританию",
+      "entity_name": "обличал Великобританию",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Государство, участвующее в процессе поиска компромисса по санкциям.",
+      "entity_name": "Azerbaijan",
+      "entity_type": "Location"
+     },
+     {
+      "description": "Организация или медиа-ресурс, представленный в социальной сети X.\n---\nАккаунт Sp",
+      "entity_name": "@sputnik_afrique",
+      "entity_type": "Other"
+     },
+     {
+      "description": "8-летняя дочь Алексея, в честь которой он вернулся из зоны боевых действий.\n---\n",
+      "entity_name": "Дочь Алексея",
+      "entity_type": "Person"
+     },
+     {
+      "description": "отправился в Сочи",
+      "entity_name": "отправился в Сочи",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Банк, в отношении которого Банк России проводил операции по повышению финансовой",
+      "entity_name": "ПромСвязьБанк",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Город, подвергающийся постоянным ударам со стороны ВСУ.",
+      "entity_name": "Энергодар",
+      "entity_type": "Location"
+     },
+     {
+      "description": "Оператор мобильной связи, для которого будут настроены короткие команды оплаты.",
+      "entity_name": "Tele2",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Подразделение госкорпорации Росатом, распространившее слова Алексея Лихачева.\n--",
+      "entity_name": "Пресс-служба корпорации",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Континент, где Petrobras восстанавливает свое присутствие и реализует проекты по",
+      "entity_name": "Африканский Континент",
+      "entity_type": "Location"
+     },
+     {
+      "description": "Издание, чьи типографии были национализированы, регистрация аннулирована, а сайт",
+      "entity_name": "Новая Газета",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "План по организации полноценного регулярного сообщения по Северному морскому пут",
+      "entity_name": "Программа 2026 года",
+      "entity_type": "Concept"
+     },
+     {
+      "description": "Атаки на транспортные средства, доставлявшие дизельное топливо для Запорожской А",
+      "entity_name": "Удары по бензовозам",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Информационное агентство, предлагающее приложение для iOS и Android.\n---\nИнформа",
+      "entity_name": "Www.rbc.ru",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Мероприятие в Вене, на котором РФ поставит вопросы функционирования ЗАЭС.\n---\nЕж",
+      "entity_name": "Конференция МАГАТЭ",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Международное мероприятие, в ходе которого обсуждались стратегические достижения",
+      "entity_name": "Саммит в Казани",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Жена Алексея, находится в декретном отпуске, имеет финансовые трудности с выплат",
+      "entity_name": "Супруга Алексея",
+      "entity_type": "Person"
+     },
+     {
+      "description": "Трагическое событие, по которому, по мнению автора, отсутствует подробная и одно",
+      "entity_name": "Трагедия в Беслане",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "привлек",
+      "entity_name": "привлек",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Издание, писавшее об изменении состояния иконы «Троица».",
+      "entity_name": "Новая газета",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "мобилизовали",
+      "entity_name": "мобилизовали",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Ноутбуки, которые были куплены покупателем у продавца.",
+      "entity_name": "Макбуки",
+      "entity_type": "Product"
+     },
+     {
+      "description": "подписал указ о роспуске",
+      "entity_name": "подписал указ о роспуске",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "заявлял о готовности к строительству станции",
+      "entity_name": "заявлял о готовности к строительству станции",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Зона воздушного пространства России, доступ к которой влияет на маршруты и конку",
+      "entity_name": "Воздушное пространство РФ",
+      "entity_type": "Location"
+     },
+     {
+      "description": "Документ, в котором указаны меры наказания, включая штрафы и блокировку ресурсов",
+      "entity_name": "Презентация Ткаченко",
+      "entity_type": "Document"
+     },
+     {
+      "description": "Вооруженные силы Украины (ВСУ, укр. Збройні Сили України) представляют собой гос",
+      "entity_name": "Armed Forces Украины",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "предупреждал о подобном риске",
+      "entity_name": "предупреждал о подобном риске",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Город, подвергшийся атаке БПЛА.\n---\nГород в Ростовской области, где были уничтож",
+      "entity_name": "Ростов",
+      "entity_type": "Location"
+     },
+     {
+      "description": "Брокер, установивший тариф за перевод одного выпуска в размере 1500 рублей.\n---\n",
+      "entity_name": "КИТ",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Населенный пункт в Красноярском крае, недалеко от которого был ликвидирован медв",
+      "entity_name": "Деревня",
+      "entity_type": "Location"
+     },
+     {
+      "description": "Западные государства представляют собой совокупность стран и международных орган",
+      "entity_name": "Западные государства",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Государственный орган, в котором занимает должность Орешкин.\n---\nАдминистрация п",
+      "entity_name": "Администрация Президента РФ",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Государственная Дума, депутаты девятого созыва которой избирались.\n---\nГосударст",
+      "entity_name": "ГОСДУМА",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "организовал чартеры",
+      "entity_name": "организовал чартеры",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "объявил, что покинет свой пост",
+      "entity_name": "объявил, что покинет свой пост",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "вернуться во власть",
+      "entity_name": "вернуться во власть",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Корпус, участвующий в выпуске обзора книги о советско-финляндской войне.",
+      "entity_name": "Хартія",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Процесс утраты Украиной своего национального состава в результате демографическо",
+      "entity_name": "Исчезновение Украины",
+      "entity_type": "Concept"
+     },
+     {
+      "description": "Массированная атака беспилотных летательных аппаратов в Сочи.\n---\nСобытие, заклю",
+      "entity_name": "Атака на порт Сочи",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Процесс внезапного понимания или осознания истины, который может произойти, напр",
+      "entity_name": "Озарение",
+      "entity_type": "Concept"
+     },
+     {
+      "description": "Процесс строительства 50 энергоблоков, который обсуждается в ходе переговоров с ",
+      "entity_name": "Строительство энергоблоков",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "расскажет",
+      "entity_name": "расскажет",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "осудил похороны Mladić",
+      "entity_name": "осудил похороны Mladić",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Цель, достижение которой, по мнению Лукашенко, требует самостоятельного развития",
+      "entity_name": "Формула сохранения мира",
+      "entity_type": "Concept"
+     },
+     {
+      "description": "",
+      "entity_name": "Липовець",
+      "entity_type": "Other"
+     },
+     {
+      "description": "Ресурс воспроизводства населения, который, по оценке Алексея Куща, сократился по",
+      "entity_name": "Демографический потенциал",
+      "entity_type": "Concept"
+     },
+     {
+      "description": "Группа людей, чье существование находится под угрозой исчезновения согласно прог",
+      "entity_name": "Украинская нация",
+      "entity_type": "Concept"
+     },
+     {
+      "description": "Генерал-майор, ранее занимавший должность первого замначальника Генштаба ВС Бела",
+      "entity_name": "Андрей Матиевич",
+      "entity_type": "Person"
+     },
+     {
+      "description": "Административная единица, в которой расположено село Куртовка.\n---\nДонецкая обла",
+      "entity_name": "Донецкая обл.",
+      "entity_type": "Location"
+     },
+     {
+      "description": "Удар по сухогрузу в акватории Черного моря восточнее Одессы.\n---\nСобытие уничтож",
+      "entity_name": "Атака на судно RAGNAR",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "",
+      "entity_name": "российский театральный режиссёр",
+      "entity_type": "Other"
+     },
+     {
+      "description": "Группа специалистов, проанализировавшая систему организации спорта и предложивша",
+      "entity_name": "Рабочая группа по подготовке доклада",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "подавала заявление в Следственный комитет",
+      "entity_name": "подавала заявление в Следственный комитет",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Мероприятие в Париже, на котором было объявлено о космических амбициях Сербии.\n-",
+      "entity_name": "Международный саммит по космосу",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "иск подан",
+      "entity_name": "иск подан",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "ведется работа по увеличению численности персонала",
+      "entity_name": "ведется работа по увеличению численности персонала",
+      "entity_type": "EventOrAction"
+     },
+     {
+      "description": "Группа, признанная экстремистской и террористической, запрещенная на территории ",
+      "entity_name": "Pussy Riot",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Международная организация, предупреждающая о нестабильной ситуации вокруг ядерны",
+      "entity_name": "МАГАТЕ",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Государственный орган Украины, принявший решение о введении санкций против Юлии ",
+      "entity_name": "Совет Национальной Безопасности и Обороны Украины",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Военное подразделение, которое в полном составе переходит под управление МОГ для",
+      "entity_name": "Батальон",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "",
+      "entity_name": "Александр Лукьянченко",
+      "entity_type": "Other"
+     },
+     {
+      "description": "Судебный орган, в который был подан иск по делу о защите прав потребителей.",
+      "entity_name": "Мировой суд",
+      "entity_type": "Organization"
+     },
+     {
+      "description": "Российская Федерация, над регионами которой были сбиты БПЛА.\n---\nСтрана, в котор",
+      "entity_name": "Российская федерация",
+      "entity_type": "Location"
+     },
+     {
+      "description": "Социальный медиа-ресурс, деятельность которого стала причиной внесения изменений",
+      "entity_name": "Ютуб Канал Шария",
+      "entity_type": "Product"
+     },
+     {
+      "description": "позвонила и ИЗВИНИЛАСЬ",
+      "entity_name": "позвонила и ИЗВИНИЛАСЬ",
+      "entity_type": "EventOrAction"
+     }
+    ],
+    "relations": [
+     {
+      "label": "RELATED",
+      "src_id": "Джохар Дудаев",
+      "tgt_id": "Елена Милашина",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "CLASSIFICATION",
+      "src_id": "Джохар Дудаев",
+      "tgt_id": "Рамзан Кадыров",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "SUBJECT_OF_DOCUMENT",
+      "src_id": "Джохар Дудаев",
+      "tgt_id": "Статья Елены Милашиной",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "RELATED",
+      "src_id": "Елена Милашина",
+      "tgt_id": "Рамзан Кадыров",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Рамзан Кадыров",
+      "tgt_id": "подавала заявление в Следственный комитет",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Рамзан Кадыров",
+      "tgt_id": "просила возбудить против него уголовное дело",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "CONFLICT",
+      "src_id": "1ADAT",
+      "tgt_id": "Рамзан Кадыров",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "RELATED",
+      "src_id": "Абу-бандит",
+      "tgt_id": "Алексей",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "LOCATION",
+      "src_id": "Абу-бандит",
+      "tgt_id": "Мск",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "OWNERSHIP",
+      "src_id": "Офшор",
+      "tgt_id": "Алексей Чепа",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "EMPLOYMENT",
+      "src_id": "Телеканал Рината Ахметова",
+      "tgt_id": "Александр Ткаченко",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ACCUSATION",
+      "src_id": "Алексей Чепа",
+      "tgt_id": "Павел Валерьевич",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "OWNERSHIP",
+      "src_id": "Павел Валерьевич",
+      "tgt_id": "Телеграмская сеть",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PRESSURE",
+      "src_id": "Павел Валерьевич",
+      "tgt_id": "Российская федерация",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "CONTENT",
+      "src_id": "Telegram LLC",
+      "tgt_id": "Павел Валерьевич",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "CONTENT",
+      "src_id": "Телеграмская сеть",
+      "tgt_id": "Павел Валерьевич",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "CRITICISM",
+      "src_id": "ГОСДУМА",
+      "tgt_id": "Павел Валерьевич",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ACCUSATION",
+      "src_id": "Основатель Telegram",
+      "tgt_id": "Алексей Чепа",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ACCUSATION",
+      "src_id": "Алексей Чепа",
+      "tgt_id": "Основатель Telegram",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "OWNERSHIP",
+      "src_id": "Telegram LLC",
+      "tgt_id": "Основатель Telegram",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Основатель Telegram",
+      "tgt_id": "назвали пособником киевского режима",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "FOUNDER",
+      "src_id": "Основатель Telegram",
+      "tgt_id": "Телеграмская сеть",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "LEGAL_STATUS",
+      "src_id": "Основатель Telegram",
+      "tgt_id": "Российская федерация",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "CREATION",
+      "src_id": "Основатель Telegram",
+      "tgt_id": "ГОСДУМА",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "INFORMATION",
+      "src_id": "Основатель Telegram",
+      "tgt_id": "ТАСС / Москва",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PROTECTION",
+      "src_id": "Великая Британия",
+      "tgt_id": "Основатель Telegram",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "OWNERSHIP",
+      "src_id": "Телеграмская сеть",
+      "tgt_id": "Основатель Telegram",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ACCUSATION",
+      "src_id": "ГОСДУМА",
+      "tgt_id": "Основатель Telegram",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "GUARANTEE",
+      "src_id": "СПРАВЕДЛИВАЯ РОССИЯ",
+      "tgt_id": "Основатель Telegram",
+      "polarity": "uncertain",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "AGREEMENT",
+      "src_id": "Александр Волошин",
+      "tgt_id": "Алексей Чепа",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "DIPLOMACY",
+      "src_id": "Александр Волошин",
+      "tgt_id": "Российская федерация",
+      "polarity": "uncertain",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "CONFLICT",
+      "src_id": "Єрмак",
+      "tgt_id": "Александр Ткаченко",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Єрмак",
+      "tgt_id": "перешёл в контрнаступление",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "OPPOSITION",
+      "src_id": "Єрмак",
+      "tgt_id": "Андрей Богдан",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "OBSERVATION",
+      "src_id": "Андрей Богдан",
+      "tgt_id": "Єрмак",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "DEFENSE",
+      "src_id": "Алієв",
+      "tgt_id": "Александр Ткаченко",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "EMPLOYMENT",
+      "src_id": "А2",
+      "tgt_id": "Алексей Чихачев",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "POSITION",
+      "src_id": "Алексей Чихачев",
+      "tgt_id": "Управляющий партнер",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "LOCATION",
+      "src_id": "Орловская",
+      "tgt_id": "С.В. Лежнев",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ACCUSATION",
+      "src_id": "Зеленський В.О.",
+      "tgt_id": "Александр Лукашенко",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "COMMUNICATION",
+      "src_id": "Алексей Лихачёв",
+      "tgt_id": "Зеленський В.О.",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "FINANCIAL_AID",
+      "src_id": "Западные государства",
+      "tgt_id": "Зеленський В.О.",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "DIPLOMACY",
+      "src_id": "Зеленський В.О.",
+      "tgt_id": "Поднебесная",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Зеленський В.О.",
+      "tgt_id": "встрече с президентом",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "LOSS",
+      "src_id": "Зеленський В.О.",
+      "tgt_id": "Armed Forces Украины",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "2022",
+      "description": ""
+     },
+     {
+      "label": "DIPLOMACY",
+      "src_id": "Зеленський В.О.",
+      "tgt_id": "Западные государства",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "AGGRESSION",
+      "src_id": "Зеленський В.О.",
+      "tgt_id": "Российская федерация",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "INTEREST",
+      "src_id": "Зеленський В.О.",
+      "tgt_id": "Володимир Путін",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "CONFIRMATION",
+      "src_id": "Зеленський В.О.",
+      "tgt_id": "Атака на порт Сочи",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "INFORMATION",
+      "src_id": "Зеленський В.О.",
+      "tgt_id": "ТАСС / Москва",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "RELATED",
+      "src_id": "Атака на порт Сочи",
+      "tgt_id": "Зеленський В.О.",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "CONFLICT",
+      "src_id": "Российская федерация",
+      "tgt_id": "Зеленський В.О.",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "INFORMATION",
+      "src_id": "Контейнеровоз «Янина",
+      "tgt_id": "Зеленський В.О.",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "LOBBYING",
+      "src_id": "Андрей Богдан",
+      "tgt_id": "Александр Ткаченко",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "APPOINTMENT",
+      "src_id": "Александр Ткаченко",
+      "tgt_id": "Андрей Богдан",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "DISCUSSION",
+      "src_id": "Алексей Лихачёв",
+      "tgt_id": "Абдул-Фаттах Ас-Сиси",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "DIPLOMACY",
+      "src_id": "Абдул-Фаттах Ас-Сиси",
+      "tgt_id": "Володимир Путін",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "BUSINESS_PARTNERSHIP",
+      "src_id": "Аркадий Новиков",
+      "tgt_id": "Алексей Чепа",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ASSOCIATION",
+      "src_id": "Е-область",
+      "tgt_id": "Алексей Ларкин",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "COMMUNICATION",
+      "src_id": "",
+      "tgt_id": "Алексей Ларкин",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ANALYSIS",
+      "src_id": "Алексей Ларкин",
+      "tgt_id": "Предвыборные технологии",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "LOCATION",
+      "src_id": "Алексей Ларкин",
+      "tgt_id": "Анкоридж",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ANALYSIS",
+      "src_id": "Алексей Ларкин",
+      "tgt_id": "Дело Костылева",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "EMPLOYMENT",
+      "src_id": "Депутат",
+      "tgt_id": "Алексей Журавлёв",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ANALYSIS",
+      "src_id": "Алексей Журавлёв",
+      "tgt_id": "Альтернатива для Німеччини",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "EMPLOYMENT",
+      "src_id": "Алексей Журавлёв",
+      "tgt_id": "ГОСДУМА",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "COMPARISON",
+      "src_id": "Алексей Журавлёв",
+      "tgt_id": "Свинцов",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ANALYSIS",
+      "src_id": "",
+      "tgt_id": "Алексей Сухачев",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Алексей Сухачев",
+      "tgt_id": "озвучил инициативу",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "EMPLOYMENT",
+      "src_id": "Алексей Сухачев",
+      "tgt_id": "ГБР",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "EVALUATION",
+      "src_id": "Алексей Сухачев",
+      "tgt_id": "",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "EXPERTISE",
+      "src_id": "Алексей Лобарев",
+      "tgt_id": "Мошенничество уличных фотографов",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Алексей Лобарев",
+      "tgt_id": "рассказал в интервью",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "EMPLOYMENT",
+      "src_id": "Алексей Лобарев",
+      "tgt_id": "Ассоциация профсоюзов правоохранительных органов",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "COMMUNICATION",
+      "src_id": "Алексей Лобарев",
+      "tgt_id": "ИС \"Вести",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "EXPERTISE",
+      "src_id": "AgeTech",
+      "tgt_id": "Алексей Анико",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "OWNERSHIP",
+      "src_id": "Алексей Анико",
+      "tgt_id": "Долгожитель",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Алексей Анико",
+      "tgt_id": "привлек",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "APPOINTMENT",
+      "src_id": "Андрей Клычков",
+      "tgt_id": "Сергей Клешнев",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Сергей Клешнев",
+      "tgt_id": "назначил",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "APPLICATION",
+      "src_id": "Алексей З.",
+      "tgt_id": "Мировой суд",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "LAWSUIT",
+      "src_id": "Алексей З.",
+      "tgt_id": "Иск к организатору концерта",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Алексей З.",
+      "tgt_id": "иск подан",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "DAMAGE",
+      "src_id": "",
+      "tgt_id": "Алексей",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "COMMUNICATION",
+      "src_id": "t.me/Aleks_Voloh",
+      "tgt_id": "Алексей",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "COMMUNICATION",
+      "src_id": "+79661476507",
+      "tgt_id": "Алексей",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ESTIMATION",
+      "src_id": "600 тысяч рублей",
+      "tgt_id": "Алексей",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "RELATED",
+      "src_id": "Алексей",
+      "tgt_id": "Уголовное дело по статье «Убийство",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "RELATED",
+      "src_id": "Алексей",
+      "tgt_id": "Компьютерный клуб",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "CAUSATION",
+      "src_id": "Алексей",
+      "tgt_id": "Російський Дрон",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "REPORT",
+      "src_id": "Алексей",
+      "tgt_id": "Полиция",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "INCIDENT",
+      "src_id": "Алексей",
+      "tgt_id": "Линдуловская роща",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "OBSERVATION",
+      "src_id": "Алексей",
+      "tgt_id": "Матч года",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "GEOGRAPHY",
+      "src_id": "Алексей",
+      "tgt_id": "",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "RELATED",
+      "src_id": "Алексей",
+      "tgt_id": "Богдан",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "CONTACT",
+      "src_id": "Алексей",
+      "tgt_id": "Батальон",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "APPOINTMENT",
+      "src_id": "Алексей",
+      "tgt_id": "Ногинский театр",
+      "polarity": "uncertain",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Алексей",
+      "tgt_id": "перенёс операцию по удалению онкологии",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "EMPLOYMENT",
+      "src_id": "Алексей",
+      "tgt_id": "Военно-промышленный Комплекс",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Алексей",
+      "tgt_id": "атаковал дрон",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "GEOGRAPHY",
+      "src_id": "Алексей",
+      "tgt_id": "Воздушное пространство РФ",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Алексей",
+      "tgt_id": "избил 7-летнего мальчика",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "COGNITIVE_STATE",
+      "src_id": "Алексей",
+      "tgt_id": "Озарение",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ALIAS",
+      "src_id": "Алексей",
+      "tgt_id": "Дед",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ORIGIN",
+      "src_id": "Алексей",
+      "tgt_id": "Казань",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Алексей",
+      "tgt_id": "деревья рухнули",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Алексей",
+      "tgt_id": "вызвали полицию",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "AVOIDANCE",
+      "src_id": "Алексей",
+      "tgt_id": "Загрязнение воды",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "EMPLOYMENT",
+      "src_id": "Алексей",
+      "tgt_id": "Хартія",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "MEDICAL_HISTORY",
+      "src_id": "Алексей",
+      "tgt_id": "Операция по удалению онкологии",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ORIGIN",
+      "src_id": "Алексей",
+      "tgt_id": "Воронеж",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "AVOIDANCE",
+      "src_id": "Алексей",
+      "tgt_id": "Угроза дронов",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "CONTACT",
+      "src_id": "Алексей",
+      "tgt_id": "МОГ ВС РФ",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Алексей",
+      "tgt_id": "мобилизовали",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ANALYSIS",
+      "src_id": "Алексей",
+      "tgt_id": "Российская федерация",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "FAMILY",
+      "src_id": "Алексей",
+      "tgt_id": "Дочь Алексея",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Алексей",
+      "tgt_id": "отправили на принудительное лечение",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "IDENTITY",
+      "src_id": "Алексей",
+      "tgt_id": "Александр Овечкин",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Алексей",
+      "tgt_id": "прилетел из Казани",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Алексей",
+      "tgt_id": "назначение",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "NAMING_TREND",
+      "src_id": "Алексей",
+      "tgt_id": "Мск",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ISSUE",
+      "src_id": "Алексей",
+      "tgt_id": "Сухостой",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "TRAVEL",
+      "src_id": "Алексей",
+      "tgt_id": "Sochi",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Алексей",
+      "tgt_id": "отправился в Сочи",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Алексей",
+      "tgt_id": "вернулся из зоны боевых действий",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "RELATED",
+      "src_id": "Алексей",
+      "tgt_id": "Психиатрическая больница",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "RELATED",
+      "src_id": "Алексей",
+      "tgt_id": "Трехмесячный сын",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "FAMILY",
+      "src_id": "Алексей",
+      "tgt_id": "Супруга Алексея",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Денис Голещихин",
+      "tgt_id": "рассказал в интервью",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Www.rbc.ru",
+      "tgt_id": "рассказал в интервью",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "ИС \"Вести",
+      "tgt_id": "рассказал в интервью",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "EXPERIENCE",
+      "src_id": "Сервис «МОСТ",
+      "tgt_id": "Алексей Мин",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ACCOUNT",
+      "src_id": "Алексей Мин",
+      "tgt_id": "КИТ",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ACCOUNT",
+      "src_id": "Алексей Мин",
+      "tgt_id": "Группа ВТБ",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ATTRIBUTION",
+      "src_id": "@banki_economy",
+      "tgt_id": "Александр Лукашенко",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "",
+      "tgt_id": "заявил в интервью",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Кондрашов",
+      "tgt_id": "заявил в интервью",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "FAMILY",
+      "src_id": "Даниил Чепа",
+      "tgt_id": "Алексей Чепа",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "CITIZENSHIP",
+      "src_id": "Великая Британия",
+      "tgt_id": "Даниил Чепа",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "OWNERSHIP",
+      "src_id": "И. Новиков",
+      "tgt_id": "Даниил Чепа",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "2013",
+      "description": ""
+     },
+     {
+      "label": "ECONOMIC_ANALYSIS",
+      "src_id": "Алексей Кущ",
+      "tgt_id": "",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ANALYSIS",
+      "src_id": "Алексей Кущ",
+      "tgt_id": "Демографическая ситуация в Украине",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Алексей Кущ",
+      "tgt_id": "предупреждал о подобном риске",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ANALYSIS",
+      "src_id": "Алексей Кущ",
+      "tgt_id": "р.Украины",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "CRITICISM",
+      "src_id": "Алексей Кущ",
+      "tgt_id": "Сценарий затяжной войны",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ECONOMIC_ANALYSIS",
+      "src_id": "Алексей Кущ",
+      "tgt_id": "Исчезновение Украины",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ESTIMATION",
+      "src_id": "Алексей Кущ",
+      "tgt_id": "Демографический потенциал",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ANALYSIS",
+      "src_id": "Алексей Кущ",
+      "tgt_id": "Украинская нация",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "провёл политический эксперимент",
+      "tgt_id": "российский театральный режиссёр",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "LEGAL_ACTION",
+      "src_id": "Офис генпрокурора Украины",
+      "tgt_id": "Александр Лукашенко",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "BUSINESS",
+      "src_id": "Карлин",
+      "tgt_id": "Локтев",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "EMPLOYMENT",
+      "src_id": "Володимир Путін",
+      "tgt_id": "Александр Ушаков",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "REPORTING",
+      "src_id": "ТАСС / Москва",
+      "tgt_id": "Володимир Путін",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ADMIRATION",
+      "src_id": "Трампа",
+      "tgt_id": "Володимир Путін",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "COMMUNICATION",
+      "src_id": "Соединенные Штаты Америки",
+      "tgt_id": "Володимир Путін",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "DIPLOMACY",
+      "src_id": "Володимир Путін",
+      "tgt_id": "Соединенные Штаты Америки",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "LEADERSHIP",
+      "src_id": "Володимир Путін",
+      "tgt_id": "Российская федерация",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "INTERACTION",
+      "src_id": "Володимир Путін",
+      "tgt_id": "Трампа",
+      "polarity": "uncertain",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "INFORMATION_SOURCE",
+      "src_id": "Володимир Путін",
+      "tgt_id": "ТАСС / Москва",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "GOVERNMENT",
+      "src_id": "Российская федерация",
+      "tgt_id": "Володимир Путін",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "DISCUSSION",
+      "src_id": "Алексей Лихачёв",
+      "tgt_id": "Володимир Путін",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "CONFLICT",
+      "src_id": "Западные государства",
+      "tgt_id": "Володимир Путін",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "GOVERNMENT",
+      "src_id": "Российская федерация",
+      "tgt_id": "Володимир Путін",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "ANALYSIS",
+      "src_id": "Александр Вучич",
+      "tgt_id": "Рыбарь поясняет",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "INFORMATION_FLOW",
+      "src_id": "Трампа",
+      "tgt_id": "Александр Ушаков",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "INFORMATION",
+      "src_id": "ТАСС / Москва",
+      "tgt_id": "Трампа",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "GOVERNANCE",
+      "src_id": "Трампа",
+      "tgt_id": "Соединенные Штаты Америки",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "DIPLOMACY",
+      "src_id": "Трампа",
+      "tgt_id": "Российская федерация",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "GOVERNMENT",
+      "src_id": "Соединенные Штаты Америки",
+      "tgt_id": "Трампа",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "DIPLOMACY",
+      "src_id": "Российская федерация",
+      "tgt_id": "Трампа",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "CHARACTERIZATION",
+      "src_id": "Борис Николаевич",
+      "tgt_id": "Елена Милашина",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATION",
+      "src_id": "Матч года",
+      "tgt_id": "Александр Овечкин",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "RELATED",
+      "src_id": "Александр Овечкин",
+      "tgt_id": "Матч года",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PATRIOTISM",
+      "src_id": "Александр Овечкин",
+      "tgt_id": "Российская федерация",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "LOCATION",
+      "src_id": "Александр Овечкин",
+      "tgt_id": "Мск",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Александр Вучич",
+      "tgt_id": "направил соответствующее официальное предложение",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "ГБР",
+      "tgt_id": "озвучил инициативу",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "CRIMINAL_ACTIVITY",
+      "src_id": "Артём Вахляев",
+      "tgt_id": "Дело о распространении литературы с пропагандой ЛГБТ",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "HISTORICAL_ANALYSIS",
+      "src_id": "Елена Милашина",
+      "tgt_id": "Первая чеченская война",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "RELATED",
+      "src_id": "Богдан",
+      "tgt_id": "Компьютерный клуб",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Богдан",
+      "tgt_id": "избил 7-летнего мальчика",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "RELATED",
+      "src_id": "Злой Пруф Телеграм",
+      "tgt_id": "Александр Лукашенко",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Александр Вучич",
+      "tgt_id": "заявил, что страна может обзавестись собственными малыми спутниками",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "COMPOSITION",
+      "src_id": "р.Украины",
+      "tgt_id": "Украинская нация",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "DEMOGRAPHIC_CRISIS",
+      "src_id": "Демографическая ситуация в Украине",
+      "tgt_id": "р.Украины",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "2022",
+      "description": ""
+     },
+     {
+      "label": "LEGAL_PROCESS",
+      "src_id": "Трехмесячный сын",
+      "tgt_id": "Уголовное дело по статье «Убийство",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "EMPLOYMENT",
+      "src_id": "Алексей Янин",
+      "tgt_id": "Raexpert.ru",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "MEDIA_COVERAGE",
+      "src_id": "Елена Милашина",
+      "tgt_id": "Юрий Дудь",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "EMPLOYMENT",
+      "src_id": "Алексей Лихачёв",
+      "tgt_id": "Rosatom",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "COMPETITION",
+      "src_id": "Западные государства",
+      "tgt_id": "Rosatom",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "MAINTENANCE",
+      "src_id": "АЭС «Бушер",
+      "tgt_id": "Rosatom",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "REPORTING",
+      "src_id": "Rosatom",
+      "tgt_id": "Armed Forces Украины",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "EXECUTION",
+      "src_id": "Rosatom",
+      "tgt_id": "Строительство АСММ",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "2027",
+      "description": ""
+     },
+     {
+      "label": "EXPERTISE",
+      "src_id": "Rosatom",
+      "tgt_id": "Российская федерация",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "BUSINESS_ACTIVITY",
+      "src_id": "Rosatom",
+      "tgt_id": "Строительство энергоблоков",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "INFORMATION",
+      "src_id": "Rosatom",
+      "tgt_id": "Контейнеровоз «Янина",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Rosatom",
+      "tgt_id": "заявлял о готовности к строительству станции",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "PARTICIPATED_IN",
+      "src_id": "Rosatom",
+      "tgt_id": "подтвердил готовность к диалогу",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "INFORMATION_SOURCE",
+      "src_id": "Rosatom",
+      "tgt_id": "ТАСС / Москва",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     },
+     {
+      "label": "OWNERSHIP",
+      "src_id": "Контейнеровоз «Янина",
+      "tgt_id": "Rosatom",
+      "polarity": "affirmed",
+      "valid_to": "",
+      "valid_from": "",
+      "description": ""
+     }
+    ]
+   }
+  }
+ },
+ "writes": [
+  {
+   "call_id": "c2",
+   "tool": "add_objects",
+   "args": {
+    "objects": [
+     {
+      "id": "Джохар Дудаев",
+      "type": "Person",
+      "label": "Джохар Дудаев"
+     },
+     {
+      "id": "Рамзан Кадыров",
+      "type": "Person",
+      "label": "Рамзан Кадыров"
+     },
+     {
+      "id": "Абу-бандит",
+      "type": "Person",
+      "label": "Абу-бандит"
+     }
+    ]
+   }
+  }
+ ]
+}

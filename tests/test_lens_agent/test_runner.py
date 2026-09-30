@@ -64,7 +64,7 @@ async def test_result_truncated_for_model_but_stored_in_full():
     async with world(result_chars=100) as w:
         seen = []
         run, evs = await w.run(scripted([("kb_big", {})], "ok", seen=seen))
-        ret = tool_returns(seen[-1])[0]
+        ret = tool_returns(seen[-1])[-1]
         assert ret.startswith("call_id=c1\n") and ret.endswith("полный результат: call_id=c1")
         assert len(ret) < 200 and of(evs, "tool_result")[0]["truncated"] is True
         assert len((await w.store.get_payload(run.id, "c1")).payload) == 10_000
@@ -434,19 +434,22 @@ async def test_hidden_board_objects_are_found_as_similar():
 
 async def test_object_id_is_taken_from_the_cited_source_result():
     async with world() as w:
+        seen = []
         await w.run(scripted(
             [("kb_find_entity", {"name": "Росатом"})],
             [("board_add_objects", {"objects": [
-                {"id": "rosatom", "type": "organization", "label": "Росатом", "call_id": "c1"},
+                {"id": "rosatom", "type": "person", "label": "Росатом", "call_id": "c1"},
                 {"id": "invented", "type": "person", "label": "Нет в источнике", "call_id": "c1"},
             ]})],
-            "ok"))
+            "ok", seen=seen))
         st = await w.board.state(w.ws.id)
-        # the model invented "rosatom"; the source row for label «Росатом» has id E1
-        assert "kb:e1" in st.objects and "kb:rosatom" not in st.objects
+        # the model invented "rosatom"/person; the row for label «Росатом» gives id E1 and its type
+        assert set(st.objects) == {"kb:e1"}
         assert st.objects["kb:e1"].attrs["source_id"] == "E1"
-        # nothing matched in the source: kept as the model wrote it
-        assert "kb:invented" in st.objects and "source_id" not in st.objects["kb:invented"].attrs
+        assert st.objects["kb:e1"].type == "organization"
+        # nothing matched in the source: rejected, with the nearest rows to pick from
+        ret = tool_returns(seen[-1])[-1]
+        assert "Нет в источнике" in ret and "nearest" in ret
 
 
 async def test_mentioned_object_carries_its_source_id_into_the_prompt():
@@ -483,5 +486,5 @@ async def test_relation_without_any_known_source_is_still_rejected():
             [("board_add_relations", {"relations": [
                 {"from": "kb:x", "to": "kb:y", "kind": "связан"}]})],
             "ok", seen=seen))
-        assert "call_id" in tool_returns(seen[-1])[0]
+        assert "нет связи" in tool_returns(seen[-1])[0]
         assert (await w.board.state(w.ws.id)).relations == {}

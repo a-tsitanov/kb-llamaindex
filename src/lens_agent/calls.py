@@ -10,11 +10,12 @@ What the model cannot be trusted with happens here:
 - an identical repeated source call is answered from the run cache (not counted twice);
 - soft budgets per kind (source / board): over budget the call is not made and the model is
   told to finish with what it has;
-- board writes: ``call_id`` is checked against this run's source calls and replaced by the
-  full ``source {server, tool, call_id, namespace}``; unknown ids are rejected with a reason;
-  the object ``id`` is taken from the cited source result when a row there matches the
-  item's id or label (models invent ids like "likhachev"; the source's own id keeps one
-  entity on one key and lets a later run call the source with it) — ``attrs.source_id``;
+- board writes point at ROWS of this run's stored source results (see ``rows``): an object
+  names a row (``row`` number, ``id`` or ``label``) of the cited call — or of any source call
+  of the run when ``call_id`` is missing — and its id / label / type / description are
+  copied from that row (never from the model); no matching row → rejected with the nearest
+  rows. A relation must match a relation row of a source result (its kind comes from the
+  row). The full ``source {server, tool, call_id, namespace}`` is attached by the hook;
 - board reads repeated while this run has not changed the board are answered from the cache
   with a nudge to add objects or answer (a weak model otherwise re-reads the board in a loop);
 - consecutive calls that bring nothing new (cache hits, over-budget calls) are counted; at
@@ -33,6 +34,14 @@ from pydantic_ai import ModelRetry
 
 from src.lens.keys import make_key, normalize_id
 from src.lens_agent.config import McpEntry
+from src.lens_agent.rows import (
+    Row,
+    entity_rows,
+    match_entity,
+    match_relation,
+    nearest,
+    relation_rows,
+)
 from src.lens_agent.store import AgentStore, CallPayload
 from src.lens_agent.stream import RunEmitter
 
@@ -45,26 +54,6 @@ def _changed(name: str, result: Any) -> bool:
     if name not in _BOARD_WRITES:
         return True  # note, hide/show, merge, undo
     return isinstance(result, dict) and (bool(result.get("added")) or bool(result.get("merged")))
-
-
-_ID_FIELDS = ("id", "entity_name", "name")  # preference order within one source row
-
-
-def _source_id(payload: Any, item: dict) -> str | None:
-    """The id of the row in ``payload`` whose id / name matches the item's id or label."""
-    want = {normalize_id(str(v)) for v in (item.get("id"), item.get("label")) if v}
-    want.discard("")
-    stack = [payload]
-    while stack:
-        node = stack.pop()
-        if isinstance(node, list):
-            stack.extend(reversed(node))
-        elif isinstance(node, dict):
-            values = [node.get(f) for f in _ID_FIELDS]
-            if any(isinstance(v, str) and normalize_id(v) in want for v in values):
-                return next(v for v in values if isinstance(v, str) and v.strip())
-            stack.extend(reversed(list(node.values())))
-    return None
 
 
 class RunStalled(Exception):
@@ -122,6 +111,8 @@ class RunCalls:
         self._cache: dict[str, tuple[str, str]] = {}
         self._payloads: dict[str, Any] = {}  # source call id -> full result (for source ids)
         self._object_src: dict[str, CallInfo] = {}  # board key written this run -> its source
+        self._object_names: dict[str, set[str]] = {}  # board key -> normalized source names
+        self._rows: dict[str, tuple[list[Row], list]] = {}  # source call id -> parsed rows
         self._board_version = 0  # bumped by every board change this run makes
         self._board_reads: dict[str, str] = {}  # read key (incl. version) -> first call id
         self.stalls = 0  # consecutive calls that brought nothing new
@@ -237,7 +228,25 @@ class RunCalls:
                       spaces[0] if len(spaces) == 1 else None)
         return make_key(ns, v) if ns else v
 
-    def _attach_sources(self, items: Any, kind: str = "objects") -> tuple[list[dict], list[dict]]:
+    def _parsed(self, call_id: str) -> tuple[list[Row], list]:
+        if call_id not in self._rows:
+            payload = self._payloads.get(call_id)
+            self._rows[call_id] = (entity_rows(payload), relation_rows(payload))
+        return self._rows[call_id]
+
+    def _source_calls(self) -> list[CallInfo]:
+        """Distinct stored source calls of this run, latest first."""
+        seen: dict[str, CallInfo] = {}
+        for info in self.registry.values():
+            seen.setdefault(info.call_id, info)
+        return list(reversed(list(seen.values())))
+
+    @staticmethod
+    def _src(info: CallInfo) -> dict[str, str]:
+        return {"server": info.server, "tool": info.tool, "call_id": info.call_id,
+                "namespace": info.namespace}
+
+    def _attach_objects(self, items: Any) -> tuple[list[dict], list[dict]]:
         ok, rejected = [], []
         for it in items if isinstance(items, list) else []:
             if not isinstance(it, dict):
@@ -245,27 +254,76 @@ class RunCalls:
                 continue
             ref = str(it.get("call_id") or "").strip()
             info = self.registry.get(ref)
-            clean = {k: v for k, v in it.items() if k not in ("call_id", "source")}
-            if kind == "relations":
-                ns = info.namespace if info else None
-                clean["from"] = self._as_key(it.get("from"), ns)
-                clean["to"] = self._as_key(it.get("to"), ns)
-                if info is None and not ref:  # evidence: the source both ends came from
-                    a, b = self._object_src.get(clean["from"]), self._object_src.get(clean["to"])
-                    info = a if a is not None and (b is None or a == b) else (a or b)
-            if info is None:
+            if ref and info is None:
                 rejected.append({"item": it, "reason": f"неизвестный call_id {ref!r} — укажи "
                                  "call_id из результата инструмента-источника этого запроса"})
                 continue
-            if kind == "objects":
-                sid = _source_id(self._payloads.get(info.call_id), it)
-                if sid is not None:
-                    attrs = clean.get("attrs") if isinstance(clean.get("attrs"), dict) else {}
-                    clean["id"], clean["attrs"] = sid, {**attrs, "source_id": sid}
-                self._object_src.setdefault(make_key(info.namespace, str(clean.get("id"))), info)
-            clean["source"] = {"server": info.server, "tool": info.tool,
-                               "call_id": info.call_id, "namespace": info.namespace}
+            candidates = [info] if info else self._source_calls()
+            hit = next(((i, r) for i in candidates
+                        if (r := match_entity(self._parsed(i.call_id)[0], it)) is not None), None)
+            if hit is None:
+                rows = self._parsed(candidates[0].call_id)[0] if candidates else []
+                where = f"результате {info.call_id}" if info else "результатах этого запроса"
+                rejected.append({"item": it, "reason": (
+                    f"в {where} нет такой сущности — укажи row, id или label строки из результата "
+                    "(название и тип берутся из источника, придумывать нельзя)"),
+                    "nearest": [{"row": r.index, "id": r.id, "label": r.label}
+                                for r in nearest(rows, it, 3)]})
+                continue
+            info, row = hit
+            clean: dict[str, Any] = {"id": row.id, "label": row.label, "type": row.type,
+                                     "attrs": {"source_id": row.id},
+                                     "source": self._src(info)}
+            if row.description:
+                clean["description"] = row.description[:1000]
+            key = make_key(info.namespace, row.id)
+            self._object_src.setdefault(key, info)
+            self._object_names[key] = set(row.names)
             ok.append(clean)
+        return ok, rejected
+
+    async def _names(self, key: str, call_tool) -> set[str]:
+        """Source names of a board object: written this run, else read from the board."""
+        if key not in self._object_names:
+            names = {key.split(":", 1)[-1]}
+            try:
+                o = await call_tool("get_object", {"key": key}, None)
+            except Exception:
+                o = None
+            if isinstance(o, dict):
+                attrs = o.get("attrs") if isinstance(o.get("attrs"), dict) else {}
+                names |= {normalize_id(str(v)) for v in (o.get("label"), attrs.get("source_id"))
+                          if v}
+            self._object_names[key] = names
+        return self._object_names[key]
+
+    async def _attach_relations(self, items: Any, call_tool) -> tuple[list[dict], list[dict]]:
+        ok, rejected = [], []
+        for it in items if isinstance(items, list) else []:
+            if not isinstance(it, dict):
+                rejected.append({"item": it, "reason": "ожидался объект"})
+                continue
+            ref = str(it.get("call_id") or "").strip()
+            info = self.registry.get(ref)
+            if ref and info is None:
+                rejected.append({"item": it, "reason": f"неизвестный call_id {ref!r}"})
+                continue
+            ns = info.namespace if info else None
+            a, b = self._as_key(it.get("from"), ns), self._as_key(it.get("to"), ns)
+            na, nb = await self._names(a, call_tool), await self._names(b, call_tool)
+            candidates = [info] if info else self._source_calls()
+            hit = next(((i, r) for i in candidates
+                        if (r := match_relation(self._parsed(i.call_id)[1], na, nb)) is not None),
+                       None)
+            if hit is None:
+                rejected.append({"item": it, "reason": (
+                    f"в результатах источников нет связи между {a} и {b} — добавляй только "
+                    "связи, которые есть в результате")})
+                continue
+            info, rel = hit
+            src_first = normalize_id(rel.src) in {normalize_id(x) for x in na}
+            ok.append({"from": a if src_first else b, "to": b if src_first else a,
+                       "kind": rel.kind or it.get("kind") or "", "source": self._src(info)})
         return ok, rejected
 
     async def _board(self, cid: str, call_tool, name: str, args: dict[str, Any]) -> Any:
@@ -293,18 +351,15 @@ class RunCalls:
         self.counts["board"] += 1
         if name in _BOARD_WRITES:
             field = _BOARD_WRITES[name]
-            items, rejected = self._attach_sources(args.get(field), field)
+            if field == "objects":
+                items, rejected = self._attach_objects(args.get(field))
+            else:
+                items, rejected = await self._attach_relations(args.get(field), call_tool)
             if items:
                 result = await self._call(cid, t0, call_tool, name, {field: items})
             else:
                 result = {"added": 0, "rejected": []}
             result = {**result, "rejected": rejected + list(result.get("rejected", []))}
-            for m in result.get("merged", []) or []:  # near-duplicates live under another key
-                src = next((i for i in items if str(i.get("id")) == str(m.get("id"))), None)
-                if src is not None:
-                    info = self.registry.get(src["source"]["call_id"])
-                    if info is not None:
-                        self._object_src.setdefault(str(m.get("merged_into")), info)
         else:
             result = await self._call(cid, t0, call_tool, name, args)
         await self.store.save_payload(CallPayload(run_id=self.run_id, call_id=cid,

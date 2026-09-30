@@ -43,11 +43,12 @@ async def test_add_objects_normalizes_keys_and_injects_run(board):
     assert o["sources"][0]["run_id"] == "r1" and o["type"] == "organization"
 
 
-async def test_near_duplicate_by_label_reports_merged_into(board):
+async def test_same_label_with_different_ids_is_not_merged(board):
+    # identity is the source id; label look-alikes are separate objects (no guessing)
     b, ws, _ = board
     await b.add_objects(ws, "r1", [obj("ent_7", label="Росатом")])
     r = await b.add_objects(ws, "r2", [obj("Rosatom-id", label="  РОСАТОМ ")])
-    assert r["added"] == 0 and r["merged"] == [{"id": "Rosatom-id", "merged_into": "kb:ent_7"}]
+    assert r["added"] == 1 and not r.get("merged")
 
 
 async def test_rejects_without_source_or_id(board):
@@ -188,26 +189,19 @@ async def test_parallel_calls_in_one_workspace_do_not_duplicate():
     b = BoardService(store, bus, BoardLimits(objects_per_call=3, objects_per_run=4))
     ws = await store.create_workspace("t")
     r1, r2 = await asyncio.gather(
-        b.add_objects(ws.id, "r1", [obj("id-1", label="Росатом")]),
-        b.add_objects(ws.id, "r1", [obj("id-2", label="РОСАТОМ")]))
+        b.add_objects(ws.id, "r1", [obj("Росатом")]),
+        b.add_objects(ws.id, "r1", [obj("РОСАТОМ")]))
     assert r1["added"] + r2["added"] == 1
     assert len((await b.state(ws.id)).objects) == 1
 
 
-async def test_near_duplicate_with_type_other_matches_any_type(board):
+async def test_type_other_is_refined_by_a_later_specific_type(board):
     b, ws, _ = board
-    await b.add_objects(ws, "r1", [obj("likhachev", label="Алексей Лихачёв", type_="person")])
-    r = await b.add_objects(ws, "r2", [obj("Алексей Лихачёв", label="Алексей Лихачёв",
-                                           type_="other")])
-    assert r["merged"] == [{"id": "Алексей Лихачёв", "merged_into": "kb:likhachev"}]
-    await b.add_objects(ws, "r3", [obj("tass", label="ТАСС", type_="other")])
-    r = await b.add_objects(ws, "r4", [obj("tass-org", label="ТАСС", type_="organization")])
-    assert r["merged"] == [{"id": "tass-org", "merged_into": "kb:tass"}]
+    await b.add_objects(ws, "r1", [obj("tass", label="ТАСС", type_="other")])
+    await b.add_objects(ws, "r2", [obj("tass", label="ТАСС", type_="organization")])
+    await b.add_objects(ws, "r3", [obj("likh", label="Лихачёв", type_="person")])
+    await b.add_objects(ws, "r4", [obj("likh", label="Лихачёв", type_="other")])
     st = await b.state(ws)
     assert st.objects["kb:tass"].type == "organization"  # "other" is refined, not kept
-    assert st.objects["kb:likhachev"].type == "person"
-    assert "types_seen" not in st.objects["kb:likhachev"].attrs
-    # two specific different types are still different entities
-    r = await b.add_objects(ws, "r5", [obj("likh-place", label="Алексей Лихачёв",
-                                           type_="location")])
-    assert r["added"] == 1
+    assert st.objects["kb:likh"].type == "person"
+    assert "types_seen" not in st.objects["kb:likh"].attrs
