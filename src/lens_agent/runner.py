@@ -216,8 +216,13 @@ class Runner:
             similar = [o for o in await self._similar(board, run.text)
                        if o["key"] not in run.mentions]
             prompt = user_prompt(run.text, mentioned, similar=similar)
+            async def more(call_id: str, offset: int = 0) -> str:
+                """Следующие строки уже полученного результата источника, начиная с offset
+                (номер строки из «ещё: more(...)»). Не новый вызов источника: лимит не тратит."""
+                return await calls.more(call_id, offset)
+
             agent = Agent(self.model_factory(), instructions=INSTRUCTIONS,
-                          toolsets=list(servers.values()))
+                          toolsets=list(servers.values()), tools=[more])
             answer, usage = await asyncio.wait_for(
                 self._agent_run(agent, prompt, em, calls, run_usage), s.run_timeout_s)
             await em.emit("final", answer=answer, usage=usage,

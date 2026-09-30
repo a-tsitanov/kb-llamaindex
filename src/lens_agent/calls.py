@@ -6,7 +6,10 @@ What the model cannot be trusted with happens here:
   Provider tool-call ids are not trusted to be unique (some backends restart them each turn);
 - tool calls of a run are sequential (see ``runner``), so an identical call in the same turn
   already finds the first one's result in the cache;
-- source results are stored in full and cut to ``result_chars`` for the model;
+- source results are stored in full; the model sees numbered rows with a coverage header and
+  the name resolution (``view``), cut to ``result_chars`` by whole rows, and pages the rest
+  with the local ``more`` tool (not a source call: no source budget); results without entity
+  rows keep a plain character cut;
 - an identical repeated source call is answered from the run cache (not counted twice);
 - soft budgets per kind (source / board): over budget the call is not made and the model is
   told to finish with what it has;
@@ -44,6 +47,7 @@ from src.lens_agent.rows import (
 )
 from src.lens_agent.store import AgentStore, CallPayload
 from src.lens_agent.stream import RunEmitter
+from src.lens_agent.view import render
 
 _BOARD_WRITES = {"add_objects": "objects", "add_relations": "relations"}
 _BOARD_READS = ("get_board", "find_on_board", "get_object")
@@ -203,14 +207,54 @@ class RunCalls:
                                                   payload=result))
         text = _text(result)
         n = self.limits.result_chars
-        truncated = len(text) > n
-        body = text[:n] + (f"\n…усечено, полный результат: call_id={cid}" if truncated else "")
-        model_text = f"call_id={cid}\n{body}"
+        view = render(cid, result, n)
+        if view is not None:
+            model_text, truncated = view
+        else:
+            truncated = len(text) > n
+            body = text[:n] + (f"\n…усечено, продолжение: more(call_id=\"{cid}\", "
+                               f"offset={n})" if truncated else "")
+            model_text = f"call_id={cid}\n{body}"
         self.registry[cid] = CallInfo(cid, entry.name, name, entry.ns)
         self._payloads[cid] = result
         self._cache[key] = (cid, model_text)
         await self._result(cid, ok=True, t0=t0, text=text, result=result, truncated=truncated)
         return model_text
+
+    async def more(self, call_id: str, offset: int = 0) -> str:
+        """Next rows (or characters) of a stored source result — the ``more`` tool."""
+        cid = self.short_id(None)
+        args = {"call_id": call_id, "offset": offset}
+        await self.emitter.emit("tool_call", call_id=cid, server="lens", tool="more", args=args)
+        t0 = time.monotonic()
+        info = self.registry.get(str(call_id))
+        payload = self._payloads.get(info.call_id) if info else None
+        if payload is None:
+            msg = f"нет результата источника с call_id {call_id!r}"
+            await self._result(cid, ok=False, t0=t0, error=msg)
+            self._stall()
+            return msg
+        offset = max(0, int(offset or 0))
+        view = render(info.call_id, payload, self.limits.result_chars, offset)
+        if view is None:
+            text = _text(payload)
+            n = self.limits.result_chars
+            chunk = text[offset:offset + n]
+            nxt = offset + n
+            view = (f"call_id={info.call_id} символы {offset}–{offset + len(chunk)} из "
+                    f"{len(text)}\n{chunk}"
+                    + (f"\n…ещё: more(call_id=\"{info.call_id}\", offset={nxt})"
+                       if nxt < len(text) else ""), nxt < len(text))
+            empty = not chunk
+        else:
+            empty = offset >= len(self._parsed(info.call_id)[0])
+        text, truncated = view
+        await self._result(cid, ok=True, t0=t0, text=text, truncated=truncated)
+        if empty:
+            self._stall()
+        else:
+            self._progress()
+        return text
 
     def _namespaces(self) -> list[str]:
         return list(dict.fromkeys(i.namespace for i in self.registry.values()))

@@ -72,6 +72,22 @@ def kb_source() -> tuple[FastMCP, dict[str, int]]:
                                "label": "работает_в"}]}
 
     @mcp.tool
+    def neighbours(entity_name: str) -> dict:
+        """kb-tools shaped: resolution + ranked entities + relations (60 neighbours)."""
+        hit("neighbours")
+        ents = [{"entity_name": "Rosatom", "entity_type": "Organization",
+                 "description": "госкорпорация"}]
+        ents += [{"entity_name": f"Сосед {i}", "entity_type": "Person",
+                  "description": "описание " * 5, "relevance": round(1 - i / 100, 2),
+                  "match": "strong"} for i in range(60)]
+        return {"resolution": {"query": entity_name, "status": "ok",
+                               "chosen": {"name": "Rosatom", "matched_via": ["translit"]},
+                               "alternatives": []},
+                "centre_found": True, "entities": ents,
+                "relations": [{"src_id": f"Сосед {i}", "tgt_id": "Rosatom", "label": "WORKS_AT"}
+                              for i in range(60)]}
+
+    @mcp.tool
     def big() -> str:
         hit("big")
         return "x" * 10_000

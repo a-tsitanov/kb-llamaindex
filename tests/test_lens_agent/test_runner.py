@@ -65,7 +65,7 @@ async def test_result_truncated_for_model_but_stored_in_full():
         seen = []
         run, evs = await w.run(scripted([("kb_big", {})], "ok", seen=seen))
         ret = tool_returns(seen[-1])[-1]
-        assert ret.startswith("call_id=c1\n") and ret.endswith("полный результат: call_id=c1")
+        assert ret.startswith("call_id=c1\n") and ret.endswith('more(call_id="c1", offset=100)')
         assert len(ret) < 200 and of(evs, "tool_result")[0]["truncated"] is True
         assert len((await w.store.get_payload(run.id, "c1")).payload) == 10_000
 
@@ -488,3 +488,32 @@ async def test_relation_without_any_known_source_is_still_rejected():
             "ok", seen=seen))
         assert "нет связи" in tool_returns(seen[-1])[0]
         assert (await w.board.state(w.ws.id)).relations == {}
+
+
+async def test_rows_view_with_coverage_resolution_and_paging():
+    async with world(result_chars=1200) as w:
+        seen = []
+        run, evs = await w.run(scripted(
+            [("kb_neighbours", {"entity_name": "Росатом"})],
+            [("more", {"call_id": "c1", "offset": 12})],
+            [("board_add_objects", {"objects": [{"call_id": "c1", "row": 13}]})],
+            "ok", seen=seen))
+        first, page, added = tool_returns(seen[-1])[:3]
+        assert "⚠ «Росатом» в базе называется «Rosatom» (совпадение: translit)" in first
+        assert "[0] Rosatom (Organization) — госкорпорация" in first
+        assert "[1] Сосед 0 (Person)" in first and "| 1.0 strong" in first
+        assert "из 61" in first and 'more(call_id="c1", offset=' in first
+        assert "Сосед 0 —WORKS_AT→ Rosatom" in first and "[60]" not in first
+        assert page.splitlines()[1].startswith("сущности 12–") and "[12] Сосед 11" in page
+        assert w.hits["neighbours"] == 1  # paging reads the stored payload
+        st = await w.board.state(w.ws.id)
+        assert [o.label for o in st.objects.values()] == ["Сосед 12"]
+        more_call = [e for e in of(evs, "tool_call") if e["tool"] == "more"]
+        assert more_call and more_call[0]["server"] == "lens"
+
+
+async def test_more_with_an_unknown_call_id_is_an_error():
+    async with world() as w:
+        seen = []
+        await w.run(scripted([("more", {"call_id": "c9"})], "ok", seen=seen))
+        assert "нет результата источника" in tool_returns(seen[-1])[0]
