@@ -23,6 +23,7 @@ serialise on the GPU automatically.
 
 from __future__ import annotations
 
+import difflib
 import inspect
 import json
 from dataclasses import dataclass, field
@@ -32,7 +33,7 @@ from llama_index.core.schema import NodeWithScore, TextNode
 from loguru import logger
 from pydantic import BaseModel
 
-from src.retrieval.graph_rank import GraphRanker
+from src.retrieval.graph_rank import GraphRanker, entity_text
 
 # ── protocols ────────────────────────────────────────────────────────
 
@@ -163,13 +164,14 @@ async def graph_search(
     data = await graph_retriever.aretrieve(query, path_depth=depth)
     entities = getattr(data, "entities", []) or []
     relations = getattr(data, "relations", []) or []
+    meta: dict[str, Any] = {}
     if ranker is not None:
-        entities, relations = await ranker.rank(query, entities, relations)
+        entities, relations, meta = await ranker.rank_meta(query, entities, relations)
     chunks = list(getattr(data, "chunks", []) or [])
     return ToolResult(
         sources=chunks,
         observation=json.dumps(
-            {"entities": entities, "relations": relations},
+            {**meta, "entities": entities, "relations": relations},
             ensure_ascii=False,
         ),
     )
@@ -267,17 +269,48 @@ async def find_entity_by_name(
     )
 
 
+def _norm_name(name: Any) -> str:
+    return " ".join(str(name or "").casefold().replace("ё", "е").split())
+
+
+def _edge_context(entity_name: str, relations: list[dict]) -> dict[str, str]:
+    """neighbour name -> ``связь с <centre>: LABEL, …`` for the passages the ranker reads."""
+    centre, labels = _norm_name(entity_name), {}
+    for r in relations:
+        src, tgt = r.get("src_id"), r.get("tgt_id")
+        other = tgt if _norm_name(src) == centre else src if _norm_name(tgt) == centre else None
+        if other is not None:
+            labels.setdefault(other, []).append(str(r.get("label") or "RELATED"))
+    return {n: f"связь с {entity_name}: {', '.join(dict.fromkeys(ls))}"
+            for n, ls in labels.items()}
+
+
 async def _rank_neighbours(ranker: GraphRanker, query: str, entity_name: str,
                            entities: list[dict], relations: list[dict]):
-    """Rank a neighbourhood by the question without the centre's own name: a cross-encoder
-    otherwise rewards look-alike names ("Алексей Чихачев" for "Алексей Лихачёв"). The centre
-    entity itself stays first, unranked."""
-    centre = {w.casefold() for w in entity_name.split()}
-    rank_query = " ".join(w for w in query.split() if w.casefold() not in centre) or query
-    head = [e for e in entities if e.get("entity_name") == entity_name]
-    rest = [e for e in entities if e.get("entity_name") != entity_name]
-    ranked, relations = await ranker.rank(rank_query, rest, relations)
-    return head + ranked, relations
+    """Rank a neighbourhood by the question. Each passage carries the neighbour's edge to the
+    centre (``Rosatom (Organization) | связь с Алексей Лихачёв: HEADS``), so an entity that
+    is linked to the centre outranks a look-alike name that is not; the question keeps the
+    centre's name. The centre entity itself stays first, unranked; ``meta`` says whether it
+    was found at all (the store may have matched the name to other entities)."""
+    centre = _norm_name(entity_name)
+    head = [e for e in entities if _norm_name(e.get("entity_name")) == centre]
+    rest = [e for e in entities if _norm_name(e.get("entity_name")) != centre]
+    ctx = _edge_context(entity_name, relations)
+    texts = [entity_text(e, ctx.get(e.get("entity_name"), f"нет прямой связи с {entity_name}"))
+             for e in rest]
+    ranked, relations, meta = await ranker.rank_meta(query, rest, relations, texts)
+    return head + ranked, relations, meta
+
+
+def _centre_meta(entity_name: str, entities: list[dict]) -> dict[str, Any]:
+    centre = _norm_name(entity_name)
+    if any(_norm_name(e.get("entity_name")) == centre for e in entities):
+        return {"centre_found": True}
+    names = [str(e.get("entity_name") or "") for e in entities]
+    closest = difflib.get_close_matches(entity_name, names, n=3, cutoff=0.5)
+    return {"centre_found": False, "closest": closest,
+            "centre_note": (f"сущности «{entity_name}» нет в результате — это соседи похожих "
+                            "сущностей, а не её; уточни имя (find_entity_by_name)")}
 
 
 async def find_neighbours(
@@ -304,13 +337,15 @@ async def find_neighbours(
     data = await graph_retriever.aretrieve(entity_name, path_depth=hops)
     entities = getattr(data, "entities", []) or []
     relations = getattr(data, "relations", []) or []
+    meta = _centre_meta(entity_name, entities)
     if ranker is not None and query.strip():
-        entities, relations = await _rank_neighbours(ranker, query, entity_name,
-                                                     entities, relations)
+        entities, relations, rank_meta = await _rank_neighbours(
+            ranker, query, entity_name, entities, relations)
+        meta.update(rank_meta)
     return ToolResult(
         sources=[],
         observation=json.dumps(
-            {"entities": entities, "relations": relations},
+            {**meta, "entities": entities, "relations": relations},
             ensure_ascii=False,
         ),
     )

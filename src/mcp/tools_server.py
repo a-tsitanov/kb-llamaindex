@@ -35,6 +35,7 @@ import asyncio
 import json
 import math
 import os
+import threading
 from calendar import monthrange
 from datetime import date, timedelta
 from typing import Any
@@ -158,17 +159,27 @@ _RERANK_ON = os.environ.get("MCP_TOOLS_RERANK", "true").strip().lower() == "true
 _RERANK_KEEP = int(os.environ.get("MCP_TOOLS_RERANK_KEEP", "32"))
 _PREFILTER_KEEP = int(os.environ.get("MCP_TOOLS_PREFILTER_KEEP", "128"))
 _VECTOR_POOL = int(os.environ.get("MCP_TOOLS_VECTOR_POOL", "30"))
+_RANK_BUDGET_S = float(os.environ.get("MCP_TOOLS_RANK_BUDGET_S", "20"))
+_ce_lock = threading.Lock()  # tool calls run in parallel: load the 2 GB model once
+_ce_slot = asyncio.Semaphore(1)  # one predict at a time: torch already uses every core
 
 
 def _cross_encoder():
     if "cross_encoder" not in _deps:
-        try:
-            from src.retrieval.reranker import build_reranker
-            _deps["cross_encoder"] = build_reranker(top_n=_VECTOR_POOL)
-        except Exception as exc:  # no torch in a lean image, model missing, ...
-            logger.warning("MCP-2: reranker unavailable, results stay unranked: {e}", e=exc)
-            _deps["cross_encoder"] = None
+        with _ce_lock:
+            if "cross_encoder" not in _deps:
+                try:
+                    from src.retrieval.reranker import build_reranker
+                    _deps["cross_encoder"] = build_reranker(top_n=_VECTOR_POOL)
+                except Exception as exc:  # no torch in a lean image, model missing, ...
+                    logger.warning("MCP-2: reranker unavailable, results stay unranked: {e}",
+                                   e=exc)
+                    _deps["cross_encoder"] = None
     return _deps["cross_encoder"]
+
+
+async def _load_cross_encoder():
+    return await asyncio.to_thread(_cross_encoder) if _RERANK_ON else None
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -183,30 +194,38 @@ async def _dense_scores(query: str, texts: list[str]) -> list[float]:
     return [_cosine(q, v) for v in vs]
 
 
-async def _cross_scores(query: str, texts: list[str]) -> list[float]:
-    ce = _cross_encoder()
+async def _predict(pairs: list[tuple[str, str]]) -> list[float]:
+    ce = await _load_cross_encoder()
     if ce is None:
         raise RuntimeError("cross-encoder unavailable")
-    scores = await asyncio.to_thread(ce._model.predict, [(query, t) for t in texts])
+    async with _ce_slot:
+        scores = await asyncio.to_thread(ce._model.predict, pairs)
     return [float(x) for x in scores]
+
+
+async def _cross_scores(query: str, texts: list[str]) -> list[float]:
+    return await _predict([(query, t) for t in texts])
 
 
 async def _ranker() -> GraphRanker | None:
     if not _RERANK_ON:
         return None
     await _init()
-    await asyncio.to_thread(_cross_encoder)  # load once, off the event loop
-    return GraphRanker(prefilter=_dense_scores,
-                       rerank=_cross_scores if _deps.get("cross_encoder") else None,
-                       prefilter_keep=_PREFILTER_KEEP, rerank_keep=_RERANK_KEEP)
+    ce = await _load_cross_encoder()
+    return GraphRanker(prefilter=_dense_scores, rerank=_cross_scores if ce else None,
+                       prefilter_keep=_PREFILTER_KEEP, rerank_keep=_RERANK_KEEP,
+                       budget_s=_RANK_BUDGET_S)
 
 
 async def _rerank_chunks(query: str, nodes: list, top_k: int) -> list:
-    ce = _deps.get("cross_encoder")
-    if ce is None:
-        return nodes[:top_k]
-    ranked = await asyncio.to_thread(ce.postprocess_nodes, nodes, query_str=query)
-    return ranked[:top_k]
+    """Cross-encoder order of the whole retrieved pool, cut to ``top_k`` (a pool larger than
+    the reranker's own ``top_n`` is never silently truncated)."""
+    if not nodes:
+        return nodes
+    scores = await _predict([(query, n.node.get_content()) for n in nodes])
+    for n, s in zip(nodes, scores, strict=True):
+        n.score = s
+    return sorted(nodes, key=lambda n: -n.score)[:top_k]
 
 
 async def _g():
@@ -242,7 +261,7 @@ async def vector_search(query: str, top_k: int = 10) -> dict[str, Any]:
     with its `doc_id`.
     """
     await _init()
-    if _RERANK_ON and await _ranker() is not None and _deps.get("cross_encoder"):
+    if await _load_cross_encoder() is not None:
         pool = _deps["index"].as_retriever(similarity_top_k=max(_VECTOR_POOL, top_k))
         r = await atomic_tools.vector_search(pool, query=query, top_k=top_k,
                                              rerank=_rerank_chunks)
@@ -773,6 +792,8 @@ def main() -> None:
         "kb-llamaindex-tools",
         transport=args["transport"], host=args["host"], port=args["port"],
     )
+    if _RERANK_ON:  # warm the cross-encoder so the first ranked call does not pay the load
+        threading.Thread(target=_cross_encoder, name="ce-warmup", daemon=True).start()
     if args["transport"] == "stdio":
         mcp.run(transport="stdio")
     else:
