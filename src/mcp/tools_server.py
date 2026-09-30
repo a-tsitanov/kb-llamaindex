@@ -233,6 +233,43 @@ async def _g():
     return _deps["graph"]
 
 
+# ── name resolution (src/graph/name_resolution.py) ─────────────────
+# Every name-taking tool resolves the name to ONE canonical entity first and reports it in
+# `resolution`. MCP_TOOLS_RESOLVE=false restores the old per-tool matching.
+_RESOLVE_ON = os.environ.get("MCP_TOOLS_RESOLVE", "true").strip().lower() == "true"
+
+
+async def _resolver():
+    if not _RESOLVE_ON:
+        return None
+    await _init()
+    if "resolver" not in _deps:
+        gs = _deps.get("graph_store")
+        if gs is None or settings.graph.backend != "nebula":
+            _deps["resolver"] = None
+        else:
+            from src.graph.name_resolution import NameResolver, nebula_fetch
+            from src.storage.entity_lexicon import EntityLexicon
+            _deps["resolver"] = NameResolver(EntityLexicon(), nebula_fetch(gs))
+    return _deps["resolver"]
+
+
+async def _resolve_all(names: list[str]) -> tuple[list[str], list[dict], list[dict]]:
+    """→ (canonical names that resolved, every resolution, the ones that did not)."""
+    resolver = await _resolver()
+    if resolver is None:
+        return list(names), [], []
+    resolved, report, missing = [], [], []
+    for n in names:
+        res = await resolver.resolve(n)
+        report.append(res.to_dict())
+        if res.name is None:
+            missing.append(res.to_dict())
+        else:
+            resolved.append(res.name)
+    return resolved, report, missing
+
+
 async def _c():
     await _init()
     return _deps["chunks"]
@@ -303,10 +340,12 @@ async def graph_walk(
     to Y", "trace X's network N hops out". Optionally restrict to
     `rel_filter` relationship types. Returns entities + relations.
     NOT FOR: a single hop (use `find_neighbours`) or discovery without a
-    start entity (use `graph_search` / `find_entity_by_name` first)."""
+    start entity (use `graph_search` / `find_entity_by_name` first).
+    `start_entity` is resolved to one graph entity first (`resolution` says which);
+    an unknown or ambiguous name returns candidates and walks nothing."""
     r = await atomic_tools.graph_walk(
         await _g(), start_entity=start_entity, hops=hops,
-        rel_filter=rel_filter,
+        rel_filter=rel_filter, resolver=await _resolver(),
     )
     return json.loads(r.observation)
 
@@ -321,9 +360,11 @@ async def find_entity_by_id(
     USE FOR: "whose number is +7…", "find INN 7707…" — when the user
     gives an exact identifier. One entity expected.
     PREFER INSTEAD: `find_entity_by_name` when you only have a partial /
-    approximate name; `graph_search` for non-name semantic queries."""
+    approximate name; `graph_search` for non-name semantic queries.
+    Case, ё/е, a merged-away name and another script ("Rosatom" / «Росатом») still
+    match; otherwise `status: not_found` with candidates."""
     r = await atomic_tools.find_entity_by_id(
-        await _g(), name=name, entity_type=entity_type,
+        await _g(), name=name, entity_type=entity_type, resolver=await _resolver(),
     )
     return json.loads(r.observation)
 
@@ -332,11 +373,11 @@ async def find_entity_by_id(
 async def find_entity_by_name(
     query: str, limit: int = 10,
 ) -> dict[str, Any]:
-    """Entity lookup by NAME prefix ("Иванов" → "Иванов Иван Иванович";
-    "Алексей Лихачёв" → itself first). Pass the name only — "Алексей Лихачёв",
-    not "Лихачёв Алексей Росатом генеральный директор": extra words match
-    unrelated names ("Генеральный директор"). A surname alone does not find
-    "Имя Фамилия" (prefix index) — use `graph_search` for that and for questions.
+    """Entity lookup by NAME: exact, any case / ё-е, a name merged into another entity
+    («Росатом» → "Rosatom"), the other script ("Likhachev"), a surname inside a full name
+    ("Лихачев" → «Алексей Лихачёв»), a prefix or a close spelling. Each row says how it
+    matched (`matched_via`, `score`); `resolution.chosen` is the best one. Pass the name
+    only — not a question: extra words match unrelated names.
 
     USE FOR: resolving an approximate / partial name into canonical
     entities — usually the first step before drilling in with
@@ -345,14 +386,14 @@ async def find_entity_by_name(
     `graph_search` for non-name semantic queries. Returns entity rows
     only (no chunks)."""
     r = await atomic_tools.find_entity_by_name(
-        await _g(), query=query, limit=limit,
+        await _g(), query=query, limit=limit, resolver=await _resolver(),
     )
     return json.loads(r.observation)
 
 
 @mcp.tool(timeout=1800)
 async def find_neighbours(
-    entity_name: str, hops: int = 1, query: str = "",
+    entity_name: str, hops: int = 1, query: str = "", types: list[str] | None = None,
 ) -> dict[str, Any]:
     """Neighbours + relations of a KNOWN entity, up to `hops` triplet-hops.
 
@@ -365,10 +406,15 @@ async def find_neighbours(
     yet; `find_entity_*` to resolve the entity first.
     Pass the user's question as `query` to get the neighbours most relevant to
     it first (a well-known person has hundreds of neighbours; without `query`
-    they come in arbitrary order)."""
+    they come in arbitrary order). `types` keeps only those entity types
+    (e.g. ["Person"] for «люди, связанные с X»).
+    `entity_name` is resolved to one graph entity first (`resolution`); an unknown or
+    ambiguous name returns candidates and no neighbours. `relevance_note` means nothing
+    matched the question well — do not present that list as the answer."""
     r = await atomic_tools.find_neighbours(
         await _g(), entity_name=entity_name, hops=hops, query=query,
         ranker=await _ranker() if query.strip() else None,
+        resolver=await _resolver(), types=types,
     )
     return json.loads(r.observation)
 
@@ -443,13 +489,19 @@ async def graph_personalized_pagerank(
     (personalized) PageRank.
 
     USE FOR: "what's most connected to X and Y" — centrality relative to
-    `seeds` (exact entity names). Resolve names first with
-    `find_entity_by_name` if unsure. Empty seeds → empty result. Returns
-    top_n {name, score}; empty if Neo4j/GDS is unavailable."""
+    `seeds` (entity names; each is resolved, see `resolution` / `unresolved`).
+    Empty seeds → empty result. Returns top_n {name, score}; empty if the graph
+    is unavailable."""
     from src.graph import analysis
-    return {"top": await analysis.personalized_pagerank(
-        await _gs(), seeds, top_n=top_n,
-    )}
+    resolved, report, missing = await _resolve_all(seeds)
+    out: dict[str, Any] = {"top": await analysis.personalized_pagerank(
+        await _gs(), resolved, top_n=top_n,
+    ) if resolved else []}
+    if report:
+        out["resolution"] = report
+    if missing:
+        out["unresolved"] = [m["query"] for m in missing]
+    return out
 
 
 @mcp.tool(timeout=1800)
@@ -467,16 +519,21 @@ async def graph_components() -> dict[str, Any]:
 async def graph_shortest_path(
     source: str, target: str, max_hops: int = 6,
 ) -> dict[str, Any]:
-    """Shortest undirected path between two entities by EXACT name.
+    """Shortest undirected path between two entities.
 
     USE FOR: "how are X and Y connected" — the concrete chain of entities
-    between them. Resolve names first with `find_entity_by_name` if
-    unsure. Returns {path:[names], hops}; {path:[], hops:-1} when there's
-    no path (or Neo4j unavailable)."""
+    between them. Both names are resolved first (`resolution`); a name that
+    does not resolve is listed in `unresolved`. Returns {path:[names], hops};
+    {path:[], hops:-1} when there's no path (or the graph is unavailable)."""
     from src.graph import analysis
-    return await analysis.shortest_path(
-        await _gs(), source, target, max_hops=max_hops,
+    resolved, report, missing = await _resolve_all([source, target])
+    if missing:
+        return {"path": [], "hops": -1, "resolution": report,
+                "unresolved": [m["query"] for m in missing]}
+    out = await analysis.shortest_path(
+        await _gs(), resolved[0], resolved[1], max_hops=max_hops,
     )
+    return {**out, "resolution": report} if report else out
 
 
 @mcp.tool(timeout=1800)
@@ -774,9 +831,17 @@ async def polarity_evolution(
     NOT FOR: mention counts (use `topic_trend`, whose rows DO feed
     `stat_align` unchanged)."""
     await _init()
-    return await _polarity_evolution(
+    report = None
+    if name:
+        resolved, report, missing = await _resolve_all([name])
+        if missing:
+            return {"name": name, "rel_type": rel_type, "rows": [],
+                    "resolution": report[0]}
+        name = resolved[0]
+    out = await _polarity_evolution(
         _deps.get("graph_store"), name, rel_type,
     )
+    return {**out, "resolution": report[0]} if report else out
 
 
 # Note: filter_by_metadata is not exposed via MCP-2.  It only makes

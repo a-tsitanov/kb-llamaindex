@@ -55,3 +55,14 @@ def test_relation_rows_and_matching_either_direction():
     hit = match_relation(rels, {r0.tgt.casefold()}, {r0.src.casefold()})
     assert hit is not None and hit.src == r0.src
     assert match_relation(rels, {"никто"}, {"ничто"}) is None
+
+
+def test_resolution_block_is_not_a_result_row():
+    p = {"resolution": {"query": "Росатом", "status": "ok",
+                        "chosen": {"name": "Rosatom", "label": "Organization"},
+                        "alternatives": [{"name": "Роснано", "label": "Organization"}]},
+         "entities": [{"entity_name": "Rosatom", "entity_type": "Organization",
+                       "description": "госкорпорация"}]}
+    rows = entity_rows(p)
+    assert [(r.id, r.type) for r in rows] == [("Rosatom", "Organization")]
+    assert match_entity(rows, {"id": "Роснано"}) is None

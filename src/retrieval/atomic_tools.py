@@ -177,12 +177,32 @@ async def graph_search(
     )
 
 
+def _unresolved(res: Any) -> dict[str, Any]:
+    """Tool output when a name did not resolve to one entity: say so, show the candidates,
+    walk nothing (a walk from a look-alike is exactly the silent substitution to avoid)."""
+    names = [c.name for c in res.candidates()]
+    if res.status == "not_found":
+        note = (f"«{res.query}» не найдено в графе — проверь имя (find_entity_by_name) "
+                "или ищи по теме (graph_search)")
+    else:
+        note = (f"«{res.query}» неоднозначно: {', '.join(names)} — вызови снова с точным "
+                "именем одного из кандидатов")
+    return {"resolution": res.to_dict(), "note": note, "entities": [], "relations": []}
+
+
+def _entity_row(c: Any) -> dict[str, Any]:
+    return {"entity_name": c.name, "entity_type": c.label, "description": c.description,
+            "mention_count": c.mention_count, "matched_via": c.matched_via,
+            "matched_text": c.matched_text, "score": round(c.score, 3)}
+
+
 async def graph_walk(
     graph_retriever: GraphRetrieverProtocol | None,
     *,
     start_entity: str,
     hops: int = 2,
     rel_filter: list[str] | None = None,
+    resolver: Any = None,
 ) -> ToolResult:
     """Bounded multi-hop graph traversal from a known entity.
 
@@ -202,6 +222,13 @@ async def graph_walk(
             sources=[],
             observation=json.dumps({"entities": [], "relations": []}),
         )
+    head: dict[str, Any] = {}
+    if resolver is not None:
+        res = await resolver.resolve(start_entity)
+        if res.name is None:
+            return ToolResult(sources=[], observation=json.dumps(
+                _unresolved(res), ensure_ascii=False))
+        start_entity, head = res.name, {"resolution": res.to_dict()}
     safe_hops = max(1, min(int(hops), GRAPH_WALK_MAX_HOPS))
     data = await graph_retriever.awalk(
         start_entity, hops=safe_hops, rel_filter=rel_filter,
@@ -212,7 +239,7 @@ async def graph_walk(
     return ToolResult(
         sources=chunks,
         observation=json.dumps(
-            {"entities": entities, "relations": relations},
+            {**head, "entities": entities, "relations": relations},
             ensure_ascii=False,
         ),
     )
@@ -223,8 +250,22 @@ async def find_entity_by_id(
     *,
     name: str,
     entity_type: str | None = None,
+    resolver: Any = None,
 ) -> ToolResult:
-    """Exact lookup by canonical name (E.164 phone, INN, email …)."""
+    """Exact lookup by canonical name (E.164 phone, INN, email …).
+
+    With a ``resolver``: strict resolution (exact / case / alias / transliteration) → that one
+    entity; otherwise ``not_found`` with the fuzzy candidates — never the neighbourhood of a
+    look-alike."""
+    if resolver is not None:
+        res = await resolver.resolve(name, label=entity_type, strict=True)
+        if res.name is not None:
+            out = {"resolution": res.to_dict(), "entities": [_entity_row(res.chosen)]}
+        else:
+            fuzzy = await resolver.resolve(name, label=entity_type)
+            out = {**_unresolved(res),
+                   "candidates": [_entity_row(c) for c in fuzzy.candidates()]}
+        return ToolResult(sources=[], observation=json.dumps(out, ensure_ascii=False))
     if graph_retriever is None:
         return ToolResult(
             sources=[], observation=json.dumps({"entities": []}),
@@ -246,6 +287,7 @@ async def find_entity_by_name(
     *,
     query: str,
     limit: int = 10,
+    resolver: Any = None,
 ) -> ToolResult:
     """Find entities whose NAME matches the query via the full-text index.
 
@@ -253,11 +295,22 @@ async def find_entity_by_name(
     the exact ``find_entity_by_id`` and the similarity ``graph_search`` on
     large graphs.  Returns entity rows only (no chunks); empty for a None
     retriever."""
+    found: list[dict] = []
+    head: dict[str, Any] = {}
+    if resolver is not None:
+        res = await resolver.resolve(query, k=limit)
+        found = [_entity_row(c) for c in res.candidates()]
+        head = {"resolution": res.to_dict()}
+        if len(found) >= limit or graph_retriever is None:
+            return ToolResult(sources=[], observation=json.dumps(
+                {**head, "entities": found[:limit]}, ensure_ascii=False))
     if graph_retriever is None:
         return ToolResult(sources=[], observation=json.dumps({"entities": []}))
     data = await graph_retriever.afind_entities_by_name(query, limit=limit)
-    entities = getattr(data, "entities", []) or []
-    payload: dict[str, Any] = {"entities": entities}
+    seen = {e["entity_name"] for e in found}
+    entities = found + [e for e in (getattr(data, "entities", []) or [])
+                        if e.get("entity_name") not in seen]
+    payload: dict[str, Any] = {**head, "entities": entities[:limit]}
     # An `error` means the lookup could not run — NOT that the graph has
     # no such entity. Pass it on: a caller cannot tell the two apart from
     # an empty list, and for a day this tool answered "Украина is not
@@ -273,16 +326,15 @@ def _norm_name(name: Any) -> str:
     return " ".join(str(name or "").casefold().replace("ё", "е").split())
 
 
-def _edge_context(entity_name: str, relations: list[dict]) -> dict[str, str]:
-    """neighbour name -> ``связь с <centre>: LABEL, …`` for the passages the ranker reads."""
+def _edges_to_centre(entity_name: str, relations: list[dict]) -> dict[str, list[str]]:
+    """neighbour name -> labels of its edges to the centre (one per edge)."""
     centre, labels = _norm_name(entity_name), {}
     for r in relations:
         src, tgt = r.get("src_id"), r.get("tgt_id")
         other = tgt if _norm_name(src) == centre else src if _norm_name(tgt) == centre else None
         if other is not None:
             labels.setdefault(other, []).append(str(r.get("label") or "RELATED"))
-    return {n: f"связь с {entity_name}: {', '.join(dict.fromkeys(ls))}"
-            for n, ls in labels.items()}
+    return labels
 
 
 async def _rank_neighbours(ranker: GraphRanker, query: str, entity_name: str,
@@ -295,11 +347,30 @@ async def _rank_neighbours(ranker: GraphRanker, query: str, entity_name: str,
     centre = _norm_name(entity_name)
     head = [e for e in entities if _norm_name(e.get("entity_name")) == centre]
     rest = [e for e in entities if _norm_name(e.get("entity_name")) != centre]
-    ctx = _edge_context(entity_name, relations)
-    texts = [entity_text(e, ctx.get(e.get("entity_name"), f"нет прямой связи с {entity_name}"))
+    edges = _edges_to_centre(entity_name, relations)
+    texts = [entity_text(e, f"связь с {entity_name}: {', '.join(dict.fromkeys(ls))}"
+                         if (ls := edges.get(e.get("entity_name"))) else
+                         f"нет прямой связи с {entity_name}")
              for e in rest]
     ranked, relations, meta = await ranker.rank_meta(query, rest, relations, texts)
+    if "relevance_note" in meta:
+        # a vague question («с кем связан?») scores everything near zero: fall back to how
+        # strongly each neighbour is tied to the centre (number of edges to it)
+        ranked = sorted(ranked, key=lambda e: -len(edges.get(e.get("entity_name"), [])))
+        meta["order"] = "edges_to_centre"
     return head + ranked, relations, meta
+
+
+def _only_types(entity_name: str, entities: list[dict], relations: list[dict],
+                types: list[str]) -> tuple[list[dict], list[dict]]:
+    """Keep the centre and the neighbours of the given entity types (``["Person"]`` for
+    «люди …»): a type is a filter, not something a cross-encoder can rank."""
+    want = {str(x).casefold() for x in types}
+    centre = _norm_name(entity_name)
+    kept = [e for e in entities if _norm_name(e.get("entity_name")) == centre
+            or str(e.get("entity_type") or "").casefold() in want]
+    names = {e.get("entity_name") for e in kept}
+    return kept, [r for r in relations if r.get("src_id") in names and r.get("tgt_id") in names]
 
 
 def _centre_meta(entity_name: str, entities: list[dict]) -> dict[str, Any]:
@@ -320,6 +391,8 @@ async def find_neighbours(
     hops: int = 1,
     query: str = "",
     ranker: GraphRanker | None = None,
+    resolver: Any = None,
+    types: list[str] | None = None,
 ) -> ToolResult:
     """Neighbours of an entity: matched node + relations up to ``hops``
     triplet-hops out. With a ``query`` and a ``ranker`` the neighbours come
@@ -334,10 +407,24 @@ async def find_neighbours(
             sources=[],
             observation=json.dumps({"entities": [], "relations": []}),
         )
-    data = await graph_retriever.aretrieve(entity_name, path_depth=hops)
+    head: dict[str, Any] = {}
+    if resolver is not None:
+        # resolve first, then the real neighbourhood of that ONE vertex (the similarity
+        # retriever seeds from every look-alike: «Росатом» → «Российский суд» …)
+        res = await resolver.resolve(entity_name)
+        if res.name is None:
+            return ToolResult(sources=[], observation=json.dumps(
+                _unresolved(res), ensure_ascii=False))
+        entity_name, head = res.name, {"resolution": res.to_dict()}
+        data = await graph_retriever.awalk(entity_name, hops=hops)
+    else:
+        data = await graph_retriever.aretrieve(entity_name, path_depth=hops)
     entities = getattr(data, "entities", []) or []
     relations = getattr(data, "relations", []) or []
-    meta = _centre_meta(entity_name, entities)
+    meta = {**head, **_centre_meta(entity_name, entities)}
+    if types:
+        entities, relations = _only_types(entity_name, entities, relations, types)
+        meta["types"] = list(types)
     if ranker is not None and query.strip():
         entities, relations, rank_meta = await _rank_neighbours(
             ranker, query, entity_name, entities, relations)

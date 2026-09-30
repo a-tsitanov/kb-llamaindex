@@ -19,6 +19,8 @@ _ID_FIELDS = ("id", "entity_name", "name")
 _LABEL_FIELDS = ("entity_name", "name", "title", "id")
 _TYPE_FIELDS = ("entity_type", "type", "kind")
 _ENDS = (("src_id", "tgt_id"), ("from", "to"), ("source", "target"))
+# metadata about the call, not result rows (kb-tools: how the name was resolved)
+_SKIP_KEYS = frozenset({"resolution"})
 
 
 @dataclass
@@ -47,7 +49,8 @@ def _walk(payload: Any):
             stack.extend(reversed(node))
         elif isinstance(node, dict):
             yield node
-            stack.extend(reversed([v for v in node.values() if isinstance(v, list | dict)]))
+            stack.extend(reversed([v for k, v in node.items()
+                                   if k not in _SKIP_KEYS and isinstance(v, list | dict)]))
 
 
 def _first(d: dict, fields: tuple[str, ...]) -> str:
