@@ -88,7 +88,7 @@ class NoteEl(BaseModel):
 
 OpKind = Literal[
     "add_objects", "add_relations", "add_view", "add_note",
-    "hide", "show", "pin", "unpin", "set_mode", "merge", "undo",
+    "hide", "show", "pin", "unpin", "set_mode", "merge", "undo", "redirect",
 ]
 
 

@@ -72,9 +72,9 @@ def build_board_mcp(board_of: Callable[[], BoardService]) -> FastMCP:
             raise ToolError(f"нет расследования {ws!r}")
         return board, ws, run
 
-    async def call(fn, *args):  # BoardError → message the agent can act on
+    async def call(fn, *args, **kwargs):  # BoardError → message the agent can act on
         try:
-            return await fn(*args)
+            return await fn(*args, **kwargs)
         except BoardError as e:
             raise ToolError(str(e)) from e
 
@@ -116,6 +116,13 @@ def build_board_mcp(board_of: Callable[[], BoardService]) -> FastMCP:
         Проходят только связи, которые есть в результате источника; вид связи берётся оттуда."""
         board, ws, run = await ctx()
         return await call(board.add_relations, ws, run, relations)
+
+    @mcp.tool
+    async def redirect(from_key: str, to_key: str, to_id: str = "", via: str = "") -> dict:
+        """Служебный (вызывает агент-сервис, не модель): источник переименовал сущность —
+        объект from_key переезжает на to_key, сохраняя закрепление и связи."""
+        board, ws, run = await ctx()
+        return await call(board.redirect, ws, run, from_key, to_key, to_id=to_id, via=via)
 
     @mcp.tool
     async def add_note(text: str) -> dict:

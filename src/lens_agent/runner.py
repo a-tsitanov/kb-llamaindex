@@ -212,6 +212,12 @@ class Runner:
             board = servers.get(board_entry.name) if board_entry else None
             if board is None:
                 raise RunFailure("internal", "доска недоступна (board MCP)")
+            calls.board_direct = board.direct_call_tool
+            # hook-only board ops stay out of the model's tool list
+            hidden = {f"{board_entry.name}_redirect"}
+            toolsets = [srv.filtered(lambda _ctx, td: td.name not in hidden)
+                        if name == board_entry.name else srv
+                        for name, srv in servers.items()]
             mentioned = await self._mentions(board, run.mentions)
             similar = [o for o in await self._similar(board, run.text)
                        if o["key"] not in run.mentions]
@@ -222,7 +228,7 @@ class Runner:
                 return await calls.more(call_id, offset)
 
             agent = Agent(self.model_factory(), instructions=INSTRUCTIONS,
-                          toolsets=list(servers.values()), tools=[more])
+                          toolsets=toolsets, tools=[more])
             answer, usage = await asyncio.wait_for(
                 self._agent_run(agent, prompt, em, calls, run_usage), s.run_timeout_s)
             await em.emit("final", answer=answer, usage=usage,

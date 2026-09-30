@@ -205,3 +205,35 @@ async def test_type_other_is_refined_by_a_later_specific_type(board):
     assert st.objects["kb:tass"].type == "organization"  # "other" is refined, not kept
     assert st.objects["kb:likh"].type == "person"
     assert "types_seen" not in st.objects["kb:likh"].attrs
+
+
+async def test_redirect_moves_the_object_keeping_pin_relations_and_label(board):
+    b, ws, _ = board
+    await b.add_objects(ws, "r1", [obj("Росатом", attrs={"source_id": "Росатом"}),
+                                   obj("Лихачёв", type_="person")])
+    await b.add_relations(ws, "r1", [{"from": "kb:лихачев", "to": "kb:росатом",
+                                      "kind": "работает_в", "source": src()}])
+    await b.pin(ws, "kb:росатом", 10, 20)
+    r = await b.redirect(ws, "r2", "kb:росатом", "kb:rosatom", to_id="Rosatom", via="translit")
+    assert r == {"redirected": True, "from": "kb:росатом", "key": "kb:rosatom"}
+    st = await b.state(ws)
+    assert "kb:росатом" not in st.objects
+    o = st.objects["kb:rosatom"]
+    assert o.label == "Росатом" and o.attrs["resolved_from"] == "Росатом"
+    assert o.attrs["source_id"] == "Rosatom"
+    assert st.pins["kb:rosatom"] == {"x": 10, "y": 20}
+    assert [(x.from_key, x.to_key) for x in st.relations.values()] == [("kb:лихачев",
+                                                                        "kb:rosatom")]
+    # old key still resolves; a later write under the old key lands on the new object
+    await b.add_objects(ws, "r3", [obj("РОСАТОМ")])
+    assert set((await b.state(ws)).objects) == {"kb:rosatom", "kb:лихачев"}
+
+
+async def test_redirect_is_a_noop_for_objects_not_on_the_board_and_undo_reverts_it(board):
+    b, ws, _ = board
+    r = await b.redirect(ws, "r1", "kb:росатом", "kb:rosatom")
+    assert r["redirected"] is False and (await b.state(ws)).objects == {}
+    await b.add_objects(ws, "r1", [obj("Росатом")])
+    await b.redirect(ws, "r2", "kb:росатом", "kb:rosatom")
+    await b.undo(ws, "r3")
+    assert set((await b.state(ws)).objects) == {"kb:росатом"}

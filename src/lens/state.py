@@ -113,6 +113,19 @@ def _apply(st: CanvasState, op: Op) -> None:
         keep = st.canon(p["keep"])
         _merge(st, keep, st.canon(p["drop"]))
         st.touched[keep] = op.seq
+    elif op.kind == "redirect":
+        # the source renamed the entity (KB ER merge: «Росатом» → "Rosatom"): the object moves
+        # to the new key, keeps its pins / relations / label, and remembers what it was
+        to, frm = st.canon(p["to"]), st.canon(p["from"])
+        label = st.objects[frm].label if frm in st.objects else None
+        _merge(st, to, frm)
+        obj = st.objects.get(to)
+        if obj is not None:
+            if label:
+                obj.attrs.setdefault("resolved_from", label)
+            if p.get("to_id"):
+                obj.attrs["source_id"] = p["to_id"]
+        st.touched[to] = op.seq
 
 
 def _merge(st: CanvasState, keep: str, drop: str) -> None:

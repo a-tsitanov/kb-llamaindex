@@ -19,6 +19,10 @@ What the model cannot be trusted with happens here:
   copied from that row (never from the model); no matching row → rejected with the nearest
   rows. A relation must match a relation row of a source result (its kind comes from the
   row). The full ``source {server, tool, call_id, namespace}`` is attached by the hook;
+- when a source says it resolved the asked name to another one by an exact-level match
+  (``resolution`` block: casefold / alias / translit — a KB rename after an ER merge), an
+  object already on the board under the asked name is moved to the new key (board
+  ``redirect``, hidden from the model);
 - board reads repeated while this run has not changed the board are answered from the cache
   with a nudge to add objects or answer (a weak model otherwise re-reads the board in a loop);
 - consecutive calls that bring nothing new (cache hits, over-budget calls) are counted; at
@@ -29,7 +33,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -58,6 +64,12 @@ def _changed(name: str, result: Any) -> bool:
     if name not in _BOARD_WRITES:
         return True  # note, hide/show, merge, undo
     return isinstance(result, dict) and (bool(result.get("added")) or bool(result.get("merged")))
+
+
+log = logging.getLogger(__name__)
+
+# resolution steps that mean "the same entity under its current name", not a guess
+_RENAME_VIA = frozenset({"casefold", "alias", "translit"})
 
 
 class RunStalled(Exception):
@@ -120,6 +132,8 @@ class RunCalls:
         self._board_version = 0  # bumped by every board change this run makes
         self._board_reads: dict[str, str] = {}  # read key (incl. version) -> first call id
         self.stalls = 0  # consecutive calls that brought nothing new
+        # direct board MCP call (name, args) for hook-only board ops (redirect); set by the runner
+        self.board_direct: Callable[[str, dict[str, Any]], Awaitable[Any]] | None = None
 
     def short_id(self, provider_id: str | None) -> str:
         """A fresh id for every hook invocation (never reused, even for a repeated provider
@@ -215,11 +229,36 @@ class RunCalls:
             body = text[:n] + (f"\n…усечено, продолжение: more(call_id=\"{cid}\", "
                                f"offset={n})" if truncated else "")
             model_text = f"call_id={cid}\n{body}"
+        moved = await self._redirect(entry.ns, result)
+        if moved:
+            model_text += f"\n{moved}"
         self.registry[cid] = CallInfo(cid, entry.name, name, entry.ns)
         self._payloads[cid] = result
         self._cache[key] = (cid, model_text)
         await self._result(cid, ok=True, t0=t0, text=text, result=result, truncated=truncated)
         return model_text
+
+    async def _redirect(self, ns: str, result: Any) -> str:
+        res = result.get("resolution") if isinstance(result, dict) else None
+        if self.board_direct is None or not isinstance(res, dict) or res.get("status") != "ok":
+            return ""
+        chosen = res.get("chosen") if isinstance(res.get("chosen"), dict) else {}
+        asked, name = str(res.get("query") or ""), str(chosen.get("name") or "")
+        via = [str(v).rsplit("+", 1)[-1] for v in chosen.get("matched_via") or []]
+        if (not asked or not name or normalize_id(asked) == normalize_id(name)
+                or not set(via) & _RENAME_VIA):
+            return ""
+        frm, to = make_key(ns, asked), make_key(ns, name)
+        try:
+            r = await self.board_direct("redirect", {"from_key": frm, "to_key": to,
+                                                     "to_id": name, "via": ",".join(via)})
+        except Exception as e:  # the research goes on; the old key just stays
+            log.warning("run %s: board redirect %s → %s failed: %s", self.run_id, frm, to, e)
+            return ""
+        if not (isinstance(r, dict) and r.get("redirected")):
+            return ""
+        self._board_version += 1
+        return f"доска: объект {r.get('from', frm)} теперь {to} (в источнике «{name}»)"
 
     async def more(self, call_id: str, offset: int = 0) -> str:
         """Next rows (or characters) of a stored source result — the ``more`` tool."""

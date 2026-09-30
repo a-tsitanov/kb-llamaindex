@@ -493,12 +493,12 @@ async def test_relation_without_any_known_source_is_still_rejected():
 async def test_rows_view_with_coverage_resolution_and_paging():
     async with world(result_chars=1200) as w:
         seen = []
-        run, evs = await w.run(scripted(
+        _, evs = await w.run(scripted(
             [("kb_neighbours", {"entity_name": "Росатом"})],
             [("more", {"call_id": "c1", "offset": 12})],
             [("board_add_objects", {"objects": [{"call_id": "c1", "row": 13}]})],
             "ok", seen=seen))
-        first, page, added = tool_returns(seen[-1])[:3]
+        first, page = tool_returns(seen[-1])[:2]
         assert "⚠ «Росатом» в базе называется «Rosatom» (совпадение: translit)" in first
         assert "[0] Rosatom (Organization) — госкорпорация" in first
         assert "[1] Сосед 0 (Person)" in first and "| 1.0 strong" in first
@@ -517,3 +517,29 @@ async def test_more_with_an_unknown_call_id_is_an_error():
         seen = []
         await w.run(scripted([("more", {"call_id": "c9"})], "ok", seen=seen))
         assert "нет результата источника" in tool_returns(seen[-1])[0]
+
+
+async def test_object_under_a_renamed_kb_name_is_redirected_and_the_model_told():
+    async with world() as w:
+        src = {"server": "kb", "tool": "find_entity", "call_id": "c1", "namespace": "kb"}
+        await w.board.add_objects(w.ws.id, "old", [{"id": "Росатом", "label": "Росатом",
+                                                     "type": "organization", "source": src}])
+        await w.board.pin(w.ws.id, "kb:росатом", 1, 2)
+        seen, tools = [], []
+        await w.run(scripted([("kb_neighbours", {"entity_name": "Росатом"})], "ok",
+                             seen=seen, tools=tools), text="с кем связан?",
+                    mentions=["kb:росатом"])
+        assert "доска: объект kb:росатом теперь kb:rosatom" in tool_returns(seen[-1])[0]
+        st = await w.board.state(w.ws.id)
+        assert "kb:rosatom" in st.objects and "kb:росатом" not in st.objects
+        assert st.pins["kb:rosatom"] == {"x": 1, "y": 2}
+        assert "board_redirect" not in tools[0] and "more" in tools[0]
+
+
+async def test_no_redirect_when_the_asked_name_is_not_on_the_board():
+    async with world() as w:
+        seen = []
+        await w.run(scripted([("kb_neighbours", {"entity_name": "Росатом"})], "ok",
+                             seen=seen))
+        assert "доска:" not in tool_returns(seen[-1])[0]
+        assert (await w.board.state(w.ws.id)).objects == {}

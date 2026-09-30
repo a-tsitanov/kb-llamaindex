@@ -107,14 +107,16 @@ def kb_source() -> tuple[FastMCP, dict[str, int]]:
     return mcp, hits
 
 
-def scripted(*turns, seen: list | None = None) -> FunctionModel:
+def scripted(*turns, seen: list | None = None, tools: list | None = None) -> FunctionModel:
     """Each turn is a final text (str) or a list of ``(tool_name, args)`` calls; the turn is
     chosen by how many model responses the history already has (retries count too).
-    ``seen`` collects the messages of every request."""
+    ``seen`` collects the messages of every request, ``tools`` the tool names offered."""
 
     async def stream(messages, info):
         if seen is not None:
             seen.append(list(messages))
+        if tools is not None:
+            tools.append([t.name for t in info.function_tools])
         i = sum(isinstance(m, ModelResponse) for m in messages)
         turn = turns[min(i, len(turns) - 1)]
         if isinstance(turn, Exception):

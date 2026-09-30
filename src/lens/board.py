@@ -235,6 +235,19 @@ class BoardService:
             await self._append(ws, run_id, [("merge", {"keep": k, "drop": d})])
             return {"key": k}
 
+    async def redirect(self, ws: str, run_id: str, frm: str, to: str, *, to_id: str = "",
+                       via: str = "") -> dict[str, Any]:
+        """Move an object to the key its source now uses (hook only, never the model).
+        No-op unless ``frm`` is on the board: the source's alias table is not copied here."""
+        async with self._locks[ws]:
+            st = await self.state(ws)
+            f, t = st.canon(frm), st.canon(to)
+            if f == t or f not in st.objects:
+                return {"redirected": False, "key": t}
+            await self._append(ws, run_id, [("redirect", {"from": f, "to": t, "to_id": to_id,
+                                                          "via": via})])
+            return {"redirected": True, "from": f, "key": t}
+
     async def undo(self, ws: str, run_id: str) -> dict[str, Any]:
         """Revert the last run that changed the board, never the current one."""
         async with self._locks[ws]:
