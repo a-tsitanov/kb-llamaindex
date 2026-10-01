@@ -32,3 +32,11 @@ def test_inflects_requires_the_name_plus_an_ending():
     assert inflects("Алексея Лихачёва", "Алексей Лихачёв") and inflects("путина", "Путин")
     assert not inflects("ростатом", "Росстат")  # a typo, not «Росстат» + ending
     assert not inflects("росатом", "Роснано") and not inflects("лихачев", "Алексей Лихачёв")
+
+
+def test_short_names_need_a_letter_for_letter_translit_match():
+    from src.utils.names import short_translit_ok, translit_key
+    assert translit_key("США") == translit_key("СЧА")  # the fold collision
+    assert not short_translit_ok("США", "СЧА")
+    assert short_translit_ok("ФСБ", "FSB") and short_translit_ok("Озон", "Ozon")
+    assert short_translit_ok("Росатом", "Rosatom")  # long names keep the folded match

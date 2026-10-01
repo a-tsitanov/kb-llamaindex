@@ -48,8 +48,18 @@ def make_key(namespace: str, raw_id: str) -> str:
     return f"{namespace}:{normalize_id(raw_id)}"
 
 
+# Source types → the board vocabulary (KB labels: EventOrAction, Concept, Issue …).
+_TYPE_ALIASES = {
+    "eventoraction": "event", "event_or_action": "event",
+    "concept": "topic", "issue": "topic",
+    "company": "organization", "organisation": "organization",
+    "country": "location", "city": "location", "geopoliticalentity": "location",
+}
+
+
 def normalize_type(raw: str | None) -> str:
     t = (raw or "").strip().lower()
+    t = _TYPE_ALIASES.get(t, t)
     return t if t in TYPES else "other"
 
 

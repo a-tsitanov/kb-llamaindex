@@ -76,6 +76,7 @@ log = logging.getLogger(__name__)
 _NO_DATA = re.compile(r"нет (информации|данных|сведений)|не (найден|найдено|найдена|найдены|"
                       r"удалось найти|обнаружен)|ничего не найдено|отсутству", re.I)
 _REF = re.compile(r"\[\[([^\[\]]+?)\]\]")
+_BROKEN_REF = re.compile(r"\[\[[^\[\]]*\](?!\])")
 
 # resolution steps that mean "the same entity under its current name", not a guess
 _RENAME_VIA = frozenset({"casefold", "alias", "translit"})
@@ -142,6 +143,7 @@ class RunCalls:
         self._board_reads: dict[str, str] = {}  # read key (incl. version) -> first call id
         self.stalls = 0  # consecutive calls that brought nothing new
         self._retried: set[str] = set()  # answer-check rules that already sent a retry
+        self._key_names: dict[str, str | None] = {}  # board key -> name in its source
         # direct board MCP call (name, args) for hook-only board ops (redirect); set by the runner
         self.board_direct: Callable[[str, dict[str, Any]], Awaitable[Any]] | None = None
 
@@ -209,6 +211,7 @@ class RunCalls:
     async def _source(self, entry: McpEntry, cid: str, call_tool, name: str,
                       args: dict[str, Any]) -> str:
         t0 = time.monotonic()
+        args = await self._source_args(entry.ns, args)
         key = json.dumps([entry.name, name, args], sort_keys=True, ensure_ascii=False,
                          default=str)
         if key in self._cache:
@@ -259,8 +262,9 @@ class RunCalls:
                 "(другой инструмент или другое имя): find_entity_by_name → find_neighbours "
                 "или vector_search. Если и так не найдётся — так и напиши.")
         refs = list(dict.fromkeys(r.strip() for r in _REF.findall(text or "")))
-        if refs and "keys" not in self._retried and self.board_direct is not None:
-            bad = []
+        broken = _BROKEN_REF.findall(text or "")  # «[[0] Визит в США (…)]»: no closing ]]
+        if (refs or broken) and "keys" not in self._retried and self.board_direct is not None:
+            bad = [f"{b}…" for b in broken[:3]]
             for r in refs:
                 if ":" in r.split()[0] and await self._on_board(r):
                     continue
@@ -277,6 +281,31 @@ class RunCalls:
                     f"В ответе ссылки не на ключи объектов доски: {'; '.join(bad)}. В [[...]] "
                     "пиши только ключ объекта доски (вида kb:…), остальное — без скобок.")
         return text
+
+    async def _source_args(self, ns: str, args: dict[str, Any]) -> dict[str, Any]:
+        """A board key passed as a source argument («kb:сентябрьская встреча») becomes the
+        entity's name in that source (its source_id): the source knows names, not keys."""
+        if self.board_direct is None or not isinstance(args, dict):
+            return args
+
+        async def fix(v: Any) -> Any:
+            if isinstance(v, list):
+                return [await fix(x) for x in v]
+            if isinstance(v, str) and v.startswith(f"{ns}:"):
+                return await self._source_name(v) or v
+            return v
+        return {k: await fix(v) for k, v in args.items()}
+
+    async def _source_name(self, key: str) -> str | None:
+        if key not in self._key_names:
+            try:
+                o = await self.board_direct("get_object", {"key": key})
+            except Exception:
+                o = None
+            o = o if isinstance(o, dict) else {}
+            attrs = o.get("attrs") if isinstance(o.get("attrs"), dict) else {}
+            self._key_names[key] = attrs.get("source_id") or o.get("label") or None
+        return self._key_names[key]
 
     async def _on_board(self, key: str) -> bool:
         if key in self._object_src:

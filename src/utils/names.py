@@ -45,6 +45,20 @@ def _latin(raw: str) -> str:
     return _SPACES.sub(" ", _NON_WORD.sub(" ", s)).strip()
 
 
+def _romanized(raw: str) -> str:
+    """Letter-for-letter romanization: no folds, doubled letters kept."""
+    s = "".join(_CYR.get(ch, ch) for ch in norm_name(raw))
+    return _SPACES.sub(" ", _NON_WORD.sub(" ", s)).strip()
+
+
+def short_translit_ok(query: str, name: str) -> bool:
+    """A translit-key hit for a short name (≤ 4 letters) must also match letter for letter:
+    the folds that join spellings of long names collide on acronyms («США» "ssha" and
+    «СЧА» "scha" both fold to "sha"), while «ФСБ» / "FSB" still match."""
+    letters = norm_name(query).replace(" ", "")
+    return len(letters) > 4 or _romanized(query) == _romanized(name)
+
+
 def translit_key(raw: str) -> str:
     return _DOUBLE.sub(r"\1", _latin(raw))
 
@@ -104,4 +118,4 @@ def stem_ru(norm: str) -> str:
     return " ".join(out)
 
 
-__all__ = ["inflects", "norm_name", "stem_ru", "strip_legal_form", "translit_key"]
+__all__ = ["inflects", "norm_name", "short_translit_ok", "stem_ru", "strip_legal_form", "translit_key"]

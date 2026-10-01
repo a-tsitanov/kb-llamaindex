@@ -38,7 +38,14 @@ from typing import Any, Protocol
 
 from loguru import logger
 
-from src.utils.names import inflects, norm_name, stem_ru, strip_legal_form, translit_key
+from src.utils.names import (
+    inflects,
+    norm_name,
+    short_translit_ok,
+    stem_ru,
+    strip_legal_form,
+    translit_key,
+)
 
 # name -> props ({label, description, mention_count}) for names that are vertices;
 # None when the graph could not be asked
@@ -183,6 +190,9 @@ class NameResolver:
             if found:
                 break
             rows = await self._step(via, run)
+            if via.endswith("translit"):
+                rows = [r for r in rows if short_translit_ok(
+                    core, str(r.get("matched_text") or r.get("name") or ""))]
             if via.startswith("stem+"):
                 # a stem hit must be the asked word plus an ending, not a near-miss the stem
                 # happens to share («ростатом» → «ростат» ≠ «Росстат»)

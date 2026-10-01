@@ -616,3 +616,27 @@ async def test_a_label_in_brackets_is_sent_back_with_its_key():
                  if p.part_kind == "retry-prompt"]
         assert retry and "[[E1]] → [[kb:e1]]" in retry[0]
         assert of(evs, "final")[0]["answer"] == "Это [[kb:e1]]."
+
+
+async def test_a_board_key_passed_to_a_source_becomes_its_source_name():
+    async with world() as w:
+        src = {"server": "kb", "tool": "find_entity", "call_id": "c1", "namespace": "kb"}
+        await w.board.add_objects(w.ws.id, "old", [{
+            "id": "Сентябрьская встреча", "label": "Сентябрьская встреча", "type": "event",
+            "attrs": {"source_id": "Сентябрьская встреча"}, "source": src}])
+        seen = []
+        await w.run(scripted([("kb_neighbours", {"entity_name": "kb:сентябрьская встреча"})],
+                             "ok", seen=seen))
+        # the fake source echoes what it was asked in its resolution block
+        assert "«Сентябрьская встреча» в базе называется «Rosatom»" in tool_returns(seen[-1])[0]
+
+
+async def test_a_broken_reference_format_is_sent_back_once():
+    async with world() as w:
+        seen = []
+        _, evs = await w.run(scripted("Нашёл [[0] Визит в США (EventOrAction)].",
+                                      "Нашёл визит в США.", seen=seen))
+        retry = [str(p.content) for m in seen[1] for p in getattr(m, "parts", [])
+                 if p.part_kind == "retry-prompt"]
+        assert retry and "[[0]" in retry[0]
+        assert of(evs, "final")[0]["answer"] == "Нашёл визит в США."
