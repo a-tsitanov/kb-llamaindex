@@ -53,3 +53,31 @@ async def test_shortest_path_with_an_unknown_end_says_which(wired):
 async def test_ppr_keeps_resolved_seeds_and_lists_the_rest(wired):
     out = await _fn(ts.graph_personalized_pagerank)(["РОСАТОМ", "Газпромнефть"])
     assert wired["ppr"] == ["Rosatom"] and out["unresolved"] == ["Газпромнефть"]
+
+
+@pytest.mark.asyncio
+async def test_depth_and_hops_are_clamped_with_a_note(monkeypatch):
+    from src.retrieval import atomic_tools
+    seen = {}
+
+    async def fake_gs(g, *, query, depth, ranker):
+        seen["depth"] = depth
+        return atomic_tools.ToolResult(sources=[], observation='{"entities": []}')
+
+    async def fake_fn(g, *, entity_name, hops, **kw):
+        seen["hops"] = hops
+        return atomic_tools.ToolResult(sources=[], observation='{"entities": []}')
+
+    async def none():
+        return None
+    monkeypatch.setattr(atomic_tools, "graph_search", fake_gs)
+    monkeypatch.setattr(atomic_tools, "find_neighbours", fake_fn)
+    monkeypatch.setattr(ts, "_g", none)
+    monkeypatch.setattr(ts, "_ranker", none)
+    monkeypatch.setattr(ts, "_resolver", none)
+    out = await _fn(ts.graph_search)("q", depth=2)
+    assert seen["depth"] == 1 and "graph_walk" in out["depth_note"]
+    out = await _fn(ts.find_neighbours)("X", hops=3)
+    assert seen["hops"] == 1 and "depth_note" in out
+    out = await _fn(ts.graph_search)("q")
+    assert "depth_note" not in out

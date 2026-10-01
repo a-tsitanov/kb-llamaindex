@@ -164,6 +164,17 @@ _PREFILTER_KEEP = int(os.environ.get("MCP_TOOLS_PREFILTER_KEEP", "128"))
 _VECTOR_POOL = int(os.environ.get("MCP_TOOLS_VECTOR_POOL", "30"))
 _RANK_BUDGET_S = float(os.environ.get("MCP_TOOLS_RANK_BUDGET_S", "30"))
 _CHUNK_CHARS = 1200
+# graph_search depth / find_neighbours hops: 2 hops around a hub is thousands of vertices
+# (live 2026-10-01: graph_search depth=2 timed out at 120 s, find_neighbours hops=2 took
+# 55 s); multi-hop chains are graph_walk's job
+_MAX_DEPTH = int(os.environ.get("MCP_TOOLS_MAX_DEPTH", "1"))
+
+
+def _clamp_depth(asked: int) -> tuple[int, dict[str, Any]]:
+    d = max(1, min(int(asked or 1), _MAX_DEPTH))
+    note = ({"depth_note": f"глубина {asked} снижена до {d}: для цепочек используй graph_walk"}
+            if int(asked or 1) > d else {})
+    return d, note
 _ce_lock = threading.Lock()  # tool calls run in parallel: load the 2 GB model once
 _ce_slot = asyncio.Semaphore(1)  # one predict at a time: torch already uses every core
 
@@ -322,9 +333,8 @@ async def graph_search(query: str, depth: int = 1) -> dict[str, Any]:
     Returns matched entities + their neighbours up to `depth` triplet-hops
     + related chunks.
 
-    `depth` controls neighbour expansion (1-3, default 1): 1 = matched
-    nodes + immediate relations; raise for wider context (more nodes /
-    tokens / latency).
+    `depth`: 1 = matched nodes + immediate relations (larger values are cut
+    to the server maximum, default 1 — use `graph_walk` for chains).
     USE FOR: graph / relationship questions when you have NO specific
     entity pinned yet — discovery ("что в графе связано с темой X").
     PREFER INSTEAD: `find_entity_by_id` (you have an exact identifier),
@@ -333,9 +343,10 @@ async def graph_search(query: str, depth: int = 1) -> dict[str, Any]:
     multi-hop chains). Entities come back most relevant to `query` first
     (`relevance` = cross-encoder score). Returns empty lists if the graph is
     unavailable."""
+    depth, note = _clamp_depth(depth)
     r = await atomic_tools.graph_search(await _g(), query=query, depth=depth,
                                         ranker=await _ranker())
-    return json.loads(r.observation)
+    return {**note, **json.loads(r.observation)}
 
 
 @mcp.tool(timeout=1800)
@@ -419,8 +430,8 @@ async def find_neighbours(
 ) -> dict[str, Any]:
     """Neighbours + relations of a KNOWN entity, up to `hops` triplet-hops.
 
-    `hops` controls neighbour depth (1-3, default 1 = immediate). Raising
-    it widens context (more nodes / tokens / latency).
+    `hops`: 1 = immediate neighbours (larger values are cut to the server
+    maximum, default 1 — use `graph_walk` for chains).
     USE FOR: "who / what is connected to X", and as the core of an entity
     dossier.
     PREFER INSTEAD: `graph_walk` for deterministic edge-following with
@@ -433,12 +444,13 @@ async def find_neighbours(
     `entity_name` is resolved to one graph entity first (`resolution`); an unknown or
     ambiguous name returns candidates and no neighbours. `relevance_note` means nothing
     matched the question well — do not present that list as the answer."""
+    hops, note = _clamp_depth(hops)
     r = await atomic_tools.find_neighbours(
         await _g(), entity_name=entity_name, hops=hops, query=query,
         ranker=await _ranker() if query.strip() else None,
         resolver=await _resolver(), types=types,
     )
-    return json.loads(r.observation)
+    return {**note, **json.loads(r.observation)}
 
 
 @mcp.tool(timeout=1800)

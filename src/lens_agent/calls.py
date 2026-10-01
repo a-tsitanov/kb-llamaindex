@@ -101,7 +101,7 @@ class CallInfo:
 @dataclass(frozen=True)
 class CallLimits:
     result_chars: int = 4000
-    source_calls: int = 8
+    source_calls: int = 14
     board_calls: int = 20
     tool_timeout_s: float = 120.0
     stall_calls: int = 4
