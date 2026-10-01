@@ -599,5 +599,20 @@ async def test_answer_keys_must_be_on_the_board():
             seen=seen))
         retry = [str(p.content) for m in seen[3] for p in getattr(m, "parts", [])
                  if p.part_kind == "retry-prompt"]
-        assert retry and "kb:выдумка" in retry[0] and "kb:e1" not in retry[0].split(":", 1)[1]
+        assert retry and "[[kb:выдумка]]" in retry[0] and "[[kb:e1]]" not in retry[0]
+        assert of(evs, "final")[0]["answer"] == "Это [[kb:e1]]."
+
+
+async def test_a_label_in_brackets_is_sent_back_with_its_key():
+    async with world() as w:
+        seen = []
+        _, evs = await w.run(scripted(
+            [("kb_find_entity", {"name": "Росатом"})],
+            [("board_add_objects", {"objects": objs("c1")[:1]})],
+            "Это [[E1]].",
+            "Это [[kb:e1]].",
+            seen=seen))
+        retry = [str(p.content) for m in seen[3] for p in getattr(m, "parts", [])
+                 if p.part_kind == "retry-prompt"]
+        assert retry and "[[E1]] → [[kb:e1]]" in retry[0]
         assert of(evs, "final")[0]["answer"] == "Это [[kb:e1]]."

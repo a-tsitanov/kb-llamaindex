@@ -75,7 +75,7 @@ log = logging.getLogger(__name__)
 # "nothing found" answers (checked against how hard the run actually looked)
 _NO_DATA = re.compile(r"нет (информации|данных|сведений)|не (найден|найдено|найдена|найдены|"
                       r"удалось найти|обнаружен)|ничего не найдено|отсутству", re.I)
-_KEY_REF = re.compile(r"\[\[([^\[\]\s]+:[^\[\]]+?)\]\]")
+_REF = re.compile(r"\[\[([^\[\]]+?)\]\]")
 
 # resolution steps that mean "the same entity under its current name", not a guess
 _RENAME_VIA = frozenset({"casefold", "alias", "translit"})
@@ -258,15 +258,24 @@ class RunCalls:
                 "Прежде чем ответить «нет данных», попробуй ещё один способ найти ответ "
                 "(другой инструмент или другое имя): find_entity_by_name → find_neighbours "
                 "или vector_search. Если и так не найдётся — так и напиши.")
-        keys = list(dict.fromkeys(_KEY_REF.findall(text or "")))
-        if keys and "keys" not in self._retried and self.board_direct is not None:
-            missing = [k for k in keys if not await self._on_board(k)]
-            if missing:
+        refs = list(dict.fromkeys(r.strip() for r in _REF.findall(text or "")))
+        if refs and "keys" not in self._retried and self.board_direct is not None:
+            bad = []
+            for r in refs:
+                if ":" in r.split()[0] and await self._on_board(r):
+                    continue
+                # a label instead of a key: suggest the key when the object is on the board
+                key = None
+                for ns in self._namespaces():
+                    if await self._on_board(make_key(ns, r)):
+                        key = make_key(ns, r)
+                        break
+                bad.append(f"[[{r}]] → [[{key}]]" if key else f"[[{r}]]")
+            if bad:
                 self._retried.add("keys")
                 raise ModelRetry(
-                    f"В ответе ключи, которых нет на доске: {', '.join(missing)}. Упоминай "
-                    "только объекты доски (ключи из board_add_objects / board_get_board) или "
-                    "пиши название без [[...]].")
+                    f"В ответе ссылки не на ключи объектов доски: {'; '.join(bad)}. В [[...]] "
+                    "пиши только ключ объекта доски (вида kb:…), остальное — без скобок.")
         return text
 
     async def _on_board(self, key: str) -> bool:
