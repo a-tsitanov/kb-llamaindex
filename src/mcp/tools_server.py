@@ -158,10 +158,11 @@ async def _r():
 # BAAI/bge-reranker-v2-m3). Without it the cross-encoder is skipped (fail-soft) and only
 # the dense prefilter / the store order remain. MCP_TOOLS_RERANK=false turns it all off.
 _RERANK_ON = os.environ.get("MCP_TOOLS_RERANK", "true").strip().lower() == "true"
-_RERANK_KEEP = int(os.environ.get("MCP_TOOLS_RERANK_KEEP", "32"))
+# CPU cross-encoder ≈ 0.3 s per pair (measured 2026-10-01: 32 pairs 10 s, 16 pairs 4.7 s)
+_RERANK_KEEP = int(os.environ.get("MCP_TOOLS_RERANK_KEEP", "16"))
 _PREFILTER_KEEP = int(os.environ.get("MCP_TOOLS_PREFILTER_KEEP", "128"))
 _VECTOR_POOL = int(os.environ.get("MCP_TOOLS_VECTOR_POOL", "30"))
-_RANK_BUDGET_S = float(os.environ.get("MCP_TOOLS_RANK_BUDGET_S", "20"))
+_RANK_BUDGET_S = float(os.environ.get("MCP_TOOLS_RANK_BUDGET_S", "30"))
 _ce_lock = threading.Lock()  # tool calls run in parallel: load the 2 GB model once
 _ce_slot = asyncio.Semaphore(1)  # one predict at a time: torch already uses every core
 

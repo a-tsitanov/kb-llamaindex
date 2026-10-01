@@ -126,3 +126,20 @@ async def test_without_a_resolver_the_old_paths_stay():
     g = FakeGraph()
     out = obs(await atomic_tools.find_neighbours(g, entity_name="Росатом"))
     assert g.retrieved == ["Росатом"] and "resolution" not in out
+
+
+@pytest.mark.asyncio
+async def test_a_people_question_filters_to_persons_and_a_timeout_orders_by_edges():
+    async def slow(query, texts):
+        import asyncio
+        await asyncio.sleep(1)
+        return [0.9] * len(texts)
+    out = obs(await atomic_tools.find_neighbours(
+        FakeGraph(), entity_name="Росатом", query="Выведи людей связанных с Росатомом",
+        ranker=GraphRanker(rerank=slow, budget_s=0.05), resolver=resolver()))
+    assert out["types_inferred"] is True and out["rank_timeout"] is True
+    assert [e["entity_name"] for e in out["entities"]] == ["Rosatom", "Алексей Лихачёв"]
+    assert out["order"] == "edges_to_centre"
+    out = obs(await atomic_tools.find_neighbours(
+        FakeGraph(), entity_name="Росатом", query="что строит", resolver=resolver()))
+    assert "types_inferred" not in out and len(out["entities"]) == 4

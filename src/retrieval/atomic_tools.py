@@ -26,6 +26,7 @@ from __future__ import annotations
 import difflib
 import inspect
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -180,6 +181,7 @@ async def graph_search(
 
 
 NEIGHBOUR_NODES, NEIGHBOUR_EDGES = 500, 2000  # find_neighbours of a resolved entity
+_PEOPLE = re.compile(r"(?<!\w)(люд|человек|персон|кто\b|people|persons?\b)", re.I)
 
 
 def _unresolved(res: Any) -> dict[str, Any]:
@@ -358,9 +360,9 @@ async def _rank_neighbours(ranker: GraphRanker, query: str, entity_name: str,
                          f"нет прямой связи с {entity_name}")
              for e in rest]
     ranked, relations, meta = await ranker.rank_meta(query, rest, relations, texts)
-    if "relevance_note" in meta:
-        # a vague question («с кем связан?») scores everything near zero: fall back to how
-        # strongly each neighbour is tied to the centre (number of edges to it)
+    if "relevance_note" in meta or meta.get("rank_timeout"):
+        # a vague question («с кем связан?») scores everything near zero, or ranking ran out
+        # of time: fall back to how strongly each neighbour is tied to the centre (edges)
         ranked = sorted(ranked, key=lambda e: -len(edges.get(e.get("entity_name"), [])))
         meta["order"] = "edges_to_centre"
     return head + ranked, relations, meta
@@ -429,6 +431,10 @@ async def find_neighbours(
     entities = getattr(data, "entities", []) or []
     relations = getattr(data, "relations", []) or []
     meta = {**head, **_centre_meta(entity_name, entities)}
+    if not types and _PEOPLE.search(query or ""):
+        # «люди / кто …»: a type filter, which a small model often forgets to pass
+        types = ["Person"]
+        meta["types_inferred"] = True
     if types:
         entities, relations = _only_types(entity_name, entities, relations, types)
         meta["types"] = list(types)
