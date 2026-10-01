@@ -38,7 +38,7 @@ from typing import Any, Protocol
 
 from loguru import logger
 
-from src.utils.names import norm_name, stem_ru, strip_legal_form, translit_key
+from src.utils.names import inflects, norm_name, stem_ru, strip_legal_form, translit_key
 
 # name -> props ({label, description, mention_count}) for names that are vertices;
 # None when the graph could not be asked
@@ -182,7 +182,12 @@ class NameResolver:
         for via, run, score in steps:
             if found:
                 break
-            add(await self._step(via, run), via, score)
+            rows = await self._step(via, run)
+            if via.startswith("stem+"):
+                # a stem hit must be the asked word plus an ending, not a near-miss the stem
+                # happens to share («ростатом» → «ростат» ≠ «Росстат»)
+                rows = [r for r in rows if inflects(core, str(r.get("name") or ""))]
+            add(rows, via, score)
             found = await live()
         if not found and not strict:
             fuzzy = await asyncio.gather(
@@ -267,6 +272,8 @@ _STOP_WORDS = """
 _STOP = frozenset(_STOP_WORDS.split())
 _TOKEN = re.compile(r"[\w«»\"'-]+", re.U)
 SPAN_SCORE = 0.82  # exact-level only (exact / casefold / alias / translit / legal / stem)
+SPAN_LABELS = frozenset({"Person", "Organization", "Location", "Product", "Country", "City",
+                         "Company", "GeoPoliticalEntity"})
 
 
 async def resolve_spans(resolver: NameResolver, text: str, *, max_words: int = 3,
@@ -295,6 +302,8 @@ async def resolve_spans(resolver: NameResolver, text: str, *, max_words: int = 3
         c = res.chosen
         if res.status != "ok" or c is None or c.score < SPAN_SCORE:
             continue
+        if c.label and c.label not in SPAN_LABELS:
+            continue  # «руководитель» is a Role entity too, but not a name in the request
         taken |= idx
         out.append({"span": span, "name": c.name, "label": c.label,
                     "matched_via": c.matched_via, "score": round(c.score, 3)})

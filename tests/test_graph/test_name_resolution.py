@@ -14,6 +14,8 @@ GRAPH = {  # live vertices
     "Лихачев Виктор": {"label": "Person", "description": "", "mention_count": 2},
     "Российский суд": {"label": "Organization", "description": "", "mention_count": 30},
     "Роснано": {"label": "Organization", "description": "", "mention_count": 12},
+    "Росстат": {"label": "Organization", "description": "", "mention_count": 60},
+    "Руководитель": {"label": "Role", "description": "", "mention_count": 9},
     "АО «Роснано": {"label": "Organization", "description": "", "mention_count": 3},
     "передать контракт российской корпорации «Росатом»": {"label": "EventOrAction",
                                                           "mention_count": 1},
@@ -223,3 +225,12 @@ async def test_resolve_spans_finds_entity_names_in_a_request_without_guessing():
     assert [(g["span"], g["name"]) for g in got] == [("Алексей Лихачёв", "Алексей Лихачёв"),
                                                      ("Роснано", "Роснано")]
     assert await resolve_spans(resolver(), "что нового?") == []
+
+
+@pytest.mark.asyncio
+async def test_a_typo_is_not_taken_for_another_name_plus_an_ending():
+    res = await resolver().resolve("ростатом", strict=True)
+    assert res.status == "not_found"  # «ростат» + ом would have been «Росстат»
+    from src.graph.name_resolution import resolve_spans
+    got = await resolve_spans(resolver(), "кто руководитель роснано?")
+    assert [g["name"] for g in got] == ["Роснано"]  # the Role «Руководитель» is not a name
