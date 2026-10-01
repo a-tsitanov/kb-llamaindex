@@ -50,6 +50,16 @@ def _resolution_line(res: Any) -> str:
     return ""
 
 
+def _order_line(payload: dict) -> str:
+    if payload.get("rank_timeout"):
+        return ("⚠ порядок строк НЕ по вопросу (ранжирование не успело) — первые строки не "
+                "обязательно ответ; сузь запрос или проверь другим инструментом")
+    if payload.get("relevance_note"):
+        return ("⚠ ничего не подходит к вопросу (лучшая оценка "
+                f"{payload.get('best_relevance')}) — не выдавай эти строки как ответ")
+    return ""
+
+
 def _meta(payload: dict) -> str:
     meta = {k: v for k, v in payload.items()
             if k != "resolution" and not isinstance(v, list | dict)}
@@ -91,7 +101,8 @@ def render(cid: str, payload: Any, budget: int, offset: int = 0) -> tuple[str, b
     rels = relation_rows(payload)
     lines = [f"call_id={cid}"]
     if isinstance(payload, dict) and offset == 0:  # pages after the first: rows only
-        lines += [x for x in (_resolution_line(payload.get("resolution")), _meta(payload)) if x]
+        lines += [x for x in (_resolution_line(payload.get("resolution")),
+                              _order_line(payload), _meta(payload)) if x]
     scores = _scores(payload)
     head_len = sum(len(x) + 1 for x in lines) + 120
     body: list[str] = []

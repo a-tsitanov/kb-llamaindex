@@ -128,6 +128,7 @@ async def vector_search(
             nodes = await rerank(query, list(nodes), top_k)
         except Exception as exc:  # best-effort: keep the dense order
             logger.warning("vector_search rerank failed: {e}", e=repr(exc))
+            nodes = list(nodes)[:top_k]  # the pool is wider than top_k
     observation = json.dumps(
         [
             {

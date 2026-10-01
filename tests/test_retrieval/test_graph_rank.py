@@ -293,3 +293,40 @@ async def test_warm_up_model_in_deps_does_not_skip_init(monkeypatch):
     monkeypatch.setattr(ts, "_deps", {"cross_encoder": object()})  # warm-up finished first
     await ts._init()
     assert ts._deps["retriever"] == "retriever" and "graph" in ts._deps
+
+
+@pytest.mark.asyncio
+async def test_chunk_rerank_has_a_deadline_and_cuts_long_passages(monkeypatch):
+    import asyncio
+
+    from llama_index.core.schema import NodeWithScore, TextNode
+
+    from src.mcp import tools_server as ts
+    seen = []
+
+    async def slow(pairs):
+        seen.append(max(len(t) for _, t in pairs))
+        await asyncio.sleep(1)
+        return [1.0] * len(pairs)
+    monkeypatch.setattr(ts, "_predict", slow)
+    monkeypatch.setattr(ts, "_RANK_BUDGET_S", 0.05)
+    nodes = [NodeWithScore(node=TextNode(id_="n", text="x" * 5000), score=1.0)]
+    with pytest.raises(TimeoutError):
+        await ts._rerank_chunks("q", nodes, 1)
+    assert seen == [ts._CHUNK_CHARS]
+
+
+@pytest.mark.asyncio
+async def test_vector_search_falls_back_to_the_dense_top_k_when_rerank_fails():
+    from llama_index.core.schema import NodeWithScore, TextNode
+    nodes = [NodeWithScore(node=TextNode(id_=f"n{i}", text=f"t{i}"), score=1.0 - i / 10)
+             for i in range(6)]
+
+    class _R:
+        async def aretrieve(self, q):
+            return nodes
+
+    async def boom(query, pool, top_k):
+        raise TimeoutError
+    r = await atomic_tools.vector_search(_R(), query="q", top_k=2, rerank=boom)
+    assert [s["chunk_id"] for s in json.loads(r.observation)] == ["n0", "n1"]

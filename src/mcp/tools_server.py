@@ -163,6 +163,7 @@ _RERANK_KEEP = int(os.environ.get("MCP_TOOLS_RERANK_KEEP", "16"))
 _PREFILTER_KEEP = int(os.environ.get("MCP_TOOLS_PREFILTER_KEEP", "128"))
 _VECTOR_POOL = int(os.environ.get("MCP_TOOLS_VECTOR_POOL", "30"))
 _RANK_BUDGET_S = float(os.environ.get("MCP_TOOLS_RANK_BUDGET_S", "30"))
+_CHUNK_CHARS = 1200
 _ce_lock = threading.Lock()  # tool calls run in parallel: load the 2 GB model once
 _ce_slot = asyncio.Semaphore(1)  # one predict at a time: torch already uses every core
 
@@ -225,7 +226,12 @@ async def _rerank_chunks(query: str, nodes: list, top_k: int) -> list:
     the reranker's own ``top_n`` is never silently truncated)."""
     if not nodes:
         return nodes
-    scores = await _predict([(query, n.node.get_content()) for n in nodes])
+    # the same deadline as the graph ranker: over it vector_search keeps the dense order
+    # (atomic_tools.vector_search catches the error); passages are cut — the cross-encoder
+    # reads 512 tokens at most and the CPU cost grows with length
+    scores = await asyncio.wait_for(
+        _predict([(query, n.node.get_content()[:_CHUNK_CHARS]) for n in nodes]),
+        _RANK_BUDGET_S)
     for n, s in zip(nodes, scores, strict=True):
         n.score = s
     return sorted(nodes, key=lambda n: -n.score)[:top_k]
