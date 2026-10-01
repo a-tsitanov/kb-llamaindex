@@ -258,3 +258,38 @@ async def test_chunk_rerank_keeps_the_whole_pool_up_to_top_k(monkeypatch):
              for i in range(40)]
     out = await ts._rerank_chunks("q", nodes, 40)
     assert len(out) == 40 and out[0].node.id_ == "n39"
+
+
+@pytest.mark.asyncio
+async def test_warm_up_model_in_deps_does_not_skip_init(monkeypatch):
+    """Live 2026-10-01: the warm-up thread put the cross-encoder into _deps first and _init's
+    `if _deps: return` skipped building the services (KeyError 'graph' in every tool)."""
+    import src.graph.store as gstore
+    import src.ingestion.embeddings as emb
+    import src.retrieval.llm_pool as pool
+    import src.retrieval.vector_index as vi
+    import src.storage.chunk_repository as cr
+    import src.storage.postgres as pg
+    from src.mcp import tools_server as ts
+
+    class _Index:
+        def as_retriever(self, **kw):
+            return "retriever"
+
+    class _Pool:
+        def get(self, name):
+            return "llm"
+
+    def no_graph():
+        raise RuntimeError("no graph in this test")
+
+    monkeypatch.setattr(emb, "build_embedding_model", lambda: "embed")
+    monkeypatch.setattr(vi, "build_vector_store", lambda: "store")
+    monkeypatch.setattr(vi, "build_vector_index", lambda store, embed: _Index())
+    monkeypatch.setattr(pool, "get_llm_pool", lambda: _Pool())
+    monkeypatch.setattr(gstore, "build_graph_store", no_graph)
+    monkeypatch.setattr(cr, "ChunkRepository", lambda pg: "chunks")
+    monkeypatch.setattr(pg, "AsyncPostgres", lambda: None)
+    monkeypatch.setattr(ts, "_deps", {"cross_encoder": object()})  # warm-up finished first
+    await ts._init()
+    assert ts._deps["retriever"] == "retriever" and "graph" in ts._deps

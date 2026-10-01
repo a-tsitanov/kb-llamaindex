@@ -78,10 +78,11 @@ async def _init() -> None:
     chunk_repository / BoundedLLM-wrapped LLM via the same factories
     used by the FastAPI route handlers and the Temporal search-side
     activities (see ``src/workflow/_search_deps.py``)."""
-    if _deps:
+    # not "if _deps": the cross-encoder warm-up thread puts its model into _deps first
+    if _deps.get("_ready"):
         return
     async with _lock:
-        if _deps:
+        if _deps.get("_ready"):
             return
         from src.ingestion.embeddings import build_embedding_model
         from src.retrieval.vector_index import (
@@ -144,6 +145,7 @@ async def _init() -> None:
             _deps["graph_store"] = None
 
         _deps["chunks"] = ChunkRepository(pg=AsyncPostgres())
+        _deps["_ready"] = True
 
 
 async def _r():
