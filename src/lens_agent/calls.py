@@ -25,6 +25,9 @@ What the model cannot be trusted with happens here:
   ``redirect``, hidden from the model);
 - board reads repeated while this run has not changed the board are answered from the cache
   with a nudge to add objects or answer (a weak model otherwise re-reads the board in a loop);
+- the final answer is checked (``check_answer``, a pydantic-ai output validator): «нет данных»
+  after fewer than two different source attempts, or a ``[[key]]`` that is not on the board,
+  sends the model back once per rule with what to do;
 - consecutive calls that bring nothing new (cache hits, over-budget calls) are counted; at
   ``stall_calls`` the run is stopped (``RunStalled``) instead of burning the run timeout.
 """
@@ -34,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -67,6 +71,11 @@ def _changed(name: str, result: Any) -> bool:
 
 
 log = logging.getLogger(__name__)
+
+# "nothing found" answers (checked against how hard the run actually looked)
+_NO_DATA = re.compile(r"нет (информации|данных|сведений)|не (найден|найдено|найдена|найдены|"
+                      r"удалось найти|обнаружен)|ничего не найдено|отсутству", re.I)
+_KEY_REF = re.compile(r"\[\[([^\[\]\s]+:[^\[\]]+?)\]\]")
 
 # resolution steps that mean "the same entity under its current name", not a guess
 _RENAME_VIA = frozenset({"casefold", "alias", "translit"})
@@ -132,6 +141,7 @@ class RunCalls:
         self._board_version = 0  # bumped by every board change this run makes
         self._board_reads: dict[str, str] = {}  # read key (incl. version) -> first call id
         self.stalls = 0  # consecutive calls that brought nothing new
+        self._retried: set[str] = set()  # answer-check rules that already sent a retry
         # direct board MCP call (name, args) for hook-only board ops (redirect); set by the runner
         self.board_direct: Callable[[str, dict[str, Any]], Awaitable[Any]] | None = None
 
@@ -209,7 +219,7 @@ class RunCalls:
             return f"(повтор вызова {first}, тот же результат)\n{model_text}"
         if self.counts["source"] >= self.limits.source_calls:
             msg = (f"лимит вызовов источников исчерпан ({self.limits.source_calls}) — "
-                   "завершай с тем, что есть")
+                   "завершай с тем, что есть, и перечисли, что не удалось проверить")
             await self._result(cid, ok=False, t0=t0, error=msg)
             self._stall()
             return msg
@@ -237,6 +247,36 @@ class RunCalls:
         self._cache[key] = (cid, model_text)
         await self._result(cid, ok=True, t0=t0, text=text, result=result, truncated=truncated)
         return model_text
+
+    async def check_answer(self, text: str) -> str:
+        """Output validator: one retry per rule, then the answer is accepted as it is."""
+        attempts = len(self._cache)  # distinct source calls that really ran
+        if (_NO_DATA.search(text or "") and attempts < 2 and "no_data" not in self._retried
+                and self.counts["source"] < self.limits.source_calls):
+            self._retried.add("no_data")
+            raise ModelRetry(
+                "Прежде чем ответить «нет данных», попробуй ещё один способ найти ответ "
+                "(другой инструмент или другое имя): find_entity_by_name → find_neighbours "
+                "или vector_search. Если и так не найдётся — так и напиши.")
+        keys = list(dict.fromkeys(_KEY_REF.findall(text or "")))
+        if keys and "keys" not in self._retried and self.board_direct is not None:
+            missing = [k for k in keys if not await self._on_board(k)]
+            if missing:
+                self._retried.add("keys")
+                raise ModelRetry(
+                    f"В ответе ключи, которых нет на доске: {', '.join(missing)}. Упоминай "
+                    "только объекты доски (ключи из board_add_objects / board_get_board) или "
+                    "пиши название без [[...]].")
+        return text
+
+    async def _on_board(self, key: str) -> bool:
+        if key in self._object_src:
+            return True
+        try:
+            o = await self.board_direct("get_object", {"key": key})
+        except Exception:
+            return False
+        return isinstance(o, dict) and bool(o.get("key") or o.get("label"))
 
     async def _redirect(self, ns: str, result: Any) -> str:
         res = result.get("resolution") if isinstance(result, dict) else None

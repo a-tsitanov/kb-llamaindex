@@ -254,7 +254,11 @@ class Runner:
                 return await calls.more(call_id, offset)
 
             agent = Agent(self.model_factory(), instructions=INSTRUCTIONS,
-                          toolsets=toolsets, tools=[more])
+                          toolsets=toolsets, tools=[more], output_retries=3)
+
+            @agent.output_validator
+            async def check(output: str) -> str:
+                return await calls.check_answer(output)
             answer, usage = await asyncio.wait_for(
                 self._agent_run(agent, prompt, em, calls, run_usage), s.run_timeout_s)
             await em.emit("final", answer=answer, usage=usage,

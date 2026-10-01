@@ -562,3 +562,42 @@ async def test_a_failing_pre_resolution_does_not_stop_the_run():
         seen = []
         run, _ = await w.run(scripted("ok", seen=seen), text="сломай Росатом")
         assert run.status == "done" and "Имена из запроса" not in seen[0][0].parts[-1].content
+
+
+async def test_no_data_after_one_attempt_is_sent_back_once():
+    async with world() as w:
+        seen = []
+        run, evs = await w.run(scripted(
+            [("kb_find_entity", {"name": "Роснано"})],
+            "Нет информации о руководителе.",
+            [("kb_neighbours", {"entity_name": "Роснано"})],
+            "Нет данных о руководителе.",
+            seen=seen), text="кто руководитель роснано?")
+        assert run.status == "done"
+        retry = [p.content for m in seen[2] for p in getattr(m, "parts", [])
+                 if p.part_kind == "retry-prompt"]
+        assert retry and "попробуй ещё один способ" in str(retry[0])
+        assert of(evs, "final")[0]["answer"] == "Нет данных о руководителе."
+
+
+async def test_no_data_retry_is_not_repeated_after_the_second_answer():
+    async with world() as w:
+        run, evs = await w.run(scripted(
+            "Ничего не найдено.", "Ничего не найдено, источники пусты."))
+        assert run.status == "done"
+        assert of(evs, "final")[0]["answer"] == "Ничего не найдено, источники пусты."
+
+
+async def test_answer_keys_must_be_on_the_board():
+    async with world() as w:
+        seen = []
+        _, evs = await w.run(scripted(
+            [("kb_find_entity", {"name": "Росатом"})],
+            [("board_add_objects", {"objects": objs("c1")[:1]})],
+            "Это [[kb:e1]] и [[kb:выдумка]].",
+            "Это [[kb:e1]].",
+            seen=seen))
+        retry = [str(p.content) for m in seen[3] for p in getattr(m, "parts", [])
+                 if p.part_kind == "retry-prompt"]
+        assert retry and "kb:выдумка" in retry[0] and "kb:e1" not in retry[0].split(":", 1)[1]
+        assert of(evs, "final")[0]["answer"] == "Это [[kb:e1]]."
