@@ -17,7 +17,8 @@ class FakeGraph:
     def __init__(self):
         self.walked, self.retrieved = [], []
 
-    async def awalk(self, name, hops=1, rel_filter=None):
+    async def awalk(self, name, hops=1, rel_filter=None, node_cap=50, edge_cap=100):
+        self.caps = (node_cap, edge_cap)
         self.walked.append(name)
         if name != "Rosatom":
             return RoundGraphData()
@@ -53,6 +54,7 @@ async def test_neighbours_of_a_merged_away_name_are_the_canonical_entitys():
     g = FakeGraph()
     out = obs(await atomic_tools.find_neighbours(g, entity_name="Росатом", resolver=resolver()))
     assert g.walked == ["Rosatom"] and g.retrieved == []
+    assert g.caps == (atomic_tools.NEIGHBOUR_NODES, atomic_tools.NEIGHBOUR_EDGES)
     assert out["resolution"]["chosen"]["name"] == "Rosatom" and out["centre_found"] is True
     assert "Алексей Лихачёв" in [e["entity_name"] for e in out["entities"]]
 

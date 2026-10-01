@@ -415,8 +415,15 @@ class GraphRetriever:
         *,
         hops: int = 2,
         rel_filter: list[str] | None = None,
+        node_cap: int = GRAPH_WALK_NODE_CAP,
+        edge_cap: int = GRAPH_WALK_EDGE_CAP,
     ) -> RoundGraphData:
         """Bounded N-hop traversal from ``start_entity``.
+
+        ``node_cap`` / ``edge_cap`` (nebula path) bound the result; the start entity, its
+        direct neighbours and the edges touching it are kept first, so a hub's real
+        neighbours are not cut away in store order (``find_neighbours`` raises the caps and
+        ranks the whole 1-hop).
 
         Distinct from ``aretrieve`` (which is similarity-based,
         path_depth=1 and UNCHANGED). This issues one bounded Cypher
@@ -447,7 +454,8 @@ class GraphRetriever:
             except Exception as exc:
                 logger.warning("graph_walk (nebula) failed: {e}", e=repr(exc))
                 return RoundGraphData()
-            out = self._map_walk_rows(rows)
+            out = self._map_walk_rows(rows, node_cap=node_cap, edge_cap=edge_cap,
+                                      centre=start_entity)
             if rel_filter:
                 allow = set(rel_filter)
                 out.relations = [r for r in out.relations if r.get("label") in allow]
@@ -629,7 +637,10 @@ class GraphRetriever:
             "valid_to": rel.get("valid_to"),
         }
 
-    def _map_walk_rows(self, rows: list[dict] | None) -> RoundGraphData:
+    def _map_walk_rows(self, rows: list[dict] | None, *,
+                       node_cap: int = GRAPH_WALK_NODE_CAP,
+                       edge_cap: int = GRAPH_WALK_EDGE_CAP,
+                       centre: str | None = None) -> RoundGraphData:
         """Map the APOC-path Cypher result into ``RoundGraphData``.
 
         Defensive caps re-applied here in case the store ignored the
@@ -650,8 +661,17 @@ class GraphRetriever:
                 mapped = self._map_rel(rel)
                 if mapped is not None:
                     out.relations.append(mapped)
-        out.entities = _dedupe_entities(out.entities)[:GRAPH_WALK_NODE_CAP]
-        out.relations = _dedupe_relations(out.relations)[:GRAPH_WALK_EDGE_CAP]
+        ents = _dedupe_entities(out.entities)
+        rels = _dedupe_relations(out.relations)
+        if centre is not None:
+            touching = [r for r in rels if centre in (r.get("src_id"), r.get("tgt_id"))]
+            near = {centre} | {r.get("src_id") for r in touching} | {r.get("tgt_id")
+                                                                   for r in touching}
+            ents = sorted(ents, key=lambda e: (e.get("entity_name") != centre,
+                                               e.get("entity_name") not in near))
+            rels = touching + [r for r in rels if r not in touching]
+        out.entities = ents[:node_cap]
+        out.relations = rels[:edge_cap]
         return out
 
     def _map_no_apoc_rows(self, rows: list[dict] | None) -> RoundGraphData:

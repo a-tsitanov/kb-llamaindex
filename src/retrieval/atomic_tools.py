@@ -53,6 +53,8 @@ class GraphRetrieverProtocol(Protocol):
         *,
         hops: int = 2,
         rel_filter: list[str] | None = None,
+        node_cap: int = ...,
+        edge_cap: int = ...,
     ) -> Any: ...
 
     async def afind_entities_by_name(
@@ -175,6 +177,9 @@ async def graph_search(
             ensure_ascii=False,
         ),
     )
+
+
+NEIGHBOUR_NODES, NEIGHBOUR_EDGES = 500, 2000  # find_neighbours of a resolved entity
 
 
 def _unresolved(res: Any) -> dict[str, Any]:
@@ -416,7 +421,9 @@ async def find_neighbours(
             return ToolResult(sources=[], observation=json.dumps(
                 _unresolved(res), ensure_ascii=False))
         entity_name, head = res.name, {"resolution": res.to_dict()}
-        data = await graph_retriever.awalk(entity_name, hops=hops)
+        # the whole neighbourhood (a hub has hundreds): ranked below, not cut in store order
+        data = await graph_retriever.awalk(entity_name, hops=hops, node_cap=NEIGHBOUR_NODES,
+                                           edge_cap=NEIGHBOUR_EDGES)
     else:
         data = await graph_retriever.aretrieve(entity_name, path_depth=hops)
     entities = getattr(data, "entities", []) or []
