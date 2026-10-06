@@ -120,7 +120,7 @@ async def test_gleaning_pass_adds_missed_entities() -> None:
     llm = _ScriptedLLM(responses=[initial, glean])
     extractor = LightRAGExtractor(llm=llm, num_workers=1, gleaning_passes=1)
 
-    node = TextNode(id_="c2", text="text")
+    node = TextNode(id_="c2", text="Alpha and Beta.")
     out = await extractor.acall([node])
     ents = out[0].metadata[KG_NODES_KEY]
     assert {e.name for e in ents} == {"Alpha", "Beta"}
@@ -148,7 +148,7 @@ async def test_gleaning_dedups_against_initial() -> None:
         llm=_ScriptedLLM(responses=[initial, glean]),
         num_workers=1, gleaning_passes=1,
     )
-    out = await extractor.acall([TextNode(id_="c3", text="t")])
+    out = await extractor.acall([TextNode(id_="c3", text="Alpha, Beta, Gamma.")])
     ents = out[0].metadata[KG_NODES_KEY]
     assert {e.name for e in ents} == {"Alpha", "Beta", "Gamma"}
 
@@ -179,7 +179,7 @@ async def test_orphan_endpoint_synthesises_entity() -> None:
     extractor = LightRAGExtractor(
         llm=_ScriptedLLM(responses=[payload]), num_workers=1,
     )
-    out = await extractor.acall([TextNode(id_="c5", text="t")])
+    out = await extractor.acall([TextNode(id_="c5", text="Alpha mentions Ghost.")])
     ents = out[0].metadata[KG_NODES_KEY]
     rels = out[0].metadata[KG_RELATIONS_KEY]
     assert {e.name for e in ents} == {"Alpha", "Ghost"}
@@ -326,3 +326,24 @@ def test_extraction_text_no_augment_unchanged() -> None:
     result = _extraction_text(node)
     assert "plain chunk" in result
     assert _AUGMENT_METADATA_KEY not in result
+
+
+@pytest.mark.asyncio
+async def test_prompt_example_entity_absent_from_chunk_is_dropped() -> None:
+    # qwen3 copied «ООО «Ромашка»» from the event few-shot into a criminal
+    # case (2026-10-05); the extractor must drop it and its relations.
+    payload = _build_payload(
+        entities=[
+            ("Петров В.С.", "Person", "Организатор группы."),
+            ("ООО «Ромашка»", "Organization", "Упомянута в примере."),
+        ],
+        relations=[("Петров В.С.", "ООО «Ромашка»", "deal", "Сделка.")],
+    )
+    llm = _ScriptedLLM(responses=[payload])
+    extractor = LightRAGExtractor(llm=llm, num_workers=1)
+
+    node = TextNode(id_="c1", text="Петров В.С. создал преступную группу.")
+    out = await extractor.acall([node])
+
+    assert [e.name for e in out[0].metadata[KG_NODES_KEY]] == ["Петров В.С."]
+    assert out[0].metadata[KG_RELATIONS_KEY] == []

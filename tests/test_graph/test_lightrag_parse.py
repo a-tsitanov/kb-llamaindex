@@ -10,7 +10,9 @@ from src.graph.lightrag_parse import (
     _display_entity_name,
     _first_keyword,
     _normalize_entity_name,
+    drop_prompt_example_entities,
     ensure_orphan_entities,
+    prompt_example_entity_names,
     parse_lightrag_output,
     parsed_relations_to_relations,
 )
@@ -71,7 +73,7 @@ def test_parsed_entity_stores_acronym_preserving_name() -> None:
 
 def test_normalize_preserves_non_ascii() -> None:
     assert _normalize_entity_name("Иванов Иван Петрович") == "Иванов Иван Петрович"
-    assert _normalize_entity_name("ООО «Северные технологии»") == "ООО «Северные технологии»".strip("«»")
+    assert _normalize_entity_name("ООО «Северные технологии»") == "ООО «Северные технологии»"
 
 
 def test_normalize_strips_whitespace() -> None:
@@ -492,3 +494,76 @@ def test_full_event_line_keeps_verbatim_ts() -> None:
     line = TUPLE_DELIM.join(["event", "meeting", "провели встречу", "Иванов", "вчера", "Москва", "affirmed"])
     out = parse_lightrag_output(line + "\n" + COMPLETE_DELIM)
     assert out.events[0].event_ts == "вчера"
+
+
+# ── guillemets: only a wrapper around the WHOLE name is stripped ──────
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # inner quoted brand keeps its closing guillemet (was "ПАО «Детский мир")
+        ("ПАО «Детский мир»", "ПАО «Детский мир»"),
+        ("ООО ЧОП «Кондор+»", "ООО ЧОП «Кондор+»"),
+        ("ТРЦ «РИО»", "ТРЦ «РИО»"),
+        # a wrapper around the whole name is still removed
+        ("«Детский мир»", "Детский мир"),
+        ('"UV radiation"', "Uv Radiation"),
+        ("«ООО «Ромашка»»", "ООО «Ромашка»"),
+        # two separately quoted parts are not one wrapper
+        ("«Ромашка» и «Лютик»", "«Ромашка» и «Лютик»"),
+        # stray unbalanced edge guillemet (truncated LLM output) is dropped
+        ("«Кондор+", "Кондор+"),
+        ("Кондор+»", "Кондор+"),
+    ],
+)
+def test_normalize_keeps_inner_guillemets(raw: str, expected: str) -> None:
+    assert _normalize_entity_name(raw) == expected
+
+
+# ── prompt few-shot leakage ───────────────────────────────────────────
+
+
+def test_prompt_example_entity_names_collects_entities_and_event_participants() -> None:
+    text = (
+        "entity{tuple_delimiter}Taylor{tuple_delimiter}Person{tuple_delimiter}desc\n"
+        "relation{tuple_delimiter}Taylor{tuple_delimiter}The Device{tuple_delimiter}kw{tuple_delimiter}d\n"
+        "event{tuple_delimiter}deal{tuple_delimiter}подписали{tuple_delimiter}"
+        "ООО «Ромашка»;ООО «Лютик»{tuple_delimiter}Вчера{tuple_delimiter}{tuple_delimiter}affirmed\n"
+    )
+    names = prompt_example_entity_names([text])
+    assert {"Taylor", "The Device", "ООО «Ромашка»", "ООО «Лютик»"} <= names
+    assert "Вчера" not in names  # event time, not a participant
+
+
+def test_prompt_example_entity_names_covers_shipped_prompts() -> None:
+    names = prompt_example_entity_names()
+    assert "ООО «Ромашка»" in names  # leaked into prod graph 2026-10-04
+
+
+def _payload_with_leak() -> str:
+    lines = [
+        TUPLE_DELIM.join(["entity", "Петров В.С.", "Person", "Организатор группы."]),
+        TUPLE_DELIM.join(["entity", "ООО «Ромашка»", "Organization", "Упомянута в примере."]),
+        TUPLE_DELIM.join(["relation", "Петров В.С.", "ООО «Ромашка»", "deal", "Сделка."]),
+        TUPLE_DELIM.join(["event", "deal", "подписали договор", "Петров В.С.;ООО «Ромашка»", "", "", "affirmed"]),
+        COMPLETE_DELIM,
+    ]
+    return "\n".join(lines)
+
+
+def test_drop_prompt_example_entities_removes_leak_absent_from_chunk() -> None:
+    res = parse_lightrag_output(_payload_with_leak(), source_chunk_id="c1")
+    chunk = "Петров В.С. создал организованную преступную группу."
+    dropped = drop_prompt_example_entities(res, chunk, frozenset({"ООО «Ромашка»"}))
+    assert dropped == 1
+    assert [e.name for e in res.entities] == ["Петров В.С."]
+    assert res.relations == []  # relation to the leaked entity is gone
+    assert all("ООО «Ромашка»" not in ev.participants for ev in res.events)
+
+
+def test_drop_prompt_example_entities_keeps_name_really_in_chunk() -> None:
+    res = parse_lightrag_output(_payload_with_leak(), source_chunk_id="c1")
+    chunk = "Петров В.С. подписал договор с ООО «Ромашка» в 2019 году."
+    assert drop_prompt_example_entities(res, chunk, frozenset({"ООО «Ромашка»"})) == 0
+    assert len(res.entities) == 2 and len(res.relations) == 1

@@ -1,0 +1,70 @@
+# LiteLLM for the offline 3-server cluster. App requests only the aliases
+# small / large / bge-m3 (see .env.offline).
+#
+# Since 2026-10-05 both chat tiers run on the GPU vLLM at 10.10.151.15
+# (deepseek-v4-flash, 262k ctx; measured ~236 tok/s per stream, ~1000 tok/s
+# aggregate at 8-16 parallel). Thinking: OFF for small (extraction/plan/judge),
+# ON for large (final answer synthesis, decided 2026-10-05).
+#   small  = ingest extraction  -> deepseek-v4-flash  (fallback: Qwen3-30B-A3B CPU on srv03)
+#   large  = search synthesis   -> deepseek-v4-flash  (fallback: Qwen3-30B-A3B CPU on srv02)
+#   bge-m3 = embeddings (1024)  -> srv01 socket 1
+# The CPU llama.cpp servers stay up only as fallbacks: ~25 tok/s, minutes per call.
+
+model_list:
+  # ---- primary: GPU vLLM ----
+  - model_name: small
+    litellm_params:
+      model: hosted_vllm/deepseek-v4-flash
+      api_base: http://10.10.151.15:8000/v1
+      api_key: none
+      timeout: 180
+      extra_body: {"chat_template_kwargs": {"thinking": false}}
+  - model_name: large
+    litellm_params:
+      model: hosted_vllm/deepseek-v4-flash
+      api_base: http://10.10.151.15:8000/v1
+      api_key: none
+      timeout: 180
+      # thinking ON for the final answer only (large = `synthesis` role).
+      # vLLM returns it in reasoning_content, `content` stays clean.
+      extra_body: {"chat_template_kwargs": {"thinking": true}}
+
+  # ---- fallbacks: CPU llama.cpp (Qwen3-30B-A3B Q4_K_M) ----
+  - model_name: small-cpu
+    litellm_params:
+      model: openai/qwen3-30b-a3b
+      api_base: http://10.10.113.13:8082/v1
+      api_key: none
+  - model_name: small-cpu
+    litellm_params:
+      model: openai/qwen3-30b-a3b
+      api_base: http://10.10.113.13:8083/v1
+      api_key: none
+  - model_name: large-cpu
+    litellm_params:
+      model: openai/qwen3-30b-a3b
+      api_base: http://10.10.113.12:8085/v1
+      api_key: none
+
+  # ---- embeddings ----
+  - model_name: bge-m3
+    litellm_params:
+      model: openai/bge-m3
+      api_base: http://10.10.113.11:8081/v1
+      api_key: none
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  num_retries: 0
+
+router_settings:
+  routing_strategy: least-busy
+  num_retries: 2
+  timeout: 900
+  allowed_fails: 3
+  cooldown_time: 60
+  # GPU endpoint down/overloaded -> CPU fallbacks (slow but alive)
+  fallbacks:
+    - small: [small-cpu]
+    - large: [large-cpu, small-cpu]
