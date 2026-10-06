@@ -144,6 +144,9 @@ class RunCalls:
         self.stalls = 0  # consecutive calls that brought nothing new
         self._retried: set[str] = set()  # answer-check rules that already sent a retry
         self._key_names: dict[str, str | None] = {}  # board key -> name in its source
+        # namespace -> (entry, relation tool, direct call) for sources that can confirm an edge
+        self.relation_checks: dict[str, tuple[McpEntry, str, Callable[..., Awaitable[Any]]]] = {}
+        self.final_mode = False  # tools withdrawn: the model must answer with what it has
         # direct board MCP call (name, args) for hook-only board ops (redirect); set by the runner
         self.board_direct: Callable[[str, dict[str, Any]], Awaitable[Any]] | None = None
 
@@ -173,10 +176,14 @@ class RunCalls:
         self.stalls = 0
 
     def _stall(self) -> None:
-        """Count a call that brought nothing new; stop the run at ``stall_calls``."""
+        """Count a call that brought nothing new. At ``stall_calls`` the tools are withdrawn
+        (``final_mode``: the model has to answer with what it found — a run that looped after
+        a good search used to end with nothing); a stall after that stops the run."""
         self.stalls += 1
         if self.stalls >= self.limits.stall_calls:
-            raise RunStalled(self.stalls)
+            if self.final_mode:
+                raise RunStalled(self.stalls)
+            self.final_mode = True
 
     def _stall_after_board(self, name: str, result: Any) -> None:
         if name in _BOARD_WRITES and not _changed(name, result):
@@ -255,6 +262,7 @@ class RunCalls:
         """Output validator: one retry per rule, then the answer is accepted as it is."""
         attempts = len(self._cache)  # distinct source calls that really ran
         if (_NO_DATA.search(text or "") and attempts < 2 and "no_data" not in self._retried
+                and not self.final_mode
                 and self.counts["source"] < self.limits.source_calls):
             self._retried.add("no_data")
             raise ModelRetry(
@@ -472,20 +480,58 @@ class RunCalls:
             ns = info.namespace if info else None
             a, b = self._as_key(it.get("from"), ns), self._as_key(it.get("to"), ns)
             na, nb = await self._names(a, call_tool), await self._names(b, call_tool)
-            candidates = [info] if info else self._source_calls()
+            # the cited call first, then every other source result of the run
+            candidates = ([info] if info else []) + [
+                i for i in self._source_calls() if not info or i.call_id != info.call_id]
             hit = next(((i, r) for i in candidates
                         if (r := match_relation(self._parsed(i.call_id)[1], na, nb)) is not None),
                        None)
             if hit is None:
+                hit = await self._check_relation(a, b, na, nb)
+            if hit is None:
                 rejected.append({"item": it, "reason": (
-                    f"в результатах источников нет связи между {a} и {b} — добавляй только "
-                    "связи, которые есть в результате")})
+                    f"ни в результатах источников, ни в самой базе нет связи между {a} и {b} — "
+                    "добавляй только связи, которые есть в источнике")})
                 continue
             info, rel = hit
             src_first = normalize_id(rel.src) in {normalize_id(x) for x in na}
             ok.append({"from": a if src_first else b, "to": b if src_first else a,
                        "kind": rel.kind or it.get("kind") or "", "source": self._src(info)})
         return ok, rejected
+
+    async def _check_relation(self, a: str, b: str, na: set[str], nb: set[str]
+                              ) -> tuple[CallInfo, Any] | None:
+        """Ask the source itself whether the two objects are related (its hidden
+        ``relation_tool``): the model often draws a real KB edge it never fetched. The check
+        is journaled and stored like any source call, so the relation keeps its provenance."""
+        ns = a.split(":", 1)[0] if ":" in a else ""
+        check = self.relation_checks.get(ns)
+        if check is None or b.split(":", 1)[0] != ns:
+            return None
+        entry, tool, call = check
+        name_a, name_b = await self._source_name(a), await self._source_name(b)
+        if not name_a or not name_b:
+            return None
+        cid = self.short_id(None)
+        args = {"a": name_a, "b": name_b}
+        await self.emitter.emit("tool_call", call_id=cid, server=entry.name, tool=tool, args=args)
+        t0 = time.monotonic()
+        try:
+            result = await asyncio.wait_for(call(tool, args), self.limits.tool_timeout_s)
+        except Exception as e:  # a failed check is just "not confirmed"
+            await self._result(cid, ok=False, t0=t0, error=f"{type(e).__name__}: {e}"[:300])
+            return None
+        await self.store.save_payload(CallPayload(run_id=self.run_id, call_id=cid,
+                                                  server=entry.name, tool=tool, args=args,
+                                                  payload=result))
+        info = CallInfo(cid, entry.name, tool, ns)
+        self.registry[cid] = info
+        self._payloads[cid] = result
+        await self._result(cid, ok=True, t0=t0, text=_text(result), result=result)
+        names_a = na | {normalize_id(name_a)}
+        names_b = nb | {normalize_id(name_b)}
+        rel = match_relation(self._parsed(cid)[1], names_a, names_b)
+        return (info, rel) if rel is not None else None
 
     async def _board(self, cid: str, call_tool, name: str, args: dict[str, Any]) -> Any:
         t0 = time.monotonic()

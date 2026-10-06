@@ -31,6 +31,9 @@ class McpEntry(BaseModel):
     # optional pre-resolution tool of a source: (text) -> {"names": [{span, name, …}]}; the
     # runner calls it before the model starts and hides it from the model
     resolve_tool: str | None = None
+    # optional relation check of a source: (a, b) -> {"relations": [...]}; the hook asks it
+    # when the model draws an edge no result of the run contains; hidden from the model
+    relation_tool: str | None = None
 
     @field_validator("token", mode="before")
     @classmethod

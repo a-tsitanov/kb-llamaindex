@@ -81,6 +81,19 @@ def kb_source() -> tuple[FastMCP, dict[str, int]]:
         return {"names": names}
 
     @mcp.tool
+    def entity(name: str) -> dict:
+        """One entity, no relations (like find_entity_by_name)."""
+        hit("entity")
+        return {"entities": [{"entity_name": name, "entity_type": "Person"}]}
+
+    @mcp.tool
+    def relations_between(a: str, b: str) -> dict:
+        hit("relations_between")
+        edges = {frozenset({"Си Цзиньпин", "Трампа"}): ("Си Цзиньпин", "Трампа", "DIPLOMACY")}
+        e = edges.get(frozenset({a, b}))
+        return {"relations": [{"src_id": e[0], "tgt_id": e[1], "label": e[2]}] if e else []}
+
+    @mcp.tool
     def neighbours(entity_name: str) -> dict:
         """kb-tools shaped: resolution + ranked entities + relations (60 neighbours)."""
         hit("neighbours")
@@ -158,7 +171,7 @@ class World:
         self.kb_app = self.kb.http_app(path="/mcp")
         self.store, self.bus = MemoryAgentStore(), EventBus()
         mcp = [McpEntry(name="kb", url="http://kb/mcp", namespace="kb", token=KB_TOKEN,
-                        resolve_tool="resolve_names"),
+                        resolve_tool="resolve_names", relation_tool="relations_between"),
                McpEntry(name="board", url="http://lens/mcp/mcp", token=BOARD_TOKEN,
                         role="board")]
         self.settings = AgentSettings(mcp=settings.pop("mcp", mcp), **settings)

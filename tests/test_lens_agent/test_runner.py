@@ -386,16 +386,26 @@ async def test_unchanged_board_read_is_answered_from_cache_with_a_nudge():
         assert "cached_from" not in results[4] and "kb:e1" in rets[4]
 
 
-async def test_stalled_agent_is_stopped_early():
+async def test_a_looping_agent_loses_its_tools_and_answers_with_what_it_found():
+    async with world(stall_calls=3) as w:
+        tools = []
+        run, evs = await w.run(scripted(
+            [("board_get_board", {})], [("board_get_board", {})], [("board_get_board", {})],
+            [("board_get_board", {})], "итог по найденному", tools=tools))
+        assert run.status == "done"
+        assert of(evs, "final")[0]["answer"] == "итог по найденному"
+        (err,) = of(evs, "error")
+        assert err["where"] == "limit" and "инструменты отключены" in err["message"]
+        assert len(of(evs, "tool_call")) == 4  # 1 real read + 3 repeats
+        assert tools[-1] == [] and "board_get_board" in tools[0]
+
+
+async def test_a_model_that_ignores_the_withdrawn_tools_is_still_stopped():
     async with world(stall_calls=3) as w:
         run, evs = await w.run(scripted(
-            [("board_get_board", {})],
-            [("board_get_board", {})]))  # repeats forever
+            [("board_get_board", {})], [("board_get_board", {})]))  # repeats forever
         assert run.status == "failed"
-        (err,) = of(evs, "error")
-        assert err["where"] == "limit" and "зациклился" in err["message"]
-        assert len(of(evs, "tool_call")) == 4  # 1 real read + 3 repeats, then stop
-        assert run.usage and run.usage["requests"] == 4
+        assert len(of(evs, "tool_call")) == 4
 
 
 async def test_similar_board_objects_are_named_in_the_prompt():
@@ -640,3 +650,27 @@ async def test_a_broken_reference_format_is_sent_back_once():
                  if p.part_kind == "retry-prompt"]
         assert retry and "[[0]" in retry[0]
         assert of(evs, "final")[0]["answer"] == "Нашёл визит в США."
+
+
+async def test_a_kb_edge_the_run_never_fetched_is_confirmed_by_the_source():
+    async with world() as w:
+        seen, tools = [], []
+        _, evs = await w.run(scripted(
+            [("kb_entity", {"name": "Си Цзиньпин"}), ("kb_entity", {"name": "Трампа"})],
+            [("board_add_objects", {"objects": [{"call_id": "c1", "row": 0},
+                                                {"call_id": "c2", "row": 0}]})],
+            [("board_add_relations", {"relations": [
+                {"from": "kb:си цзиньпин", "to": "kb:трампа", "call_id": "c2"},
+                {"from": "kb:си цзиньпин", "to": "kb:трампа", "kind": "x"}]}),
+             ("board_add_relations", {"relations": [
+                 {"from": "kb:трампа", "to": "kb:нет такого"}]})],
+            "ok", seen=seen, tools=tools))
+        st = await w.board.state(w.ws.id)
+        (rel,) = st.relations.values()
+        assert (rel.from_key, rel.to_key) == ("kb:си цзиньпин", "kb:трампа")  # KB direction
+        assert rel.sources[0].tool == "relations_between"
+        assert w.hits["relations_between"] >= 1
+        assert "kb_relations_between" not in tools[0]
+        checks = [e for e in of(evs, "tool_call") if e["tool"] == "relations_between"]
+        assert checks and checks[0]["args"] == {"a": "Си Цзиньпин", "b": "Трампа"}
+        assert "ни в результатах источников, ни в самой базе" in tool_returns(seen[-1])[-1]

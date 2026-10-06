@@ -81,3 +81,33 @@ async def test_depth_and_hops_are_clamped_with_a_note(monkeypatch):
     assert seen["hops"] == 1 and "depth_note" in out
     out = await _fn(ts.graph_search)("q")
     assert "depth_note" not in out
+
+
+@pytest.mark.asyncio
+async def test_relations_between_resolves_strictly_and_returns_live_edges(monkeypatch):
+    from src.graph.nebula_store import entity_vid
+
+    class Store:
+        def __init__(self):
+            self.q = []
+
+        def structured_query(self, q):
+            self.q.append(q)
+            return [{"s": entity_vid("Алексей Лихачёв"), "label": "HEADS", "polarity": "affirmed"},
+                    {"s": entity_vid("Rosatom"), "label": "DENIES", "polarity": "negated"}]
+
+    store = Store()
+
+    async def resolver():
+        return NameResolver(FakeLexicon(), fetch_from(GRAPH))
+
+    async def gs():
+        return store
+    monkeypatch.setattr(ts, "_resolver", resolver)
+    monkeypatch.setattr(ts, "_gs", gs)
+    out = await _fn(ts.relations_between)("Росатом", "Алексей Лихачёв")
+    assert out["relations"] == [{"src_id": "Алексей Лихачёв", "tgt_id": "Rosatom",
+                                 "label": "HEADS", "polarity": "affirmed"}]  # negated dropped
+    assert "BIDIRECT" in store.q[0]
+    out = await _fn(ts.relations_between)("Лихачев", "Rosatom")  # surname only: not strict
+    assert out["relations"] == [] and out["unresolved"] == ["Лихачев"]

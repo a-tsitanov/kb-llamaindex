@@ -238,7 +238,12 @@ class Runner:
             calls.board_direct = board.direct_call_tool
             # hook-only board ops stay out of the model's tool list
             hidden = {f"{board_entry.name}_redirect"} | {
-                f"{e.name}_{e.resolve_tool}" for e in s.enabled() if e.resolve_tool}
+                f"{e.name}_{t}" for e in s.enabled()
+                for t in (e.resolve_tool, e.relation_tool) if t}
+            for e in s.enabled():
+                if e.relation_tool and e.name in servers:
+                    calls.relation_checks.setdefault(
+                        e.ns, (e, e.relation_tool, servers[e.name].direct_call_tool))
             toolsets = [srv.filtered(lambda _ctx, td: td.name not in hidden)
                         for srv in servers.values()]
             mentioned = await self._mentions(board, run.mentions)
@@ -253,8 +258,21 @@ class Runner:
                 (номер строки из «ещё: more(...)»). Не новый вызов источника: лимит не тратит."""
                 return await calls.more(call_id, offset)
 
+            announced = []
+
+            async def prepare(_ctx, tool_defs):
+                if not calls.final_mode:
+                    return tool_defs
+                if not announced:  # once: the journal shows why the tools disappeared
+                    announced.append(True)
+                    await em.emit("error", where="limit", message=(
+                        f"агент зациклился: {calls.stalls} вызовов подряд без новых данных — "
+                        "инструменты отключены, модель отвечает по найденному"))
+                return []
+
             agent = Agent(self.model_factory(), instructions=INSTRUCTIONS,
-                          toolsets=toolsets, tools=[more], output_retries=3)
+                          toolsets=toolsets, tools=[more], output_retries=3,
+                          prepare_tools=prepare)
 
             @agent.output_validator
             async def check(output: str) -> str:

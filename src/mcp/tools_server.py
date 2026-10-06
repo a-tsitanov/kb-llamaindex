@@ -411,6 +411,45 @@ async def find_entity_by_name(
     return json.loads(r.observation)
 
 
+async def _edges_between(store: Any, a: str, b: str) -> list[dict[str, Any]]:
+    """Live RELATED edges between two exact entity names (either direction)."""
+    from datetime import date
+
+    from src.graph.nebula_store import _q, entity_vid
+    from src.graph.retriever import _relation_is_live
+    va, vb = entity_vid(a), entity_vid(b)
+    rows = await asyncio.to_thread(
+        store.structured_query,
+        f"GO FROM {_q(va)} OVER RELATED BIDIRECT WHERE id($$) == {_q(vb)} YIELD "
+        "src(edge) AS s, properties(edge).rel_type AS label, "
+        "properties(edge).polarity AS polarity, properties(edge).valid_to AS valid_to;")
+    today = date.today().isoformat()
+    return [{"src_id": a if r.get("s") == va else b, "tgt_id": b if r.get("s") == va else a,
+             "label": r.get("label") or "RELATED", "polarity": r.get("polarity")}
+            for r in rows or [] if _relation_is_live(r, now_iso=today)]
+
+
+@mcp.tool(timeout=60)
+async def relations_between(a: str, b: str) -> dict[str, Any]:
+    """Graph relations between two entities, each resolved strictly (exact / case / alias /
+    transliteration — no fuzzy guess). For clients that check a relation before drawing it;
+    a model should use `find_neighbours`. Returns {relations: [{src_id, tgt_id, label}],
+    resolution, unresolved?}."""
+    resolver = await _resolver()
+    gs = await _gs()
+    if resolver is None or gs is None:
+        return {"relations": [], "error": "name resolution unavailable"}
+    report, names = [], []
+    for n in (a, b):
+        res = await resolver.resolve(n, strict=True)
+        report.append(res.to_dict())
+        names.append(res.name)
+    if None in names:
+        return {"relations": [], "resolution": report,
+                "unresolved": [r["query"] for r, n in zip(report, names, strict=True) if n is None]}
+    return {"relations": await _edges_between(gs, names[0], names[1]), "resolution": report}
+
+
 @mcp.tool(timeout=120)
 async def resolve_names(text: str) -> dict[str, Any]:
     """Names in a free-text request that are KB entities, with the entity each resolves to
