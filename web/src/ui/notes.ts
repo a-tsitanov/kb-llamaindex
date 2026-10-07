@@ -1,16 +1,12 @@
-// Notes (answers on the board): [[key]] becomes a clickable citation of a live object.
-import { canon, type BoardState } from "../state/board";
-import { esc } from "./dom";
+// Notes (answers on the board): rendered text with [[key]] chips of live objects.
+import type { BoardState } from "../state/board";
+import { bindRefs, richText } from "./rich";
 
 export function renderNotes(el: HTMLElement, st: BoardState, onCite: (key: string) => void): void {
-  const labels = new Map(st.objects.filter((o) => !o.hidden).map((o) => [o.key, o.label]));
-  el.innerHTML = st.notes.slice(-4).reverse().map((n) => {
-    const html = esc(n.text).replace(/\[\[([^\]]+)\]\]/g, (_, raw: string) => {
-      const k = canon(st, raw);
-      const label = labels.get(k);
-      return label ? `<span class="cite" data-k="${esc(k)}">${esc(label)}</span>` : esc(raw.split(":").pop());
-    });
-    return `<div class="note">${html}</div>`;
-  }).join("");
-  el.querySelectorAll<HTMLElement>(".cite").forEach((c) => (c.onclick = () => onCite(c.dataset.k!)));
+  const notes = st.notes.slice(-4).reverse();
+  el.innerHTML = notes.length
+    ? `<div class="ptitle">Заметки на доске</div>` +
+      notes.map((n) => `<div class="note">${richText(n.text, st)}</div>`).join("")
+    : `<div class="ptitle">Заметки на доске</div><div class="empty">Ответы агента появятся здесь</div>`;
+  bindRefs(el, onCite);
 }

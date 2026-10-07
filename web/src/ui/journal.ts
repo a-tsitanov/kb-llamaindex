@@ -1,12 +1,16 @@
 // Journal panel: one block per run — calls, results («подробнее» = full payload), text,
 // collapsed thinking, final answer, errors in red.
+import type { BoardState } from "../state/board";
 import type { RunJournal } from "../state/journal";
 import { esc, isNearBottom } from "./dom";
+import { bindRefs, richText } from "./rich";
 
 const STATUS: Record<string, string> = { running: "идёт", done: "готово", failed: "ошибка", cancelled: "остановлено" };
 
 export function renderJournal(el: HTMLElement, runs: RunJournal[],
-                              onDetails: (runId: string, callId: string) => void): void {
+                              onDetails: (runId: string, callId: string) => void,
+                              st: BoardState | null = null,
+                              onRef: (key: string) => void = () => {}): void {
   // innerHTML redraw collapses open <details> (thinking blocks): remember which ones
   // were open and restore them below, keyed by run id + line index.
   const open = new Set<string>();
@@ -15,12 +19,14 @@ export function renderJournal(el: HTMLElement, runs: RunJournal[],
     if (run != null && d.dataset.idx != null) open.add(`${run}:${d.dataset.idx}`);
   });
   const stickToBottom = isNearBottom(el);
-  el.innerHTML = runs.map((j) => `
+  el.innerHTML = (runs.length ? "" : `<div class="empty">Задай вопрос внизу — здесь будет ход работы агента</div>`) + runs.map((j) => `
     <div class="run" data-run="${esc(j.runId)}">
       <div class="h"><b title="${esc(j.input)}">${esc(j.input || "…")}</b>
         <span class="badge ${j.status}">${STATUS[j.status] ?? j.status}</span></div>
       ${j.lines.map((l, i) => l.kind === "thinking"
         ? `<details class="line" data-idx="${i}"${open.has(`${j.runId}:${i}`) ? " open" : ""}><summary>размышления</summary>${esc(l.text)}</details>`
+        : l.kind === "final" || l.kind === "text"
+        ? `<div class="line ${l.kind} rich">${richText(l.text, st)}</div>`
         : `<div class="line ${l.kind}${l.ok === false ? " bad" : ""}">${esc(l.text)}${
             l.kind === "result" && l.ok !== false && l.callId
               ? `<span class="more" data-call="${esc(l.callId)}">подробнее</span>` : ""}</div>`).join("")}
@@ -28,5 +34,6 @@ export function renderJournal(el: HTMLElement, runs: RunJournal[],
   el.querySelectorAll<HTMLElement>(".more").forEach((m) => {
     m.onclick = () => onDetails(m.closest<HTMLElement>(".run")!.dataset.run!, m.dataset.call!);
   });
+  bindRefs(el, onRef);
   if (stickToBottom) el.scrollTop = el.scrollHeight;
 }

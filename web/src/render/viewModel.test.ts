@@ -24,8 +24,19 @@ describe("toView", () => {
     expect(v.nodes.map((n) => [n.key, n.tone, n.selected, n.fresh])).toEqual([
       ["kb:e1", "event", false, false], ["kb:p1", "entity", true, true]]);
     expect(v.nodes[0].label).toBe("📅 Встреча\n2024-05-16");
-    expect(v.nodes[0].title).toBe("kb:e1\nevent\nсаммит\nkb.find c2");
+    expect(v.nodes[0].title).toBe("Встреча\nсобытие\nсаммит\nkb.find c2");
+    expect(v.nodes[1].degree).toBe(1);
     expect(v.nodes[1].pin).toEqual({ x: 1, y: 2 });
     expect(v.edges).toEqual([{ key: "kb:p1|участник|kb:e1", from: "kb:p1", to: "kb:e1", label: "участник" }]);
+  });
+
+  it("shows the KB relation type in Russian and cuts long labels", () => {
+    const s2: BoardState = { ...st, objects: [st.objects[0], { ...st.objects[1],
+      label: "Очень длинное название организации, которое не помещается" }],
+      relations: [{ key: "r", from_key: "kb:p1", to_key: "kb:e1", kind: "related",
+                    attrs: { kind_original: "DIPLOMACY" } }] };
+    const v = toView(s2, [], undefined);
+    expect(v.edges[0].label).toBe("дипломатия");
+    expect(v.nodes[1].label.endsWith("…")).toBe(true);
   });
 });
