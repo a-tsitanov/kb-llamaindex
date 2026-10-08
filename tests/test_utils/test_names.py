@@ -1,10 +1,7 @@
-from src.lens.keys import normalize_id
 from src.utils.names import norm_name, translit_key
 
 
-def test_norm_name_is_the_board_key_normalization():
-    for raw in ["  ГК «Росатом» ", "Алексей  Лихачёв", "РОСАТОМ", "O'Neil"]:
-        assert norm_name(raw) == normalize_id(raw)
+def test_norm_name_basics():
     assert norm_name("Алексей Лихачёв") == "алексей лихачев"
 
 

@@ -58,9 +58,8 @@ dependencies = [
     # Previously only in [dev] which was a latent bug for prod installs.
     "httpx>=0.27,<1",
 
-    # Lens agent (src/lens): OpenAI-compatible chat + tool calling against the
-    # LiteLLM proxy. Already present transitively via llama-index; pinned
-    # explicitly because Lens imports it directly.
+    # Present transitively via llama-index; kept pinned below 2 (the llama-index
+    # OpenAI-like integrations and the version window used across the stack).
     "openai>=1.50,<2",
 
     # MCP servers (Model Context Protocol) for OpenWebUI / Claude
@@ -81,12 +80,6 @@ dependencies = [
     # Was previously only in the dev .venv (ad-hoc), which broke the prod image.
     "nebula3-python>=3.8,<3.9",
 
-    # Lens agent service (src/lens_agent): ready-made agent loop over MCP toolsets.
-    # 1.31+ requires openai>=2.29 (we pin openai<2); 1.28–1.30 resolve with no changes
-    # to openai/fastmcp/mcp/pydantic.
-    "pydantic-ai-slim[openai,mcp]>=1.28,<1.31",
-    # pydantic-ai <=1.34 imports opentelemetry._events, removed in otel-api 1.44.
-    "opentelemetry-api>=1.28,<1.44",
 ]
 
 [project.optional-dependencies]
