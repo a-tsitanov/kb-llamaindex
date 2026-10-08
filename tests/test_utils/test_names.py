@@ -40,3 +40,19 @@ def test_short_names_need_a_letter_for_letter_translit_match():
     assert not short_translit_ok("США", "СЧА")
     assert short_translit_ok("ФСБ", "FSB") and short_translit_ok("Озон", "Ozon")
     assert short_translit_ok("Росатом", "Rosatom")  # long names keep the folded match
+
+
+# Board-key contract: the same list pins Lens's copy (lens: tests/test_lens_common/test_names.py).
+CONTRACT = [
+    ("  ГК «Росатом» ", "гк росатом"),
+    ("Алексей  Лихачёв", "алексей лихачев"),
+    ("РОСАТОМ", "росатом"),
+    ("O'Neil", "oneil"),
+    ('"Газпром"\tнефть', "газпром нефть"),
+    ("Ёлка\n", "елка"),
+]
+
+
+def test_norm_name_board_key_contract():
+    for raw, norm in CONTRACT:
+        assert norm_name(raw) == norm
