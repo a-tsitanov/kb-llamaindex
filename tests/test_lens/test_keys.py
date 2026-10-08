@@ -42,3 +42,10 @@ def test_match_labels_exact_stem_no_substring():
     assert match_labels("Путина", labels) == ["kb:3"]
     assert match_labels("Байден", labels) == []
     assert match_labels("  ", labels) == []
+
+
+def test_source_types_map_to_the_board_vocabulary():
+    from src.lens.keys import normalize_type
+    assert normalize_type("EventOrAction") == "event" and normalize_type("Concept") == "topic"
+    assert normalize_type("Person") == "person" and normalize_type("Country") == "location"
+    assert normalize_type("Role") == "other" and normalize_type(None) == "other"

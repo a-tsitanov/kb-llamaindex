@@ -161,42 +161,68 @@ LIMIT $limit
 """
 
 
-def _find_by_name_ngql(query: str, *, limit: int) -> str:
-    """PREFIX name lookup under nebula, over the ``entity_name_idx`` index.
-
-    Whitespace-split the input and OR a ``STARTS WITH`` per token. Exact
-    and prefix both work: "Украина" finds itself, "Иванов" finds "Иванов
-    Иван Иванович".
-
-    KNOWN LIMIT: a token matching mid-name does NOT match. "Ромаш" will
-    not find "ООО Ромашка", which the previous ``CONTAINS`` version
-    promised. That promise was not kept in practice — ``CONTAINS`` cannot
-    use an index, so the query was a full scan of every Entity vertex,
-    and on a 161k-entity graph it failed outright with
-    ``GraphMemoryExceeded (-2600)``. Measured 2026-08-18: this form
-    answers in under two seconds where ``CONTAINS`` failed in three.
-    Prefix matching that works beats substring matching that does not.
-
-    True substring search needs an index built for it — a trigram table
-    of entity names in Postgres, the way the statistics registry is
-    searched. That is a separate piece of work; do not reintroduce
-    ``CONTAINS`` here instead.
-
-    Returns ``""`` for blank input so the caller short-circuits.
-    Case-sensitive, like the index.
-    """
+def _name_terms(query: str) -> list[str]:
+    """Prefix terms for the name index: the whole phrase (multi-word), then every token, each
+    also with a capitalised first letter (the index is case-sensitive: "лихачёв")."""
     tokens = [t for t in (query or "").split() if t.strip()]
-    if not tokens:
-        return ""
-    clauses = " OR ".join(
-        f"`Entity`.name STARTS WITH {_nebula_q(t)}" for t in tokens
-    )
-    return (
-        f"LOOKUP ON `Entity` WHERE {clauses} "
+    base = ([" ".join(tokens)] if len(tokens) > 1 else []) + tokens
+    terms: list[str] = []
+    for t in base:
+        for v in (t, t[:1].upper() + t[1:]):
+            if v not in terms:
+                terms.append(v)
+    return terms
+
+
+def _name_fetch_cap(limit: int) -> int:
+    """Over-fetch: the OR of prefixes is unranked, so the entity matching every word can sit
+    past ``limit`` ("Алексей Лихачёв" came back as ten other Алексей)."""
+    return min(max(int(limit) * 5, 50), 500)
+
+
+def _rank_by_name(entities: list[dict], query: str) -> list[dict]:
+    """Best name matches first: exact, starts with the whole phrase, more query words present
+    (as word prefixes), then shorter names. Stable for ties."""
+    def norm(x: str) -> str:
+        return " ".join(x.split()).casefold().replace("ё", "е")
+
+    q = norm(query or "")
+    words = q.split()
+
+    def key(e: dict) -> tuple:
+        name = norm(str(e.get("entity_name") or ""))
+        name_words = name.replace("«", " ").replace("»", " ").replace("(", " ").split()
+        hits = sum(any(nw.startswith(w) for nw in name_words) for w in words)
+        return (name != q, not name.startswith(q), -hits, len(name))
+
+    return sorted(entities, key=key)
+
+
+def _find_by_name_ngqls(query: str, *, limit: int) -> list[str]:
+    """PREFIX name lookups under nebula, over the ``entity_name_idx`` index — one single-term
+    ``LOOKUP`` per term (see ``_name_terms``: the whole phrase first, then each token, plus
+    capitalised variants). Exact and prefix both work: "Украина" finds itself, "Иванов" finds
+    "Иванов Иван Иванович". The caller unions the rows and ranks with ``_rank_by_name``.
+
+    One statement per term, not an ``OR``: measured 2026-09-29 on the live graph, an OR of
+    three prefixes took 1–9 s where the same three single-term lookups took 0.04 s in
+    total — and the OR's shared LIMIT let 200 "Алексей …" rows hide "Алексей Лихачёв".
+
+    KNOWN LIMIT: a token matching mid-name does NOT match. "Лихачёв" will not find
+    "Алексей Лихачёв", "Ромаш" will not find "ООО Ромашка". ``CONTAINS`` cannot use an
+    index — on a 161k-entity graph it was a full scan that failed with
+    ``GraphMemoryExceeded (-2600)``. True substring search needs an index built for it — a
+    trigram table of entity names in Postgres. Do not reintroduce ``CONTAINS``.
+
+    Returns ``[]`` for blank input so the caller short-circuits.
+    """
+    return [
+        f"LOOKUP ON `Entity` WHERE `Entity`.name STARTS WITH {_nebula_q(t)} "
         "YIELD id(vertex) AS vid, `Entity`.name AS name, "
         "`Entity`.label AS label, `Entity`.description AS description "
         f"| LIMIT {int(limit)};"
-    )
+        for t in _name_terms(query)
+    ]
 
 
 # Lucene special chars that must be backslash-escaped inside a query term.
@@ -389,8 +415,15 @@ class GraphRetriever:
         *,
         hops: int = 2,
         rel_filter: list[str] | None = None,
+        node_cap: int = GRAPH_WALK_NODE_CAP,
+        edge_cap: int = GRAPH_WALK_EDGE_CAP,
     ) -> RoundGraphData:
         """Bounded N-hop traversal from ``start_entity``.
+
+        ``node_cap`` / ``edge_cap`` (nebula path) bound the result; the start entity, its
+        direct neighbours and the edges touching it are kept first, so a hub's real
+        neighbours are not cut away in store order (``find_neighbours`` raises the caps and
+        ranks the whole 1-hop).
 
         Distinct from ``aretrieve`` (which is similarity-based,
         path_depth=1 and UNCHANGED). This issues one bounded Cypher
@@ -421,7 +454,8 @@ class GraphRetriever:
             except Exception as exc:
                 logger.warning("graph_walk (nebula) failed: {e}", e=repr(exc))
                 return RoundGraphData()
-            out = self._map_walk_rows(rows)
+            out = self._map_walk_rows(rows, node_cap=node_cap, edge_cap=edge_cap,
+                                      centre=start_entity)
             if rel_filter:
                 allow = set(rel_filter)
                 out.relations = [r for r in out.relations if r.get("label") in allow]
@@ -525,13 +559,15 @@ class GraphRetriever:
             return RoundGraphData()
         if settings.graph.backend == "nebula":
             cap = limit if limit is not None else self._similarity_top_k
-            ngql = _find_by_name_ngql(query, limit=int(cap))
-            if not ngql:  # blank query -> nothing to look up
+            statements = _find_by_name_ngqls(query, limit=_name_fetch_cap(int(cap)))
+            if not statements:  # blank query -> nothing to look up
                 return RoundGraphData()
             try:
-                rows = await asyncio.to_thread(
-                    self._graph_store.structured_query, ngql,
-                )
+                rows: list = []
+                for ngql in statements:
+                    rows += await asyncio.to_thread(
+                        self._graph_store.structured_query, ngql,
+                    ) or []
             except Exception as exc:
                 logger.warning("find_entities_by_name (nebula) failed: {e}", e=repr(exc))
                 # Report it. Returning a bare empty result told the caller
@@ -539,7 +575,7 @@ class GraphRetriever:
                 # not run".
                 return RoundGraphData(error=str(exc)[:200])
             out = RoundGraphData()
-            for row in (rows or [])[: int(cap)]:
+            for row in rows or []:
                 # LOOKUP yields flat columns; accept the older `p` map too
                 # so a caller or fake feeding either shape still works.
                 p = (row or {}).get("p") or row or {}
@@ -551,7 +587,7 @@ class GraphRetriever:
                     "entity_type": p.get("label") or "",
                     "description": p.get("description") or "",
                 })
-            out.entities = _dedupe_entities(out.entities)
+            out.entities = _rank_by_name(_dedupe_entities(out.entities), query)[: int(cap)]
             return out
         lucene = build_fulltext_query(query)
         if not lucene:
@@ -601,7 +637,10 @@ class GraphRetriever:
             "valid_to": rel.get("valid_to"),
         }
 
-    def _map_walk_rows(self, rows: list[dict] | None) -> RoundGraphData:
+    def _map_walk_rows(self, rows: list[dict] | None, *,
+                       node_cap: int = GRAPH_WALK_NODE_CAP,
+                       edge_cap: int = GRAPH_WALK_EDGE_CAP,
+                       centre: str | None = None) -> RoundGraphData:
         """Map the APOC-path Cypher result into ``RoundGraphData``.
 
         Defensive caps re-applied here in case the store ignored the
@@ -622,8 +661,17 @@ class GraphRetriever:
                 mapped = self._map_rel(rel)
                 if mapped is not None:
                     out.relations.append(mapped)
-        out.entities = _dedupe_entities(out.entities)[:GRAPH_WALK_NODE_CAP]
-        out.relations = _dedupe_relations(out.relations)[:GRAPH_WALK_EDGE_CAP]
+        ents = _dedupe_entities(out.entities)
+        rels = _dedupe_relations(out.relations)
+        if centre is not None:
+            touching = [r for r in rels if centre in (r.get("src_id"), r.get("tgt_id"))]
+            near = {centre} | {r.get("src_id") for r in touching} | {r.get("tgt_id")
+                                                                   for r in touching}
+            ents = sorted(ents, key=lambda e: (e.get("entity_name") != centre,
+                                               e.get("entity_name") not in near))
+            rels = touching + [r for r in rels if r not in touching]
+        out.entities = ents[:node_cap]
+        out.relations = rels[:edge_cap]
         return out
 
     def _map_no_apoc_rows(self, rows: list[dict] | None) -> RoundGraphData:

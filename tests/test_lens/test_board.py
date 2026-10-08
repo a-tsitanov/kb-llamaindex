@@ -43,11 +43,12 @@ async def test_add_objects_normalizes_keys_and_injects_run(board):
     assert o["sources"][0]["run_id"] == "r1" and o["type"] == "organization"
 
 
-async def test_near_duplicate_by_label_reports_merged_into(board):
+async def test_same_label_with_different_ids_is_not_merged(board):
+    # identity is the source id; label look-alikes are separate objects (no guessing)
     b, ws, _ = board
     await b.add_objects(ws, "r1", [obj("ent_7", label="Росатом")])
     r = await b.add_objects(ws, "r2", [obj("Rosatom-id", label="  РОСАТОМ ")])
-    assert r["added"] == 0 and r["merged"] == [{"id": "Rosatom-id", "merged_into": "kb:ent_7"}]
+    assert r["added"] == 1 and not r.get("merged")
 
 
 async def test_rejects_without_source_or_id(board):
@@ -188,7 +189,51 @@ async def test_parallel_calls_in_one_workspace_do_not_duplicate():
     b = BoardService(store, bus, BoardLimits(objects_per_call=3, objects_per_run=4))
     ws = await store.create_workspace("t")
     r1, r2 = await asyncio.gather(
-        b.add_objects(ws.id, "r1", [obj("id-1", label="Росатом")]),
-        b.add_objects(ws.id, "r1", [obj("id-2", label="РОСАТОМ")]))
+        b.add_objects(ws.id, "r1", [obj("Росатом")]),
+        b.add_objects(ws.id, "r1", [obj("РОСАТОМ")]))
     assert r1["added"] + r2["added"] == 1
     assert len((await b.state(ws.id)).objects) == 1
+
+
+async def test_type_other_is_refined_by_a_later_specific_type(board):
+    b, ws, _ = board
+    await b.add_objects(ws, "r1", [obj("tass", label="ТАСС", type_="other")])
+    await b.add_objects(ws, "r2", [obj("tass", label="ТАСС", type_="organization")])
+    await b.add_objects(ws, "r3", [obj("likh", label="Лихачёв", type_="person")])
+    await b.add_objects(ws, "r4", [obj("likh", label="Лихачёв", type_="other")])
+    st = await b.state(ws)
+    assert st.objects["kb:tass"].type == "organization"  # "other" is refined, not kept
+    assert st.objects["kb:likh"].type == "person"
+    assert "types_seen" not in st.objects["kb:likh"].attrs
+
+
+async def test_redirect_moves_the_object_keeping_pin_relations_and_label(board):
+    b, ws, _ = board
+    await b.add_objects(ws, "r1", [obj("Росатом", attrs={"source_id": "Росатом"}),
+                                   obj("Лихачёв", type_="person")])
+    await b.add_relations(ws, "r1", [{"from": "kb:лихачев", "to": "kb:росатом",
+                                      "kind": "работает_в", "source": src()}])
+    await b.pin(ws, "kb:росатом", 10, 20)
+    r = await b.redirect(ws, "r2", "kb:росатом", "kb:rosatom", to_id="Rosatom", via="translit")
+    assert r == {"redirected": True, "from": "kb:росатом", "key": "kb:rosatom"}
+    st = await b.state(ws)
+    assert "kb:росатом" not in st.objects
+    o = st.objects["kb:rosatom"]
+    assert o.label == "Росатом" and o.attrs["resolved_from"] == "Росатом"
+    assert o.attrs["source_id"] == "Rosatom"
+    assert st.pins["kb:rosatom"] == {"x": 10, "y": 20}
+    assert [(x.from_key, x.to_key) for x in st.relations.values()] == [("kb:лихачев",
+                                                                        "kb:rosatom")]
+    # old key still resolves; a later write under the old key lands on the new object
+    await b.add_objects(ws, "r3", [obj("РОСАТОМ")])
+    assert set((await b.state(ws)).objects) == {"kb:rosatom", "kb:лихачев"}
+
+
+async def test_redirect_is_a_noop_for_objects_not_on_the_board_and_undo_reverts_it(board):
+    b, ws, _ = board
+    r = await b.redirect(ws, "r1", "kb:росатом", "kb:rosatom")
+    assert r["redirected"] is False and (await b.state(ws)).objects == {}
+    await b.add_objects(ws, "r1", [obj("Росатом")])
+    await b.redirect(ws, "r2", "kb:росатом", "kb:rosatom")
+    await b.undo(ws, "r3")
+    assert set((await b.state(ws)).objects) == {"kb:росатом"}

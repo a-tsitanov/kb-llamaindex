@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.lens.events import EventBus
-from src.lens.keys import make_key, match_labels, normalize_id, normalize_kind, normalize_type
+from src.lens.keys import make_key, match_labels, normalize_kind, normalize_type
 from src.lens.model import NoteEl, ObjectEl, Op, OpKind, RelationEl, Source
 from src.lens.state import CanvasState, fold
 from src.lens.store import LensStore
@@ -117,7 +117,6 @@ class BoardService:
                 raise BoardError(
                     f"лимит объектов за запуск ({self.limits.objects_per_run}) — "
                     "заверши ответ с тем, что уже на доске")
-            by_label = {(o.type, normalize_id(o.label)): k for k, o in st.objects.items()}
             built: list[ObjectEl] = []
             keys, merged, rejected = [], [], []
             added = 0
@@ -133,9 +132,9 @@ class BoardService:
                     continue
                 otype = normalize_type(item.get("type"))
                 key = st.canon(make_key(src.namespace, oid))
-                if key not in st.objects and (otype, normalize_id(label)) in by_label:
-                    key = by_label[(otype, normalize_id(label))]
                 if key in st.objects:
+                    if otype == "other":  # take the known type instead of recording a conflict
+                        otype = st.objects[key].type
                     merged.append({"id": oid, "merged_into": key})
                 elif key not in keys:
                     added += 1
@@ -147,7 +146,6 @@ class BoardService:
                     if item.get("description") else None,
                     attrs=attrs,
                     sources=[src]))
-                by_label.setdefault((otype, normalize_id(label)), key)
                 keys.append(key)
             await self._append(ws, run_id, [(
                 "add_objects", {"objects": [o.model_dump(mode="json") for o in built]})]
@@ -236,6 +234,19 @@ class BoardService:
                 return {"key": k}
             await self._append(ws, run_id, [("merge", {"keep": k, "drop": d})])
             return {"key": k}
+
+    async def redirect(self, ws: str, run_id: str, frm: str, to: str, *, to_id: str = "",
+                       via: str = "") -> dict[str, Any]:
+        """Move an object to the key its source now uses (hook only, never the model).
+        No-op unless ``frm`` is on the board: the source's alias table is not copied here."""
+        async with self._locks[ws]:
+            st = await self.state(ws)
+            f, t = st.canon(frm), st.canon(to)
+            if f == t or f not in st.objects:
+                return {"redirected": False, "key": t}
+            await self._append(ws, run_id, [("redirect", {"from": f, "to": t, "to_id": to_id,
+                                                          "via": via})])
+            return {"redirected": True, "from": f, "key": t}
 
     async def undo(self, ws: str, run_id: str) -> dict[str, Any]:
         """Revert the last run that changed the board, never the current one."""

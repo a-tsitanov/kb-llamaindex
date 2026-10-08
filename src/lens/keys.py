@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import re
 
+from src.utils.names import norm_name
+
 TYPES = (
     "person", "organization", "event", "location", "document", "topic",
     "ip", "domain", "certificate", "service", "asn", "other",
@@ -32,23 +34,32 @@ _KIND_ALIASES = {
     "mentions": "упоминает", "mentioned_in": "упоминает",
 }
 
-_QUOTES = re.compile(r"[«»\"'“”„`]")
 _SPACES = re.compile(r"\s+")
 _WORD = re.compile(r"\w+", re.U)
 
 
 def normalize_id(raw: str) -> str:
-    """casefold, ё→е, quotes dropped, whitespace collapsed and stripped."""
-    s = _QUOTES.sub("", str(raw)).casefold().replace("ё", "е")
-    return _SPACES.sub(" ", s).strip()
+    """casefold, ё→е, quotes dropped, whitespace collapsed and stripped — the KB resolver's
+    ``norm_name``, so board keys and name lookups agree."""
+    return norm_name(raw)
 
 
 def make_key(namespace: str, raw_id: str) -> str:
     return f"{namespace}:{normalize_id(raw_id)}"
 
 
+# Source types → the board vocabulary (KB labels: EventOrAction, Concept, Issue …).
+_TYPE_ALIASES = {
+    "eventoraction": "event", "event_or_action": "event",
+    "concept": "topic", "issue": "topic",
+    "company": "organization", "organisation": "organization",
+    "country": "location", "city": "location", "geopoliticalentity": "location",
+}
+
+
 def normalize_type(raw: str | None) -> str:
     t = (raw or "").strip().lower()
+    t = _TYPE_ALIASES.get(t, t)
     return t if t in TYPES else "other"
 
 

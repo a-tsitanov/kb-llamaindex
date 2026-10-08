@@ -72,9 +72,9 @@ def build_board_mcp(board_of: Callable[[], BoardService]) -> FastMCP:
             raise ToolError(f"нет расследования {ws!r}")
         return board, ws, run
 
-    async def call(fn, *args):  # BoardError → message the agent can act on
+    async def call(fn, *args, **kwargs):  # BoardError → message the agent can act on
         try:
-            return await fn(*args)
+            return await fn(*args, **kwargs)
         except BoardError as e:
             raise ToolError(str(e)) from e
 
@@ -102,18 +102,27 @@ def build_board_mcp(board_of: Callable[[], BoardService]) -> FastMCP:
 
     @mcp.tool
     async def add_objects(objects: list[dict[str, Any]]) -> dict:
-        """Добавить объекты: [{id, type, label, description?, attrs?, call_id}].
-        call_id — вызов инструмента-источника, из результата которого взят объект.
+        """Добавить объекты из результатов источников: [{call_id, row}] или [{call_id, id}].
+        call_id — вызов инструмента-источника; row — номер строки [N] в его результате,
+        id — точно как в строке (или label).
+        Название, тип и описание берутся из источника; сущности не из результата отклоняются.
         Не больше 50 за вызов. Возвращает ключи (key) для связей и заметки."""
         board, ws, run = await ctx()
         return await call(board.add_objects, ws, run, objects)
 
     @mcp.tool
     async def add_relations(relations: list[dict[str, Any]]) -> dict:
-        """Связи между объектами доски: [{from, to, kind, call_id}], from/to — ключи.
-        kind: участник, связан, владеет, входит_в, работает_в, место, упоминает."""
+        """Связи между объектами доски: [{from, to, call_id}], from/to — ключи.
+        Проходят только связи, которые есть в результате источника; вид связи берётся оттуда."""
         board, ws, run = await ctx()
         return await call(board.add_relations, ws, run, relations)
+
+    @mcp.tool
+    async def redirect(from_key: str, to_key: str, to_id: str = "", via: str = "") -> dict:
+        """Служебный (вызывает агент-сервис, не модель): источник переименовал сущность —
+        объект from_key переезжает на to_key, сохраняя закрепление и связи."""
+        board, ws, run = await ctx()
+        return await call(board.redirect, ws, run, from_key, to_key, to_id=to_id, via=via)
 
     @mcp.tool
     async def add_note(text: str) -> dict:
@@ -132,12 +141,6 @@ def build_board_mcp(board_of: Callable[[], BoardService]) -> FastMCP:
         """Вернуть скрытые объекты."""
         board, ws, run = await ctx()
         return await board.show(ws, run, keys)
-
-    @mcp.tool
-    async def merge(keep: str, drop: str) -> dict:
-        """Слить дубликат drop в keep."""
-        board, ws, run = await ctx()
-        return await call(board.merge, ws, run, keep, drop)
 
     @mcp.tool
     async def undo() -> dict:

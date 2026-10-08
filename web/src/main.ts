@@ -5,7 +5,7 @@ import { createWorkspace, followBoard, getBoard, listWorkspaces, pin, type Board
 import { HttpError, loadSettings, saveSettings } from "./api/http";
 import { VisRenderer } from "./render/vis";
 import type { BoardRenderer } from "./render/types";
-import { toView } from "./render/viewModel";
+import { ICON, TYPE_COLOR, TYPE_NAME, toView } from "./render/viewModel";
 import { applyOps, isFresherBoard, type BoardState } from "./state/board";
 import { decide, toggleMention } from "./state/input";
 import { newJournal, reduce, type RunJournal } from "./state/journal";
@@ -37,8 +37,14 @@ function draw(): void {
   const latest = journals[journals.length - 1]?.runId;
   renderer.render(toView(board, mentions, latest));
   const shown = board.objects.filter((o) => !o.hidden).length;
-  $("wsPill").innerHTML = `<b>${esc(title)}</b> · объектов ${shown}`;
+  const links = board.relations.length;
+  document.title = title ? `${title} — Lens` : "Lens";
+  $("wsPill").innerHTML = `<b>${shown}</b> объектов · <b>${links}</b> связей`;
   renderNotes($("notes"), board, (k) => renderer.focus(k));
+  const types = [...new Set(board.objects.filter((o) => !o.hidden).map((o) => o.type))];
+  $("legend").innerHTML = types.map((t) =>
+    `<span><i style="--c:${TYPE_COLOR[t] ?? TYPE_COLOR.other}"></i>${ICON[t] ?? ""} ${esc(TYPE_NAME[t] ?? t)}</span>`).join("");
+  drawJournal();
 }
 
 async function refetch(): Promise<void> {
@@ -80,7 +86,7 @@ function drawJournal(): void {
     } catch (e) {
       showErr(e);
     }
-  });
+  }, board, (k) => renderer.focus(k));
 }
 
 function setRunning(runId: string | null): void {
@@ -124,6 +130,7 @@ async function openWorkspace(id: string): Promise<void> {
   drawJournal();
   renderer.render({ nodes: [], edges: [] });
   $("notes").innerHTML = "";
+  $("legend").innerHTML = "";
   if (!ws) {
     $("wsPill").textContent = "нет расследования";
     return;
@@ -236,6 +243,12 @@ $("cSave").onclick = () => {
   boot().catch(showErr);
 };
 $("dClose").onclick = () => { $("detail").hidden = true; };
+for (const [btn, cls] of [["tglJournal", "no-journal"], ["tglNotes", "no-notes"]] as const) {
+  $(btn).onclick = () => {
+    const off = $("app").classList.toggle(cls);
+    $(btn).classList.toggle("on", !off);
+  };
+}
 
 async function boot(): Promise<void> {
   await health();

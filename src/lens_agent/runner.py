@@ -42,11 +42,12 @@ from pydantic_ai.messages import (
     ThinkingPartDelta,
 )
 from pydantic_ai.models import Model
+from pydantic_ai.usage import RunUsage
 
 from src.lens.events import EventBus
-from src.lens_agent.calls import CallLimits, RunCalls
+from src.lens_agent.calls import CallLimits, RunCalls, RunStalled
 from src.lens_agent.config import AgentSettings, McpEntry
-from src.lens_agent.prompt import INSTRUCTIONS, user_prompt
+from src.lens_agent.prompt import INSTRUCTIONS, similar_objects, user_prompt
 from src.lens_agent.store import AgentStore, RunRecord
 from src.lens_agent.stream import RunEmitter
 
@@ -72,6 +73,10 @@ def http_server_factory(settings: AgentSettings) -> ServerFactory:
             process_tool_call=hook, timeout=settings.connect_timeout_s,
             read_timeout=settings.tool_timeout_s + 30, max_retries=3)
     return make
+
+
+def _usage_dict(u: RunUsage) -> dict[str, int]:
+    return {"requests": u.requests, "tokens_in": u.input_tokens, "tokens_out": u.output_tokens}
 
 
 def _unwrap(e: BaseException) -> BaseException:
@@ -149,7 +154,41 @@ class Runner:
             except Exception:
                 o = None
             o = o if isinstance(o, dict) else {}
-            out.append({"key": key, "label": o.get("label"), "type": o.get("type")})
+            attrs = o.get("attrs") if isinstance(o.get("attrs"), dict) else {}
+            out.append({"key": key, "label": o.get("label"), "type": o.get("type"),
+                        "source_id": attrs.get("source_id")})
+        return out
+
+    async def _similar(self, board: MCPServer, text: str) -> list[dict]:
+        """Board objects whose label resembles the request (outside the model's budgets)."""
+        try:
+            b = await board.direct_call_tool("get_board", {"limit": 200, "include_hidden": True})
+        except Exception:
+            return []
+        objects = b.get("objects", []) if isinstance(b, dict) else []
+        return similar_objects(text, objects)
+
+    async def _resolved(self, servers: dict[str, MCPServer], text: str) -> list[dict]:
+        """Names of the request that sources resolve (their ``resolve_tool``), outside the
+        model's budgets; a slow or failing source is skipped."""
+        out: list[dict] = []
+        seen: set[str] = set()
+        for entry in self.settings.enabled():
+            srv = servers.get(entry.name)
+            if not entry.resolve_tool or srv is None:
+                continue
+            try:
+                r = await asyncio.wait_for(
+                    srv.direct_call_tool(entry.resolve_tool, {"text": text}),
+                    self.settings.resolve_timeout_s)
+            except Exception as e:
+                log.warning("pre-resolution via %s failed: %s", entry.name, e)
+                continue
+            for n in r.get("names", []) if isinstance(r, dict) else []:
+                if isinstance(n, dict) and n.get("name") and n.get("span") \
+                        and n["name"] not in seen:
+                    seen.add(n["name"])
+                    out.append({**n, "source": entry.name})
         return out
 
     async def _heartbeat(self, run_id: str) -> None:
@@ -158,8 +197,8 @@ class Runner:
             with contextlib.suppress(Exception):
                 await self.store.heartbeat(run_id)
 
-    async def _agent_run(self, agent: Agent, prompt: str, em: RunEmitter,
-                         calls: RunCalls) -> tuple[str, dict[str, int]]:
+    async def _agent_run(self, agent: Agent, prompt: str, em: RunEmitter, calls: RunCalls,
+                         usage: RunUsage) -> tuple[str, dict[str, int]]:
         async def on_events(_ctx, events) -> None:
             async for ev in events:
                 if isinstance(ev, PartStartEvent):
@@ -181,14 +220,12 @@ class Runner:
 
         limits = UsageLimits(request_limit=self.settings.request_limit)
         with Agent.sequential_tool_calls():  # no detached tool-call tasks: see module doc
-            result = await agent.run(prompt, usage_limits=limits,
+            result = await agent.run(prompt, usage_limits=limits, usage=usage,
                                      event_stream_handler=on_events)
-        u = result.usage()
-        return str(result.output), {"requests": u.requests, "tokens_in": u.input_tokens,
-                                    "tokens_out": u.output_tokens}
+        return str(result.output), _usage_dict(result.usage())
 
     async def _execute(self, run: RunRecord, em: RunEmitter, calls: RunCalls,
-                       t0: float) -> dict[str, int]:
+                       t0: float, run_usage: RunUsage) -> dict[str, int]:
         s = self.settings
         async with AsyncExitStack() as stack:
             servers, statuses = await self._connect(stack, run, calls)
@@ -198,11 +235,50 @@ class Runner:
             board = servers.get(board_entry.name) if board_entry else None
             if board is None:
                 raise RunFailure("internal", "доска недоступна (board MCP)")
-            prompt = user_prompt(run.text, await self._mentions(board, run.mentions))
+            calls.board_direct = board.direct_call_tool
+            # hook-only board ops stay out of the model's tool list
+            hidden = {f"{board_entry.name}_redirect"} | {
+                f"{e.name}_{t}" for e in s.enabled()
+                for t in (e.resolve_tool, e.relation_tool) if t}
+            for e in s.enabled():
+                if e.relation_tool and e.name in servers:
+                    calls.relation_checks.setdefault(
+                        e.ns, (e, e.relation_tool, servers[e.name].direct_call_tool))
+            toolsets = [srv.filtered(lambda _ctx, td: td.name not in hidden)
+                        for srv in servers.values()]
+            mentioned = await self._mentions(board, run.mentions)
+            similar = [o for o in await self._similar(board, run.text)
+                       if o["key"] not in run.mentions]
+            resolved = await self._resolved(servers, run.text)
+            if resolved:
+                await em.emit("resolved", names=resolved)
+            prompt = user_prompt(run.text, mentioned, similar=similar, resolved=resolved)
+            async def more(call_id: str, offset: int = 0) -> str:
+                """Следующие строки уже полученного результата источника, начиная с offset
+                (номер строки из «ещё: more(...)»). Не новый вызов источника: лимит не тратит."""
+                return await calls.more(call_id, offset)
+
+            announced = []
+
+            async def prepare(_ctx, tool_defs):
+                if not calls.final_mode:
+                    return tool_defs
+                if not announced:  # once: the journal shows why the tools disappeared
+                    announced.append(True)
+                    await em.emit("error", where="limit", message=(
+                        f"агент зациклился: {calls.stalls} вызовов подряд без новых данных — "
+                        "инструменты отключены, модель отвечает по найденному"))
+                return []
+
             agent = Agent(self.model_factory(), instructions=INSTRUCTIONS,
-                          toolsets=list(servers.values()))
-            answer, usage = await asyncio.wait_for(self._agent_run(agent, prompt, em, calls),
-                                                   s.run_timeout_s)
+                          toolsets=toolsets, tools=[more], output_retries=3,
+                          prepare_tools=prepare)
+
+            @agent.output_validator
+            async def check(output: str) -> str:
+                return await calls.check_answer(output)
+            answer, usage = await asyncio.wait_for(
+                self._agent_run(agent, prompt, em, calls, run_usage), s.run_timeout_s)
             await em.emit("final", answer=answer, usage=usage,
                           duration_ms=int((time.monotonic() - t0) * 1000))
             if answer.strip() and not calls.note_written and not calls.undone:
@@ -227,6 +303,8 @@ class Runner:
             return "cancelled", None
         if isinstance(e, RunFailure):
             return "failed", e
+        if isinstance(e, RunStalled):
+            return "failed", RunFailure("limit", str(e))
         if isinstance(e, UsageLimitExceeded):
             return "failed", RunFailure("limit", str(e))
         if isinstance(e, UnexpectedModelBehavior) and _TOOL_RETRIES.match(e.message):
@@ -253,15 +331,19 @@ class Runner:
         em = RunEmitter(self.store, self.bus, run.id)
         calls = RunCalls(run.id, self.store, em, CallLimits(
             result_chars=s.result_chars, source_calls=s.source_calls,
-            board_calls=s.board_calls, tool_timeout_s=s.tool_timeout_s))
+            board_calls=s.board_calls, tool_timeout_s=s.tool_timeout_s,
+            stall_calls=s.stall_calls))
         t0 = time.monotonic()
         status, failure, usage = "failed", None, None
+        run_usage = RunUsage()  # filled in place by agent.run — kept even if the run fails
         side = [asyncio.create_task(self._heartbeat(run.id)), asyncio.create_task(em.autoflush())]
         try:
-            usage = await self._execute(run, em, calls, t0)
+            usage = await self._execute(run, em, calls, t0, run_usage)
             status = "done"
         except BaseException as e:  # every run must end with `done`
             status, failure = self._classify(run, e)
+            if run_usage.requests:
+                usage = _usage_dict(run_usage)
         # The bookkeeping must survive a further cancellation (shutdown during a cancel):
         # it runs shielded and this task waits it out.
         fin = asyncio.ensure_future(self._finalize(run, em, side, status, failure, usage))

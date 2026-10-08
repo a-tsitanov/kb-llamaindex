@@ -64,8 +64,8 @@ async def test_result_truncated_for_model_but_stored_in_full():
     async with world(result_chars=100) as w:
         seen = []
         run, evs = await w.run(scripted([("kb_big", {})], "ok", seen=seen))
-        ret = tool_returns(seen[-1])[0]
-        assert ret.startswith("call_id=c1\n") and ret.endswith("полный результат: call_id=c1")
+        ret = tool_returns(seen[-1])[-1]
+        assert ret.startswith("call_id=c1\n") and ret.endswith('more(call_id="c1", offset=100)')
         assert len(ret) < 200 and of(evs, "tool_result")[0]["truncated"] is True
         assert len((await w.store.get_payload(run.id, "c1")).payload) == 10_000
 
@@ -365,3 +365,312 @@ async def test_failed_deterministic_note_is_reported(monkeypatch):
         (err,) = of(evs, "error")
         assert err["where"] == "tool" and err["message"].startswith("заметка не записана: ")
         assert "доска не ответила" in err["message"]
+
+
+async def test_unchanged_board_read_is_answered_from_cache_with_a_nudge():
+    async with world() as w:
+        seen = []
+        run, evs = await w.run(scripted(
+            [("board_get_board", {"include_hidden": True})],
+            [("board_get_board", {"limit": 50, "include_hidden": True})],
+            [("kb_find_entity", {"name": "Р"})],
+            [("board_add_objects", {"objects": objs("c3")[:1]})],
+            [("board_get_board", {})],
+            "ok", seen=seen))
+        assert run.status == "done"
+        rets = tool_returns(seen[-1])
+        assert "доска не менялась" in rets[1] and "board_add_objects" in rets[1]
+        results = of(evs, "tool_result")
+        assert results[1]["cached_from"] == "c1"
+        # after a write the board is read again for real
+        assert "cached_from" not in results[4] and "kb:e1" in rets[4]
+
+
+async def test_a_looping_agent_loses_its_tools_and_answers_with_what_it_found():
+    async with world(stall_calls=3) as w:
+        tools = []
+        run, evs = await w.run(scripted(
+            [("board_get_board", {})], [("board_get_board", {})], [("board_get_board", {})],
+            [("board_get_board", {})], "итог по найденному", tools=tools))
+        assert run.status == "done"
+        assert of(evs, "final")[0]["answer"] == "итог по найденному"
+        (err,) = of(evs, "error")
+        assert err["where"] == "limit" and "инструменты отключены" in err["message"]
+        assert len(of(evs, "tool_call")) == 4  # 1 real read + 3 repeats
+        assert tools[-1] == [] and "board_get_board" in tools[0]
+
+
+async def test_a_model_that_ignores_the_withdrawn_tools_is_still_stopped():
+    async with world(stall_calls=3) as w:
+        run, evs = await w.run(scripted(
+            [("board_get_board", {})], [("board_get_board", {})]))  # repeats forever
+        assert run.status == "failed"
+        assert len(of(evs, "tool_call")) == 4
+
+
+async def test_similar_board_objects_are_named_in_the_prompt():
+    async with world() as w:
+        await w.run(scripted([("kb_find_entity", {"name": "Р"})],
+                             [("board_add_objects", {"objects": objs("c1")[:1]})], "ok"))
+        seen = []
+        await w.run(scripted("ok", seen=seen), text="ростатом")
+        prompt = seen[0][0].parts[-1].content
+        assert "Похожие объекты на доске" in prompt and "kb:e1 — Росатом" in prompt
+
+
+async def test_usage_is_kept_when_the_run_fails():
+    async with world(run_timeout_s=0.5) as w:
+        run, _ = await w.run(scripted([("kb_slow", {})], "не дойдёт"))
+        assert run.status == "failed" and run.usage["requests"] == 1
+
+
+async def test_writes_that_add_nothing_count_as_stalls():
+    async with world(stall_calls=3, board_calls=100) as w:
+        bad = [("board_add_objects", {"objects": objs("c99")[:1]})]
+        run, evs = await w.run(scripted(bad, bad))  # rejected every time, forever
+        assert run.status == "failed" and "зациклился" in of(evs, "error")[0]["message"]
+        assert len(of(evs, "tool_call")) == 3
+
+
+async def test_hidden_board_objects_are_found_as_similar():
+    async with world() as w:
+        await w.run(scripted([("kb_find_entity", {"name": "Р"})],
+                             [("board_add_objects", {"objects": objs("c1")[:1]})], "ok"))
+        await w.board.hide(w.ws.id, None, ["kb:e1"])
+        seen = []
+        await w.run(scripted("ok", seen=seen), text="ростатом")
+        assert "kb:e1 — Росатом" in seen[0][0].parts[-1].content
+
+
+async def test_object_id_is_taken_from_the_cited_source_result():
+    async with world() as w:
+        seen = []
+        await w.run(scripted(
+            [("kb_find_entity", {"name": "Росатом"})],
+            [("board_add_objects", {"objects": [
+                {"id": "rosatom", "type": "person", "label": "Росатом", "call_id": "c1"},
+                {"id": "invented", "type": "person", "label": "Нет в источнике", "call_id": "c1"},
+            ]})],
+            "ok", seen=seen))
+        st = await w.board.state(w.ws.id)
+        # the model invented "rosatom"/person; the row for label «Росатом» gives id E1 and its type
+        assert set(st.objects) == {"kb:e1"}
+        assert st.objects["kb:e1"].attrs["source_id"] == "E1"
+        assert st.objects["kb:e1"].type == "organization"
+        # nothing matched in the source: rejected, with the nearest rows to pick from
+        ret = tool_returns(seen[-1])[-1]
+        assert "Нет в источнике" in ret and "nearest" in ret
+
+
+async def test_mentioned_object_carries_its_source_id_into_the_prompt():
+    async with world() as w:
+        await w.run(scripted([("kb_find_entity", {"name": "Р"})],
+                             [("board_add_objects", {"objects": [
+                                 {"id": "x", "type": "person", "label": "Лихачёв",
+                                  "call_id": "c1"}]})], "ok"))
+        seen = []
+        await w.run(scripted("ok", seen=seen), text="с кем связан?", mentions=["kb:e2"])
+        prompt = seen[0][0].parts[-1].content
+        assert "kb:e2 — Лихачёв (person), в источнике: E2" in prompt
+
+
+async def test_relations_accept_object_ids_and_infer_a_missing_call_id():
+    async with world() as w:
+        await w.run(scripted(
+            [("kb_find_entity", {"name": "Росатом"})],
+            [("board_add_objects", {"objects": objs("c1")})],
+            # ids instead of keys, and no call_id: both ends came from c1
+            [("board_add_relations", {"relations": [
+                {"from": "E2", "to": "kb:e1", "kind": "работает_в"}]})],
+            "ok"))
+        st = await w.board.state(w.ws.id)
+        (rel,) = st.relations.values()
+        assert (rel.from_key, rel.to_key, rel.kind) == ("kb:e2", "kb:e1", "работает_в")
+        assert rel.sources[0].call_id == "c1"
+
+
+async def test_relation_without_any_known_source_is_still_rejected():
+    async with world() as w:
+        seen = []
+        await w.run(scripted(
+            [("board_add_relations", {"relations": [
+                {"from": "kb:x", "to": "kb:y", "kind": "связан"}]})],
+            "ok", seen=seen))
+        assert "нет связи" in tool_returns(seen[-1])[0]
+        assert (await w.board.state(w.ws.id)).relations == {}
+
+
+async def test_rows_view_with_coverage_resolution_and_paging():
+    async with world(result_chars=1200) as w:
+        seen = []
+        _, evs = await w.run(scripted(
+            [("kb_neighbours", {"entity_name": "Росатом"})],
+            [("more", {"call_id": "c1", "offset": 12})],
+            [("board_add_objects", {"objects": [{"call_id": "c1", "row": 13}]})],
+            "ok", seen=seen))
+        first, page = tool_returns(seen[-1])[:2]
+        assert "⚠ «Росатом» в базе называется «Rosatom» (совпадение: translit)" in first
+        assert "[0] Rosatom (Organization) — госкорпорация" in first
+        assert "[1] Сосед 0 (Person)" in first and "| 1.0 strong" in first
+        assert "из 61" in first and 'more(call_id="c1", offset=' in first
+        assert "Сосед 0 —WORKS_AT→ Rosatom" in first and "[60]" not in first
+        assert page.splitlines()[1].startswith("сущности 12–") and "[12] Сосед 11" in page
+        assert w.hits["neighbours"] == 1  # paging reads the stored payload
+        st = await w.board.state(w.ws.id)
+        assert [o.label for o in st.objects.values()] == ["Сосед 12"]
+        more_call = [e for e in of(evs, "tool_call") if e["tool"] == "more"]
+        assert more_call and more_call[0]["server"] == "lens"
+
+
+async def test_more_with_an_unknown_call_id_is_an_error():
+    async with world() as w:
+        seen = []
+        await w.run(scripted([("more", {"call_id": "c9"})], "ok", seen=seen))
+        assert "нет результата источника" in tool_returns(seen[-1])[0]
+
+
+async def test_object_under_a_renamed_kb_name_is_redirected_and_the_model_told():
+    async with world() as w:
+        src = {"server": "kb", "tool": "find_entity", "call_id": "c1", "namespace": "kb"}
+        await w.board.add_objects(w.ws.id, "old", [{"id": "Росатом", "label": "Росатом",
+                                                     "type": "organization", "source": src}])
+        await w.board.pin(w.ws.id, "kb:росатом", 1, 2)
+        seen, tools = [], []
+        await w.run(scripted([("kb_neighbours", {"entity_name": "Росатом"})], "ok",
+                             seen=seen, tools=tools), text="с кем связан?",
+                    mentions=["kb:росатом"])
+        assert "доска: объект kb:росатом теперь kb:rosatom" in tool_returns(seen[-1])[0]
+        st = await w.board.state(w.ws.id)
+        assert "kb:rosatom" in st.objects and "kb:росатом" not in st.objects
+        assert st.pins["kb:rosatom"] == {"x": 1, "y": 2}
+        assert "board_redirect" not in tools[0] and "more" in tools[0]
+
+
+async def test_no_redirect_when_the_asked_name_is_not_on_the_board():
+    async with world() as w:
+        seen = []
+        await w.run(scripted([("kb_neighbours", {"entity_name": "Росатом"})], "ok",
+                             seen=seen))
+        assert "доска:" not in tool_returns(seen[-1])[0]
+        assert (await w.board.state(w.ws.id)).objects == {}
+
+
+async def test_request_names_are_resolved_before_the_model_starts():
+    async with world() as w:
+        seen, tools = [], []
+        _, evs = await w.run(scripted("ok", seen=seen, tools=tools),
+                             text="Выведи людей, связанных с Росатомом")
+        prompt = seen[0][0].parts[-1].content
+        assert "Имена из запроса, найденные в источниках" in prompt
+        assert "«Росатомом» → «Rosatom» (Organization, kb; совпадение: stem+translit)" in prompt
+        assert of(evs, "resolved")[0]["names"][0]["name"] == "Rosatom"
+        assert "kb_resolve_names" not in tools[0] and "kb_find_entity" in tools[0]
+
+
+async def test_a_failing_pre_resolution_does_not_stop_the_run():
+    async with world() as w:
+        seen = []
+        run, _ = await w.run(scripted("ok", seen=seen), text="сломай Росатом")
+        assert run.status == "done" and "Имена из запроса" not in seen[0][0].parts[-1].content
+
+
+async def test_no_data_after_one_attempt_is_sent_back_once():
+    async with world() as w:
+        seen = []
+        run, evs = await w.run(scripted(
+            [("kb_find_entity", {"name": "Роснано"})],
+            "Нет информации о руководителе.",
+            [("kb_neighbours", {"entity_name": "Роснано"})],
+            "Нет данных о руководителе.",
+            seen=seen), text="кто руководитель роснано?")
+        assert run.status == "done"
+        retry = [p.content for m in seen[2] for p in getattr(m, "parts", [])
+                 if p.part_kind == "retry-prompt"]
+        assert retry and "попробуй ещё один способ" in str(retry[0])
+        assert of(evs, "final")[0]["answer"] == "Нет данных о руководителе."
+
+
+async def test_no_data_retry_is_not_repeated_after_the_second_answer():
+    async with world() as w:
+        run, evs = await w.run(scripted(
+            "Ничего не найдено.", "Ничего не найдено, источники пусты."))
+        assert run.status == "done"
+        assert of(evs, "final")[0]["answer"] == "Ничего не найдено, источники пусты."
+
+
+async def test_answer_keys_must_be_on_the_board():
+    async with world() as w:
+        seen = []
+        _, evs = await w.run(scripted(
+            [("kb_find_entity", {"name": "Росатом"})],
+            [("board_add_objects", {"objects": objs("c1")[:1]})],
+            "Это [[kb:e1]] и [[kb:выдумка]].",
+            "Это [[kb:e1]].",
+            seen=seen))
+        retry = [str(p.content) for m in seen[3] for p in getattr(m, "parts", [])
+                 if p.part_kind == "retry-prompt"]
+        assert retry and "[[kb:выдумка]]" in retry[0] and "[[kb:e1]]" not in retry[0]
+        assert of(evs, "final")[0]["answer"] == "Это [[kb:e1]]."
+
+
+async def test_a_label_in_brackets_is_sent_back_with_its_key():
+    async with world() as w:
+        seen = []
+        _, evs = await w.run(scripted(
+            [("kb_find_entity", {"name": "Росатом"})],
+            [("board_add_objects", {"objects": objs("c1")[:1]})],
+            "Это [[E1]].",
+            "Это [[kb:e1]].",
+            seen=seen))
+        retry = [str(p.content) for m in seen[3] for p in getattr(m, "parts", [])
+                 if p.part_kind == "retry-prompt"]
+        assert retry and "[[E1]] → [[kb:e1]]" in retry[0]
+        assert of(evs, "final")[0]["answer"] == "Это [[kb:e1]]."
+
+
+async def test_a_board_key_passed_to_a_source_becomes_its_source_name():
+    async with world() as w:
+        src = {"server": "kb", "tool": "find_entity", "call_id": "c1", "namespace": "kb"}
+        await w.board.add_objects(w.ws.id, "old", [{
+            "id": "Сентябрьская встреча", "label": "Сентябрьская встреча", "type": "event",
+            "attrs": {"source_id": "Сентябрьская встреча"}, "source": src}])
+        seen = []
+        await w.run(scripted([("kb_neighbours", {"entity_name": "kb:сентябрьская встреча"})],
+                             "ok", seen=seen))
+        # the fake source echoes what it was asked in its resolution block
+        assert "«Сентябрьская встреча» в базе называется «Rosatom»" in tool_returns(seen[-1])[0]
+
+
+async def test_a_broken_reference_format_is_sent_back_once():
+    async with world() as w:
+        seen = []
+        _, evs = await w.run(scripted("Нашёл [[0] Визит в США (EventOrAction)].",
+                                      "Нашёл визит в США.", seen=seen))
+        retry = [str(p.content) for m in seen[1] for p in getattr(m, "parts", [])
+                 if p.part_kind == "retry-prompt"]
+        assert retry and "[[0]" in retry[0]
+        assert of(evs, "final")[0]["answer"] == "Нашёл визит в США."
+
+
+async def test_a_kb_edge_the_run_never_fetched_is_confirmed_by_the_source():
+    async with world() as w:
+        seen, tools = [], []
+        _, evs = await w.run(scripted(
+            [("kb_entity", {"name": "Си Цзиньпин"}), ("kb_entity", {"name": "Трампа"})],
+            [("board_add_objects", {"objects": [{"call_id": "c1", "row": 0},
+                                                {"call_id": "c2", "row": 0}]})],
+            [("board_add_relations", {"relations": [
+                {"from": "kb:си цзиньпин", "to": "kb:трампа", "call_id": "c2"},
+                {"from": "kb:си цзиньпин", "to": "kb:трампа", "kind": "x"}]}),
+             ("board_add_relations", {"relations": [
+                 {"from": "kb:трампа", "to": "kb:нет такого"}]})],
+            "ok", seen=seen, tools=tools))
+        st = await w.board.state(w.ws.id)
+        (rel,) = st.relations.values()
+        assert (rel.from_key, rel.to_key) == ("kb:си цзиньпин", "kb:трампа")  # KB direction
+        assert rel.sources[0].tool == "relations_between"
+        assert w.hits["relations_between"] >= 1
+        assert "kb_relations_between" not in tools[0]
+        checks = [e for e in of(evs, "tool_call") if e["tool"] == "relations_between"]
+        assert checks and checks[0]["args"] == {"a": "Си Цзиньпин", "b": "Трампа"}
+        assert "ни в результатах источников, ни в самой базе" in tool_returns(seen[-1])[-1]

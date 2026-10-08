@@ -312,6 +312,38 @@ CREATE INDEX IF NOT EXISTS entity_name_trgm_idx
 CREATE INDEX IF NOT EXISTS entity_label_idx ON entity (label);
 """
 
+# Name resolution (src/graph/name_resolution.py). ``name_norm`` / ``name_translit`` are
+# src.utils.names.norm_name / translit_key of ``name``, filled by the mirror writer and by
+# scripts/backfill_entity_names.py for older rows. ``alive`` = the vertex still exists in the
+# graph (ER deletes merged-away losers; the mirror keeps their rows). ``entity_alias`` keeps
+# names that point at a canonical entity: ER merges, verdict backfill, manual.
+_ENTITY_RESOLUTION_DDL = """
+ALTER TABLE entity ADD COLUMN IF NOT EXISTS name_norm TEXT;
+ALTER TABLE entity ADD COLUMN IF NOT EXISTS name_translit TEXT;
+ALTER TABLE entity ADD COLUMN IF NOT EXISTS alive BOOLEAN NOT NULL DEFAULT TRUE;
+CREATE INDEX IF NOT EXISTS entity_name_norm_idx ON entity (name_norm);
+CREATE INDEX IF NOT EXISTS entity_name_translit_idx ON entity (name_translit);
+CREATE INDEX IF NOT EXISTS entity_name_norm_trgm_idx
+    ON entity USING GIN (name_norm gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS entity_name_translit_trgm_idx
+    ON entity USING GIN (name_translit gin_trgm_ops);
+CREATE TABLE IF NOT EXISTS entity_alias (
+    alias          TEXT NOT NULL,
+    alias_norm     TEXT NOT NULL,
+    alias_translit TEXT NOT NULL DEFAULT '',
+    canonical_vid  TEXT NOT NULL,
+    canonical_name TEXT NOT NULL,
+    source         TEXT NOT NULL,
+    confidence     REAL NOT NULL DEFAULT 1.0,
+    doc_id         TEXT,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (alias_norm, canonical_vid)
+);
+CREATE INDEX IF NOT EXISTS entity_alias_translit_idx ON entity_alias (alias_translit);
+CREATE INDEX IF NOT EXISTS entity_alias_norm_trgm_idx
+    ON entity_alias USING GIN (alias_norm gin_trgm_ops);
+"""
+
 _STAT_INDEXES_DDL = """
 CREATE INDEX IF NOT EXISTS stat_observation_series_idx
     ON stat_observation (indicator_id, period_start);
@@ -453,6 +485,7 @@ def setup_postgres() -> None:
         cur.execute(_ER_VERDICT_DDL)
         cur.execute(_ENTITY_DDL)
         cur.execute(_ENTITY_INDEXES_DDL)
+        cur.execute(_ENTITY_RESOLUTION_DDL)
         cur.execute(_BOT_USER_DDL)
         cur.execute(_BOT_REQUEST_DDL)
         cur.execute(_BOT_INDEXES_DDL)

@@ -67,7 +67,47 @@ def kb_source() -> tuple[FastMCP, dict[str, int]]:
     @mcp.tool
     def find_entity(name: str) -> dict:
         hit("find_entity")
-        return {"entities": [ROSATOM, LIKHACHEV]}
+        return {"entities": [ROSATOM, LIKHACHEV],
+                "relations": [{"src_id": LIKHACHEV["name"], "tgt_id": ROSATOM["name"],
+                               "label": "работает_в"}]}
+
+    @mcp.tool
+    def resolve_names(text: str) -> dict:
+        hit("resolve_names")
+        if "сломай" in text:
+            raise ToolError("resolver down")
+        names = [{"span": "Росатомом", "name": "Rosatom", "label": "Organization",
+                  "matched_via": ["stem+translit"], "score": 0.84}] if "Росатом" in text else []
+        return {"names": names}
+
+    @mcp.tool
+    def entity(name: str) -> dict:
+        """One entity, no relations (like find_entity_by_name)."""
+        hit("entity")
+        return {"entities": [{"entity_name": name, "entity_type": "Person"}]}
+
+    @mcp.tool
+    def relations_between(a: str, b: str) -> dict:
+        hit("relations_between")
+        edges = {frozenset({"Си Цзиньпин", "Трампа"}): ("Си Цзиньпин", "Трампа", "DIPLOMACY")}
+        e = edges.get(frozenset({a, b}))
+        return {"relations": [{"src_id": e[0], "tgt_id": e[1], "label": e[2]}] if e else []}
+
+    @mcp.tool
+    def neighbours(entity_name: str) -> dict:
+        """kb-tools shaped: resolution + ranked entities + relations (60 neighbours)."""
+        hit("neighbours")
+        ents = [{"entity_name": "Rosatom", "entity_type": "Organization",
+                 "description": "госкорпорация"}]
+        ents += [{"entity_name": f"Сосед {i}", "entity_type": "Person",
+                  "description": "описание " * 5, "relevance": round(1 - i / 100, 2),
+                  "match": "strong"} for i in range(60)]
+        return {"resolution": {"query": entity_name, "status": "ok",
+                               "chosen": {"name": "Rosatom", "matched_via": ["translit"]},
+                               "alternatives": []},
+                "centre_found": True, "entities": ents,
+                "relations": [{"src_id": f"Сосед {i}", "tgt_id": "Rosatom", "label": "WORKS_AT"}
+                              for i in range(60)]}
 
     @mcp.tool
     def big() -> str:
@@ -89,14 +129,16 @@ def kb_source() -> tuple[FastMCP, dict[str, int]]:
     return mcp, hits
 
 
-def scripted(*turns, seen: list | None = None) -> FunctionModel:
+def scripted(*turns, seen: list | None = None, tools: list | None = None) -> FunctionModel:
     """Each turn is a final text (str) or a list of ``(tool_name, args)`` calls; the turn is
     chosen by how many model responses the history already has (retries count too).
-    ``seen`` collects the messages of every request."""
+    ``seen`` collects the messages of every request, ``tools`` the tool names offered."""
 
     async def stream(messages, info):
         if seen is not None:
             seen.append(list(messages))
+        if tools is not None:
+            tools.append([t.name for t in info.function_tools])
         i = sum(isinstance(m, ModelResponse) for m in messages)
         turn = turns[min(i, len(turns) - 1)]
         if isinstance(turn, Exception):
@@ -128,7 +170,8 @@ class World:
         self.app.mount("/mcp", board_app)
         self.kb_app = self.kb.http_app(path="/mcp")
         self.store, self.bus = MemoryAgentStore(), EventBus()
-        mcp = [McpEntry(name="kb", url="http://kb/mcp", namespace="kb", token=KB_TOKEN),
+        mcp = [McpEntry(name="kb", url="http://kb/mcp", namespace="kb", token=KB_TOKEN,
+                        resolve_tool="resolve_names", relation_tool="relations_between"),
                McpEntry(name="board", url="http://lens/mcp/mcp", token=BOARD_TOKEN,
                         role="board")]
         self.settings = AgentSettings(mcp=settings.pop("mcp", mcp), **settings)

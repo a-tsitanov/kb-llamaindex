@@ -28,6 +28,12 @@ class McpEntry(BaseModel):
     token: SecretStr | None = None
     role: Literal["source", "board"] = "source"
     enabled: bool = True
+    # optional pre-resolution tool of a source: (text) -> {"names": [{span, name, …}]}; the
+    # runner calls it before the model starts and hides it from the model
+    resolve_tool: str | None = None
+    # optional relation check of a source: (a, b) -> {"relations": [...]}; the hook asks it
+    # when the model draws an edge no result of the run contains; hidden from the model
+    relation_tool: str | None = None
 
     @field_validator("token", mode="before")
     @classmethod
@@ -48,12 +54,14 @@ class AgentSettings(BaseSettings):
     mcp: list[McpEntry] = []
     model: str = "large"  # LiteLLM alias
     result_chars: int = 4000  # source result cut before it reaches the model
-    source_calls: int = 8  # soft budget per run
+    source_calls: int = 50  # soft budget per run
     board_calls: int = 20  # soft budget per run
-    request_limit: int = 30  # hard: model requests per run
+    stall_calls: int = 4  # consecutive calls with nothing new → stop the run
+    request_limit: int = 80  # hard: model requests per run
     run_timeout_s: float = 600.0
     tool_timeout_s: float = 120.0
     connect_timeout_s: float = 10.0
+    resolve_timeout_s: float = 5.0  # pre-resolution of request names (resolve_tool)
     retention_days: int = 30
     heartbeat_s: float = 15.0
 

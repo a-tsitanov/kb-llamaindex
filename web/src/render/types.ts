@@ -13,6 +13,8 @@ export interface NodeView {
   label: string;
   type: string;
   tone: Tone;
+  color: string; // type colour (border, legend)
+  degree: number; // relations on the board (node size)
   selected: boolean; // mentioned in the input
   fresh: boolean; // touched by the latest run
   pin: Point | null;
