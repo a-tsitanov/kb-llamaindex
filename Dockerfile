@@ -26,6 +26,9 @@ WORKDIR /app
 # telethon never bloats the core services.  ${APP_EXTRAS:+…} expands to
 # nothing when unset, keeping the sync command byte-identical (cache-safe).
 ARG APP_EXTRAS=
+# uv's 30 s default per download fails on a slow link (a VPN); not part of any cache key
+# that matters — it only changes how long one download may take.
+ENV UV_HTTP_TIMEOUT=180
 
 # Dependency layer — cached unless pyproject/uv.lock change.  README is
 # referenced by [project].readme so it must be present for the project

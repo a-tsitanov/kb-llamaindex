@@ -202,6 +202,14 @@ services:
 
   mcp-tools:
     <<: [*app-build]
+    # Graph / vector tools re-rank their results by relevance to the query with the BGE
+    # cross-encoder, so build WITH the `rerank` extra (CPU torch + baked model), like the
+    # worker. MCP_TOOLS_RERANK=false in the env turns ranking off.
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_EXTRAS: rerank
     command: ["python", "-m", "src.mcp.tools_server", "--transport", "http", "--port", "9002"]
     environment: *app-env
     ports:
@@ -227,6 +235,10 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
     restart: unless-stopped
+
+  # Lens (board, agent, web) moved to its own project ~/projects/lens (2026-10-08); it
+  # reaches this stack over MCP (kb-tools, kb-stats) and LiteLLM — see
+  # docs/mcp/kb-tools-contract.md.
 
   # ───────────────────────── backing services ────────────────────────
 
