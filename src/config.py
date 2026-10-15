@@ -687,6 +687,15 @@ class AgentSettings(BaseSettings):
     # Neighbours fetched per new entity from the ER vector index when
     # native kNN is on.
     er_vector_knn_k: int = Field(default=20, ge=1, le=100)
+    # Deterministic ER rule for Russian person names (src/graph/person_names.py):
+    # "Поляков" / "Поляков С.Н." / "Поляков Сергей Николаевич" / oblique cases
+    # merge without the LLM when the match is unique; pairs whose initials,
+    # patronymic, sex or birth year disagree are vetoed before cosine
+    # auto-merge and the judge. false restores the old initials signature.
+    er_person_name_rule: bool = True
+    # Stored same-surname persons pulled from the Postgres `entity` mirror per
+    # ingest for that rule (kNN misses short vs full FIO). 0 = no lookup.
+    er_person_namesake_limit: int = Field(default=200, ge=0, le=2000)
     # Where the ER candidate-kNN vectors live. "native" = Neo4j in-graph
     # vector index (db.index.vector, unchanged prod path). "milvus" =
     # entity_er_vec Milvus collection (opt-in on neo4j for the parity
@@ -977,7 +986,7 @@ class MonitorSettings(BaseSettings):
         default=2, ge=1, description="Параллелизм активностей монитора"
     )
     sweep_interval_minutes: int = Field(
-        default=30, ge=1, description="Период Temporal-Schedule монитор-свипа, мин"
+        default=5, ge=1, description="Период Temporal-Schedule монитор-свипа, мин"
     )
     new_window_days: int = Field(
         default=7, ge=1, description="Окно (дни) для детекта новых first_seen-связей"
@@ -1011,6 +1020,10 @@ class MonitorSettings(BaseSettings):
     )
     deliver_batch: int = Field(
         default=100, ge=1, description="Сколько непушенных алертов доставлять за один свип"
+    )
+    document_link: str = Field(
+        default="/api/v1/documents/{doc_id}",
+        description="Шаблон ссылки на документ в ленте наблюдения ({doc_id} подставляется)",
     )
 
 
