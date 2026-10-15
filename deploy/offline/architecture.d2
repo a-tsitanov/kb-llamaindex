@@ -1,11 +1,13 @@
-# Офлайн-кластер KB: что и как раскатано (состояние 2026-10-14)
-# Рендер: node ~/.claude/skills/d2/scripts/render.mjs deploy/offline/architecture.d2 deploy/offline/architecture.svg --layout elk
+# Офлайн-кластер KB: что и как раскатано (состояние 2026-10-15)
+# Сверено с deploy/offline/stack/docker-compose.srv0{1,2,3}.yml, litellm_config.offline.yaml,
+# gpu14/vllm.service, remote-access/, DEPLOYMENT.md, PROGRESS.md, spec entity-watch.
+# Рендер: d2 --layout elk architecture.d2 architecture.svg
 
 direction: down
 
 title: |md
-  # Офлайн-кластер базы знаний — ext22-srv01/02/03 (2026-10-06)
-  3× Supermicro SBI-4129P-C2N · 2× Xeon Gold 5218R · 256 ГБ · без GPU · без интернета · Docker compose `-p kb` поверх `docker-compose.prod.yml`
+  # Офлайн-кластер базы знаний — ext22-srv01/02/03 + GPU .14 (2026-10-15)
+  3× Supermicro SBI-4129P-C2N · 2× Xeon Gold 5218R · 256 ГБ · без интернета · Docker compose `-p kb` поверх `docker-compose.prod.yml` · граф = NebulaGraph · очередь ingest = RabbitMQ
 | {near: top-center}
 
 classes: {
@@ -14,116 +16,110 @@ classes: {
   llm: {style: {fill: "#FFF3E0"; stroke: "#E08A1E"; border-radius: 6}}
   ui: {style: {fill: "#F3E8FB"; stroke: "#8A4FC8"; border-radius: 6}}
   ops: {style: {fill: "#F2F2F2"; stroke: "#888888"; border-radius: 6; font-color: "#444444"}}
-  socket: {style: {fill: "#FFFFFF"; stroke: "#BBBBBB"; stroke-dash: 4}}
   server: {style: {fill: "#FAFAFA"; stroke: "#555555"; stroke-width: 2; font-size: 20; bold: true}}
   primary: {style: {stroke: "#E08A1E"; stroke-width: 3}}
   fallback: {style: {stroke: "#E08A1E"; stroke-dash: 5}}
   tunnel: {style: {stroke: "#8A4FC8"; stroke-dash: 3; stroke-width: 2}}
 }
 
-user: Пользователь (мак)\nVPN ppp0 10.10.240.x {
+# ── удалённый доступ ──
+remote: Удалённый доступ {
+  class: ops
+  mac: Мак разработчика {shape: person; class: ui}
+  keygo: keygo 158.160.224.22:2222\nобратный SSH-туннель {class: ops}
+  gw31: Шлюз .31 (Ubuntu)\nL2TP/IPsec VPN «BIBB» (ppp0, split-tunnel)\nстек agent_v2 → модели кластера {class: ops}
+  mac -> keygo: ssh -p 2222 {class: tunnel}
+  keygo -> gw31: reverse tunnel {class: tunnel}
+}
+
+lan: Пользователь в LAN / VPN\n(10.10.0.0/16) {
   shape: person
   class: ui
 }
 
-gpu: GPU-узел 10.10.151.15 {
+gpu: GPU-узел · 10.10.113.14 {
   class: server
-  vllm: vLLM :8000\ndeepseek-v4-flash\n262k ctx · основная модель {class: llm}
+  vllm: vLLM :8000 (user-unit vllm)\nQwen3.6-35B-A3B NVFP4 → «qwen38»\n2× RTX 5060 Ti · TP=2 · 131k ctx · KV fp8 {class: llm}
 }
 
-srv01: srv01 · 10.10.113.11 · ДАННЫЕ {
+srv01: srv01 · 10.10.113.11 · ДАННЫЕ + ИНТЕРФЕЙС АГЕНТА {
   class: server
-  s0: сокет 0 (ядра 0-19,40-59) {
-    class: socket
-    pg: Postgres 16 :5432\nkb_llamaindex · temporal · litellm {class: data}
-    milvus: Milvus 2.4 :19530\nchunks · entity_er_vec {class: data}
-    etcd: etcd {class: data}
-    minio: MinIO :9000 / :9101\nkb-uploads · kb-staging {class: data}
-    nebula: NebulaGraph 3.8\ngraphd :9669 · metad · storaged\nspace kb {class: data}
-    redis: Redis :6379 {class: data}
-    rabbit: RabbitMQ :5672 / :15672\ningest.pending · ingest.dlq {class: data}
-  }
-  s1: сокет 1 (ядра 20-39,60-79) {
-    class: socket
-    embed: llama.cpp :8081\nbge-m3 FP16 (1024) {class: llm}
-    docs2md: docs2md :8070\nOCR выключен {class: app}
-    dsh: agent-web 127.0.0.1:3080\n«KB Ассистент» (dsh 0.2.0-rc.2)\nnetwork_mode: host · cookie 365 дн\nLAN 10.10.113.11:3080 через lan-proxy\n(белый список 10.10.0.0/16) {class: ui}
-    dshplug: плагин dsh-kb-ingest\n/kb-ingest · /kb-status\nkb_ingest_file · kb_ingest_status {class: ui}
-    dsh -> dshplug: {style.stroke-dash: 2}
-    llmproxy: llm-proxy 10.10.113.11:4000\n(образ agent-web, L4 → LiteLLM srv02) {class: ui}
-  }
-  hostsvc: хост: chrony (NTP-сервер, stratum 8) · opensm (IB 100G) {class: ops}
+  pg: Postgres 16 :5432\nkb_llamaindex · temporal · litellm\n+ журналы watch: entity_mention · edge_new\nwatch · watch_event · watch_seen · monitor_cursor {class: data}
+  milvus: Milvus 2.4 :19530\nчанки · entity_er_vec\n(+ etcd, сегменты в MinIO) {class: data}
+  minio: MinIO :9000 / :9101\nkb-uploads (оригиналы) · kb-staging {class: data}
+  nebula: NebulaGraph 3.8 :9669\nmetad · storaged · graphd · space kb {class: data}
+  redis: Redis :6379 {class: data}
+  rabbit: RabbitMQ :5672 / :15672\ningest.pending · ingest.dlq {class: data}
+  embed: llama.cpp embed :8081\nbge-m3 FP16 (1024) · сокет 1 {class: llm}
+  docs2md: docs2md :8070\nOCR выключен · сокет 1 {class: app}
+  agent: agent-web «KB Ассистент»\n127.0.0.1:3080 (network_mode host)\nLAN :3080 через lan-proxy · токен → cookie 365 дн\nплагины: kb-ingest · kb-brand · kb-locale-ru {class: ui}
+  llmproxy: llm-proxy :4000\n(образ agent-web, L4 → LiteLLM srv02)\nдля VPN-клиентов {class: ui}
+  hostsvc: хост: chrony (NTP) · opensm (IB 100G) {class: ops}
 }
 
 srv02: srv02 · 10.10.113.12 · ПРИЛОЖЕНИЕ + ПОИСК {
   class: server
-  s0: сокет 0 {
-    class: socket
-    webui: webui :8090\nформа загрузки + поиск {class: ui}
-    api: API :8000\nX-API-Key {class: app}
-    consumer: ingest-consumer\nK=4 документа {class: app}
-    worker: worker (rerank)\nmain·merge·search·large·graph_build·wiki·scheduler·monitor\nER kNN по Milvus = ON {class: app}
-    mcp: MCP :9001 search · :9002 tools · :9003 stats\nBearer API_KEYS {class: app}
-    temporal: Temporal :7233\nUI :8080 {class: app}
-    litellm: LiteLLM :4000 · UI /ui\nsmall · large · bge-m3 {class: llm}
-    mon: Prometheus :9092 · Grafana :3001 {class: ops}
-  }
-  s1: сокет 1 {
-    class: socket
-    llmsearch: llama.cpp :8085\nQwen3-30B-A3B Q4\nlarge-cpu (резерв) {class: llm}
-  }
+  webui: webui :8090\nзагрузка · поиск · скачивание оригинала {class: ui}
+  api: API :8000 (X-API-Key)\ningest · search · documents {class: app}
+  consumer: ingest-consumer\nK=4 документа {class: app}
+  temporal: Temporal :7233\nUI :8080 {class: app}
+  worker: worker (kb-app-rerank)\nmain · merge · search · large · graph_build\nwiki · scheduler · monitor\nreranker bge · ER kNN по Milvus\nmonitor: sweep watch раз в 5 мин {class: app}
+  mcp: MCP :9001 search · :9002 tools · :9003 stats\nBearer API_KEYS\ntools: kb_watch · kb_unwatch · kb_watchlist\nkb_watch_feed · kb_ack {class: app}
+  litellm: LiteLLM :4000 · UI /ui\nsmall · large · bge-m3\nфолбэки: small→small-cpu\nlarge→large-cpu→small-cpu {class: llm}
+  llmsearch: llama.cpp :8085 · сокет 1\nQwen3-30B-A3B Q4 · large-cpu {class: llm}
+  mon: Prometheus :9092 · Grafana :3001 {class: ops}
 }
 
 srv03: srv03 · 10.10.113.13 (/23) · LLM ДЛЯ INGEST {
   class: server
-  s0: сокет 0 {
-    class: socket
-    ing0: llama.cpp :8082\nQwen3-30B-A3B Q4\nsmall-cpu (резерв) {class: llm}
-    workerllm: worker-llm\nпул llm · LLM_POOL_N=8 {class: app}
-  }
-  s1: сокет 1 {
-    class: socket
-    ing1: llama.cpp :8083\nQwen3-30B-A3B Q4\nsmall-cpu (резерв) {class: llm}
-  }
+  workerllm: worker-llm\nпул llm (extract_kg)\nLLM_POOL_N=12 (.env) {class: app}
+  ing0: llama.cpp :8082 · сокет 0\nQwen3-30B-A3B Q4 · small-cpu {class: llm}
+  ing1: llama.cpp :8083 · сокет 1\nQwen3-30B-A3B Q4 · small-cpu {class: llm}
 }
 
-# ── доступ пользователя ──
-user -> srv01.s1.dsh: http://10.10.113.11:3080 (токен → cookie) {class: tunnel}
-user -> srv02.s0.webui: :8090 (напрямую или туннель) {class: tunnel}
+# ── удалённый доступ ──
+remote.gw31 -> srv01.llmproxy: VPN → :4000 (LLM кластера) {class: tunnel}
+remote.gw31 -> srv01.agent: ssh -J / :3080 {class: tunnel}
+lan -> srv01.agent: http://10.10.113.11:3080 {class: tunnel}
+lan -> srv02.webui: http://10.10.113.12:8090 {class: tunnel}
 
 # ── загрузка документов ──
-srv02.s0.webui -> srv01.s1.docs2md: /convert → Markdown
-srv02.s0.webui -> srv02.s0.api: /api/v1/ingest
-srv01.s1.dshplug -> srv02.s0.webui: /api/convert → /api/ingest
-srv02.s0.api -> srv01.s0.rabbit: ingest.pending
-srv02.s0.consumer -> srv01.s0.rabbit: prefetch K
-srv02.s0.consumer -> srv02.s0.temporal: DocumentIngestWorkflow
+srv02.webui -> srv01.docs2md: /convert → Markdown
+srv02.webui -> srv02.api: /api/v1/ingest · documents
+srv01.agent -> srv02.webui: kb-ingest: /api/convert → /api/ingest
+srv02.api -> srv01.rabbit: ingest.pending
+srv02.api -> srv01.minio: оригинал
+srv02.consumer -> srv01.rabbit: prefetch K
+srv02.consumer -> srv02.temporal: DocumentIngestWorkflow
 
 # ── оркестрация ──
-srv02.s0.worker -> srv02.s0.temporal: пулы задач
-srv03.s0.workerllm -> srv02.s0.temporal: extract_kg
+srv02.worker -> srv02.temporal: пулы задач
+srv03.workerllm -> srv02.temporal: extract_kg
 
-# ── хранилища (связи к блоку данных целиком) ──
-srv02.s0.worker -> srv01.s0: PG · Milvus · Nebula · MinIO · Redis
-srv03.s0.workerllm -> srv01.s0: MinIO staging
-srv02.s0.temporal -> srv01.s0: Postgres
-srv02.s0.mcp -> srv01.s0: Nebula · Milvus · PG
-srv01.s0.milvus -> srv01.s0.etcd
-srv01.s0.milvus -> srv01.s0.minio
+# ── хранилища ──
+srv02.worker -> srv01.nebula: граф
+srv02.worker -> srv01.milvus: векторы · ER
+srv02.worker -> srv01.pg: build_property_graph → журналы\nsweep → watch_event
+srv03.workerllm -> srv01.minio: staging
+srv02.temporal -> srv01.pg
+srv02.mcp -> srv01.nebula
+srv02.mcp -> srv01.pg: watch · лента
+srv01.milvus -> srv01.minio
 
 # ── модели через LiteLLM ──
-srv02.s0.worker -> srv02.s0.litellm
-srv03.s0.workerllm -> srv02.s0.litellm
-srv01.s1.dsh -> srv02.s0.litellm: large (по умолч.) / small
-srv02.s0.litellm -> gpu.vllm: small (без размышлений)\nlarge (с размышлениями) {class: primary}
-srv02.s0.litellm -> srv03.s0.ing0: резерв small {class: fallback}
-srv02.s0.litellm -> srv03.s1.ing1: резерв small {class: fallback}
-srv02.s0.litellm -> srv02.s1.llmsearch: резерв large {class: fallback}
-srv02.s0.litellm -> srv01.s1.embed: bge-m3
-srv02.s0.litellm -> srv01.s0: БД litellm (UI)
+srv02.worker -> srv02.litellm
+srv03.workerllm -> srv02.litellm: small
+srv01.agent -> srv02.litellm: large / small
+srv01.llmproxy -> srv02.litellm: L4
+srv02.litellm -> gpu.vllm: small (без размышлений)\nlarge (с размышлениями) {class: primary}
+srv02.litellm -> srv03.ing0: small-cpu {class: fallback}
+srv02.litellm -> srv03.ing1: small-cpu {class: fallback}
+srv02.litellm -> srv02.llmsearch: large-cpu {class: fallback}
+srv02.litellm -> srv01.embed: bge-m3
+srv02.litellm -> srv01.pg: БД litellm (UI)
 
 # ── агент ──
-srv01.s1.dsh -> srv02.s0.mcp: MCP streamable-http
+srv01.agent -> srv02.mcp: MCP streamable-http (KB_MCP_TOKEN)
 
 legend: Обозначения {
   near: bottom-right
@@ -133,6 +129,5 @@ legend: Обозначения {
   c: модели {class: llm}
   d: интерфейсы {class: ui}
   e: служебное {class: ops}
-  f: "→ сплошная оранжевая = GPU (основной путь)\n⇢ пунктир оранжевый = CPU-резерв\n⇢ фиолетовый пунктир = доступ пользователя" {shape: text}
+  f: "→ толстая оранжевая = GPU .14 (основной путь)\n⇢ оранжевый пунктир = CPU-резерв\n⇢ фиолетовый пунктир = доступ пользователя\nGPU .15 (deepseek-v4-flash) выведен 2026-10-14" {shape: text}
 }
-srv01.s1.llmproxy -> srv02.s0.litellm: VPN-клиенты {style.stroke-dash: 3}

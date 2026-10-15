@@ -40,9 +40,9 @@
     "semantic_hash": "9b90c2e756ac77fd8839fe6391ccfdc0"
   },
   "pyproject.toml": {
-    "mtime": 1790955296.9553332,
-    "ast_hash": "fecb72f0a7fbed076ea78f49fca2227f",
-    "semantic_hash": "fecb72f0a7fbed076ea78f49fca2227f"
+    "mtime": 1792077456.7760725,
+    "ast_hash": "5749169b0ab2bb8d9f52b2a33fde5b35",
+    "semantic_hash": ""
   },
   "scripts/analyze.py": {
     "mtime": 1790955296.9564023,
@@ -145,8 +145,8 @@
     "semantic_hash": "a18f9757ac7abaed67db9050e3782cbd"
   },
   "scripts/setup_db.py": {
-    "mtime": 1792042995.624384,
-    "ast_hash": "9fa6a1cb7c48b297ca29125189b063db",
+    "mtime": 1792077470.4446678,
+    "ast_hash": "5e3e208aeedbf607f9f296b4c57642cf",
     "semantic_hash": ""
   },
   "scripts/setup_monitor_schedule.py": {
@@ -685,8 +685,8 @@
     "semantic_hash": "f2bfa441224b06aade01a2649ff90d73"
   },
   "src/graph/retriever.py": {
-    "mtime": 1790955297.0088043,
-    "ast_hash": "f52a0be46454fecea53adbe7bc82cc79",
+    "mtime": 1792077456.7799478,
+    "ast_hash": "4b0951ce203790341c24c40990842684",
     "semantic_hash": ""
   },
   "src/graph/rollups_graph_ops.py": {
@@ -810,8 +810,8 @@
     "semantic_hash": ""
   },
   "src/mcp/tools_server.py": {
-    "mtime": 1792062083.308569,
-    "ast_hash": "eb8fc9f362431c90fefae096a74c9f87",
+    "mtime": 1792077456.7803214,
+    "ast_hash": "e991f0ae63512dcb0bddb1b8ebcb1efe",
     "semantic_hash": ""
   },
   "src/models/__init__.py": {
@@ -870,8 +870,8 @@
     "semantic_hash": "99515a10eebf41988cf23654dabe9957"
   },
   "src/retrieval/atomic_tools.py": {
-    "mtime": 1790955297.0198462,
-    "ast_hash": "244060f6ce33b9f2190539217393e4cb",
+    "mtime": 1792077456.7810628,
+    "ast_hash": "278ebc148a236d4902943d75919d46f5",
     "semantic_hash": ""
   },
   "src/retrieval/date_filters.py": {
@@ -2525,8 +2525,8 @@
     "semantic_hash": "50d3b00b27643b7a2b6e13c01452039a"
   },
   "tests/test_mcp/test_tools_server.py": {
-    "mtime": 1792043351.2957768,
-    "ast_hash": "483464598d9b3b182531d681e432f5a2",
+    "mtime": 1792077456.7845993,
+    "ast_hash": "6ac96cc6aa6d4a21c046b796803c7e46",
     "semantic_hash": ""
   },
   "tests/test_observability/__init__.py": {
@@ -2585,9 +2585,9 @@
     "semantic_hash": "713dd693de56dc1908b5fbd3a869a8f9"
   },
   "tests/test_retrieval/test_graph_walk_retriever.py": {
-    "mtime": 1790955297.0968373,
-    "ast_hash": "0acebc3f6a195e7743994c1153e67e81",
-    "semantic_hash": "0acebc3f6a195e7743994c1153e67e81"
+    "mtime": 1792077456.7858264,
+    "ast_hash": "079f43385667b1c6cdac7c379cdf1800",
+    "semantic_hash": ""
   },
   "tests/test_retrieval/test_group_filter.py": {
     "mtime": 1790955297.096912,
@@ -2625,8 +2625,8 @@
     "semantic_hash": "5a243cf2f31c821d216d359c2b00d833"
   },
   "tests/test_retrieval/test_nebula_read_slice.py": {
-    "mtime": 1790955297.0976028,
-    "ast_hash": "046419c575862eb22f6a1ec076eca341",
+    "mtime": 1792077456.7865288,
+    "ast_hash": "e61b91e467b1ed64a03c92b44c764d08",
     "semantic_hash": ""
   },
   "tests/test_retrieval/test_query_planner.py": {
@@ -3100,9 +3100,9 @@
     "semantic_hash": ""
   },
   "docker-compose.litellm.yml": {
-    "mtime": 1790955296.8087769,
-    "ast_hash": "6070e02bdf9dda03308c097d275d5927",
-    "semantic_hash": "6070e02bdf9dda03308c097d275d5927"
+    "mtime": 1792077456.7318616,
+    "ast_hash": "a77807e3e60c6a248a35109db205125c",
+    "semantic_hash": ""
   },
   "docker-compose.openclaw.yml": {
     "mtime": 1790955296.8100154,
@@ -3110,8 +3110,8 @@
     "semantic_hash": ""
   },
   "docker-compose.prod.yml": {
-    "mtime": 1791288049.5385177,
-    "ast_hash": "755d1452f2a8ba76b5e9e60f4702c201",
+    "mtime": 1792077456.7327542,
+    "ast_hash": "6df8863a5a152abc922d8a73a8c8a40b",
     "semantic_hash": ""
   },
   "docker-compose.scale.yml": {
@@ -4270,8 +4270,8 @@
     "semantic_hash": ""
   },
   "src/graph/entity_table.py": {
-    "mtime": 1790955296.9941213,
-    "ast_hash": "ebc7cde5eda82f27c672d6e0a21f55df",
+    "mtime": 1792077456.7779467,
+    "ast_hash": "42fa8396ed31db4344093f2415b1c383",
     "semantic_hash": ""
   },
   "src/storage/entity_search.py": {
@@ -9707,6 +9707,96 @@
   "tests/test_graph/test_person_names.py": {
     "mtime": 1792066325.5966752,
     "ast_hash": "44775b5708c337f2051def34d05a0e9c",
+    "semantic_hash": ""
+  },
+  "scripts/backfill_entity_names.py": {
+    "mtime": 1792077456.7765725,
+    "ast_hash": "6e3a619647e83e03383b9d9afc8822e0",
+    "semantic_hash": ""
+  },
+  "src/graph/name_resolution.py": {
+    "mtime": 1792077456.7786682,
+    "ast_hash": "37dc625f3fe0e1c72d504d0568077b9b",
+    "semantic_hash": ""
+  },
+  "src/retrieval/graph_rank.py": {
+    "mtime": 1792077456.7815776,
+    "ast_hash": "1482812e2c6c8eea93ea1998bbbbdfde",
+    "semantic_hash": ""
+  },
+  "src/storage/entity_lexicon.py": {
+    "mtime": 1792077456.7819126,
+    "ast_hash": "04cd0104ec0ea5787c3e4b98dd1852af",
+    "semantic_hash": ""
+  },
+  "src/utils/names.py": {
+    "mtime": 1792077456.7825155,
+    "ast_hash": "0c1d9a29ff2f618a25752e879027bf7c",
+    "semantic_hash": ""
+  },
+  "tests/eval/__init__.py": {
+    "mtime": 1792077456.7826023,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "tests/test_graph/test_entity_table_names.py": {
+    "mtime": 1792077456.7833285,
+    "ast_hash": "dc1ad4e65b055dd0c412af8b508b6bc2",
+    "semantic_hash": ""
+  },
+  "tests/test_graph/test_name_resolution.py": {
+    "mtime": 1792077456.7839472,
+    "ast_hash": "4c58911d1421687d142b39d5f6e269e3",
+    "semantic_hash": ""
+  },
+  "tests/test_mcp/test_tools_resolution.py": {
+    "mtime": 1792077456.7842102,
+    "ast_hash": "ac61417ebdb34fa065ac529c507fc1e7",
+    "semantic_hash": ""
+  },
+  "tests/test_retrieval/test_graph_rank.py": {
+    "mtime": 1792077456.7852027,
+    "ast_hash": "69b1cb3214ed429fe4901345b1a7e93e",
+    "semantic_hash": ""
+  },
+  "tests/test_retrieval/test_tools_resolution.py": {
+    "mtime": 1792077456.7868967,
+    "ast_hash": "1cf960490c77e52ada227bdf279527e4",
+    "semantic_hash": ""
+  },
+  "tests/test_scripts/test_backfill_entity_names.py": {
+    "mtime": 1792077456.787399,
+    "ast_hash": "fa028a4e375d8fb60fd3245641b784e1",
+    "semantic_hash": ""
+  },
+  "tests/test_storage/test_entity_lexicon.py": {
+    "mtime": 1792077456.7877955,
+    "ast_hash": "86d33511210421f689b642d202e9ba86",
+    "semantic_hash": ""
+  },
+  "tests/test_utils/__init__.py": {
+    "mtime": 1792077456.787883,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "tests/test_utils/test_names.py": {
+    "mtime": 1792077456.78837,
+    "ast_hash": "83e7edb1500c203bdbe30797f3f60e6f",
+    "semantic_hash": ""
+  },
+  "docs/mcp/kb-tools-contract.md": {
+    "mtime": 1792077456.733127,
+    "ast_hash": "b2d694d3e0b27f1097cc9c44dcb4bb26",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/plans/2026-10-08-lens-extraction.md": {
+    "mtime": 1792077456.7338428,
+    "ast_hash": "379054bef003eac565a24928204ad5df",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/specs/2026-09-30-kb-name-resolution-design.md": {
+    "mtime": 1792077456.734774,
+    "ast_hash": "5091b7ef76d5dee5cc196cbef323bbdb",
     "semantic_hash": ""
   }
 }
