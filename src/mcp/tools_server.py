@@ -34,7 +34,7 @@ from __future__ import annotations
 import asyncio
 import json
 from calendar import monthrange
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastmcp import FastMCP
@@ -683,6 +683,163 @@ async def polarity_evolution(
 # sense in the context of an existing accumulator, which atomic-MCP
 # clients don't maintain — they pass each tool call as a fresh
 # request and assemble context themselves.
+
+
+# ── Entity watch (docs/superpowers/specs/2026-10-15-entity-watch-design.md) ─
+# Subscriptions live in Postgres `watch`; the monitor sweep turns ingest
+# journals into `watch_event` rows; these tools read them as a feed. One
+# owner until the panel has users.
+
+_OWNER = "default"
+WATCH_KINDS: tuple[str, ...] = (
+    "new_mention", "new_connection", "new_identifier", "new_event", "contradiction",
+)
+
+
+def _entity_search():
+    from src.storage.entity_search import EntitySearchRepository
+
+    return EntitySearchRepository()
+
+
+def _watch_repo():
+    from src.storage.watch import WatchRepository
+
+    return WatchRepository()
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def _candidate(row: dict[str, Any]) -> dict[str, Any]:
+    return {k: row.get(k) for k in ("vid", "name", "label", "mention_count")}
+
+
+async def _watch(name: str, kinds: list[str] | None, note: str) -> dict[str, Any]:
+    bad = sorted(set(kinds or []) - set(WATCH_KINDS))
+    if bad:
+        return {"error": f"unknown kinds {bad}; expected a subset of {list(WATCH_KINDS)}"}
+    search = _entity_search()
+    hits = await search.search(name, mode="exact", limit=5)
+    if len(hits) != 1:
+        hits = await search.search(name, mode="substring", limit=10)
+    if not hits:
+        return {"status": "not_found", "query": name}
+    if len(hits) > 1:
+        return {"status": "ambiguous", "query": name,
+                "candidates": [_candidate(h) for h in hits]}
+    hit = hits[0]
+    await _watch_repo().add_watch(_OWNER, hit["vid"], hit["name"], kinds=list(kinds or []), note=note)
+    return {"status": "watching", "entity": _candidate(hit), "kinds": list(kinds or [])}
+
+
+async def _unwatch(name_or_vid: str) -> dict[str, Any]:
+    repo = _watch_repo()
+    for w in await repo.list_watch(_OWNER):
+        if name_or_vid in (w["entity_vid"], w["entity_name"]):
+            await repo.remove_watch(_OWNER, w["entity_vid"])
+            return {"status": "removed", "entity": w["entity_name"]}
+    return {"status": "not_watched", "query": name_or_vid}
+
+
+async def _watchlist() -> dict[str, Any]:
+    return {"watches": _json_safe(await _watch_repo().list_watch(_OWNER))}
+
+
+def build_feed_cards(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group feed events into one card per document (events without a
+    document get a card each), cards ordered by their newest event."""
+    cards: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        doc = str(r["doc_id"]) if r.get("doc_id") else None
+        key = doc or f"event:{r['id']}"
+        card = cards.get(key)
+        if card is None:
+            path = r.get("doc_path") or ""
+            card = cards[key] = {
+                "doc_id": doc,
+                "doc_title": path.rsplit("/", 1)[-1] if path else None,
+                "doc_date": _json_safe(r.get("doc_date")),
+                "link": settings.monitor.document_link.format(doc_id=doc) if doc else None,
+                "latest": r["detected_at"],
+                "events": [],
+            }
+        card["latest"] = max(card["latest"], r["detected_at"])
+        card["events"].append({
+            "id": r["id"], "entity": r["entity_name"], "kind": r["kind"],
+            "why": r.get("why", ""), "detail": _json_safe(r.get("detail") or {}),
+            "detected_at": _json_safe(r["detected_at"]),
+            "acked": r.get("acked_at") is not None,
+        })
+    ordered = sorted(cards.values(), key=lambda c: c["latest"], reverse=True)
+    for c in ordered:
+        c["latest"] = _json_safe(c["latest"])
+    return ordered
+
+
+async def _watch_feed(include_acked: bool, limit: int) -> dict[str, Any]:
+    repo = _watch_repo()
+    rows = await repo.feed(_OWNER, include_acked=include_acked, limit=limit)
+    await repo.mark_seen(_OWNER, [r["id"] for r in rows])
+    return {"count": len(rows), "cards": build_feed_cards(rows)}
+
+
+async def _ack(event_ids: list[int] | None, all_events: bool) -> dict[str, Any]:
+    if not all_events and not event_ids:
+        return {"error": "pass event_ids or all=true"}
+    n = await _watch_repo().ack(_OWNER, event_ids=event_ids, all_events=all_events)
+    return {"acked": n}
+
+
+@mcp.tool(timeout=120)
+async def kb_watch(name: str, kinds: list[str] | None = None, note: str = "") -> dict[str, Any]:
+    """Put an entity (person, organisation, phone, …) on watch: new documents
+    mentioning it, new connections / identifiers and contradicting facts then
+    show up in `kb_watch_feed`.
+
+    `name` is resolved against the KB entity table (exact, then fuzzy). One
+    match ⇒ subscribed; several ⇒ returns `candidates` and subscribes to
+    nothing — call again with the exact candidate name. `kinds` limits the
+    events (new_mention, new_connection, new_identifier, new_event, contradiction);
+    empty = all. `note` is a free-text reason. Only events detected after
+    the subscription are shown."""
+    return await _watch(name, kinds, note)
+
+
+@mcp.tool(timeout=120)
+async def kb_unwatch(name_or_vid: str) -> dict[str, Any]:
+    """Remove an entity from the watchlist (by its watched name or vid)."""
+    return await _unwatch(name_or_vid)
+
+
+@mcp.tool(timeout=120)
+async def kb_watchlist() -> dict[str, Any]:
+    """List watched entities with their event kinds, note and since-when."""
+    return await _watchlist()
+
+
+@mcp.tool(timeout=120)
+async def kb_watch_feed(include_acked: bool = False, limit: int = 50) -> dict[str, Any]:
+    """What is new about watched entities: events grouped into one card per
+    source document (title, date, `link` to GET the document — add
+    `?variant=original` for the uploaded file). Unacknowledged events only
+    unless `include_acked`. Acknowledge with `kb_ack`."""
+    return await _watch_feed(include_acked, limit)
+
+
+@mcp.tool(timeout=120)
+async def kb_ack(event_ids: list[int] | None = None, all: bool = False) -> dict[str, Any]:
+    """Mark feed events as read (`event_ids` from `kb_watch_feed`, or `all`)."""
+    return await _ack(event_ids, all)
 
 
 def main() -> None:

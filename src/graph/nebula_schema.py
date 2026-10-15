@@ -54,10 +54,10 @@ SCHEMA_DDL: list[str] = [
     "event_start_epoch int DEFAULT 0, event_end_epoch int DEFAULT 0, "
     "event_ts_precision string DEFAULT '', "
     # Offline-materialized centrality + risk scores (analytics/materialize.py).
-    # COMPUTE-written (in-worker igraph under nebula), NOT ingest-written, so
-    # upsert_nodes omits them — they default to 0/'' on re-ingest and the
-    # centrality/risk materialize re-writes them (the offline-materialize
-    # lifecycle). Backs centrality.top_central_entities + signals.risk_score /
+    # COMPUTE-written (in-worker igraph under nebula), NOT ingest-written:
+    # upsert_nodes reads them back and writes them again unchanged
+    # (nebula_store._PRESERVED), so a re-mention keeps the last materialized
+    # values. Backs centrality.top_central_entities + signals.risk_score /
     # investigate_next.
     "pagerank double DEFAULT 0.0, betweenness double DEFAULT 0.0, "
     "eigenvector double DEFAULT 0.0, risk_score double DEFAULT 0.0, "

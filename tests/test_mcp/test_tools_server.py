@@ -30,6 +30,12 @@ _EXPECTED_TOOLS = {
     # Channel-side series — inputs to MCP-3's stat_align.
     "topic_trend",
     "polarity_evolution",
+    # Entity watch: subscriptions + the per-document event feed.
+    "kb_watch",
+    "kb_unwatch",
+    "kb_watchlist",
+    "kb_watch_feed",
+    "kb_ack",
 }
 
 

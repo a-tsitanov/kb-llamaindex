@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS documents (
     doc_date     DATE,
     source_channel TEXT NOT NULL DEFAULT '',
     source_group   TEXT NOT NULL DEFAULT '',
+    original_path  TEXT,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -54,6 +55,9 @@ CREATE TABLE IF NOT EXISTS documents (
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS doc_date DATE;
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_channel TEXT NOT NULL DEFAULT '';
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_group   TEXT NOT NULL DEFAULT '';
+-- s3:// URI of the uploaded original (e.g. .docx) when `path` holds the
+-- converted text; NULL = only the text was uploaded (download falls back).
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS original_path TEXT;
 
 -- Widen the status domain to include 'skipped' (classifier skip, written by
 -- finalize.mark_skipped) on already-created tables. The inline CHECK above is
@@ -312,6 +316,93 @@ CREATE INDEX IF NOT EXISTS entity_name_trgm_idx
 CREATE INDEX IF NOT EXISTS entity_label_idx ON entity (label);
 """
 
+# Entity watch (docs/superpowers/specs/2026-10-15-entity-watch-design.md).
+# Ingest appends to the two journals (entity_mention, edge_new) for EVERY
+# entity; the monitor sweep reads them past a per-journal cursor and writes
+# watch_event rows only for subscribed entities. entity_vid is the same
+# entity_vid(name) key the graph vertex and the `entity` mirror use.
+_WATCH_DDL = """
+CREATE TABLE IF NOT EXISTS watch (
+    id          BIGSERIAL PRIMARY KEY,
+    owner       TEXT NOT NULL,
+    entity_vid  TEXT NOT NULL,
+    entity_name TEXT NOT NULL,
+    kinds       TEXT[] NOT NULL DEFAULT '{}',
+    muted_until TIMESTAMPTZ,
+    note        TEXT NOT NULL DEFAULT '',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (owner, entity_vid)
+);
+CREATE TABLE IF NOT EXISTS entity_mention (
+    entity_vid    TEXT NOT NULL,
+    doc_id        UUID NOT NULL,
+    entity_name   TEXT NOT NULL,
+    label         TEXT NOT NULL DEFAULT '',
+    doc_date      DATE,
+    mention_count INTEGER NOT NULL DEFAULT 0,
+    backfill      BOOLEAN NOT NULL DEFAULT false,
+    ingested_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    id            BIGSERIAL UNIQUE,
+    PRIMARY KEY (entity_vid, doc_id)
+);
+CREATE TABLE IF NOT EXISTS edge_new (
+    id         BIGSERIAL PRIMARY KEY,
+    src_vid    TEXT NOT NULL,
+    src_name   TEXT NOT NULL,
+    src_label  TEXT NOT NULL DEFAULT '',
+    tgt_vid    TEXT NOT NULL,
+    tgt_name   TEXT NOT NULL,
+    tgt_label  TEXT NOT NULL DEFAULT '',
+    rel        TEXT NOT NULL DEFAULT '',
+    doc_id     UUID NOT NULL,
+    doc_date   DATE,
+    backfill   BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (src_vid, tgt_vid)
+);
+CREATE TABLE IF NOT EXISTS watch_event (
+    id          BIGSERIAL PRIMARY KEY,
+    entity_vid  TEXT NOT NULL,
+    entity_name TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    doc_id      UUID,
+    doc_date    DATE,
+    detail      JSONB NOT NULL DEFAULT '{}',
+    why         TEXT NOT NULL DEFAULT '',
+    source_table TEXT NOT NULL DEFAULT '',
+    source_id   BIGINT,
+    dedup_key   TEXT NOT NULL UNIQUE,
+    detected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS watch_seen (
+    owner    TEXT NOT NULL,
+    event_id BIGINT NOT NULL,
+    seen_at  TIMESTAMPTZ,
+    acked_at TIMESTAMPTZ,
+    PRIMARY KEY (owner, event_id)
+);
+CREATE TABLE IF NOT EXISTS monitor_cursor (
+    name       TEXT PRIMARY KEY,
+    last_id    BIGINT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS risk_snapshot (
+    entity_vid TEXT NOT NULL,
+    risk_score DOUBLE PRECISION NOT NULL,
+    taken_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (entity_vid, taken_at)
+);
+"""
+
+_WATCH_INDEXES_DDL = """
+CREATE INDEX IF NOT EXISTS entity_mention_doc_idx ON entity_mention (doc_id);
+CREATE INDEX IF NOT EXISTS edge_new_src_idx ON edge_new (src_vid);
+CREATE INDEX IF NOT EXISTS edge_new_tgt_idx ON edge_new (tgt_vid);
+CREATE INDEX IF NOT EXISTS watch_event_entity_idx
+    ON watch_event (entity_vid, detected_at DESC);
+CREATE INDEX IF NOT EXISTS watch_entity_idx ON watch (entity_vid);
+"""
+
 _STAT_INDEXES_DDL = """
 CREATE INDEX IF NOT EXISTS stat_observation_series_idx
     ON stat_observation (indicator_id, period_start);
@@ -453,6 +544,8 @@ def setup_postgres() -> None:
         cur.execute(_ER_VERDICT_DDL)
         cur.execute(_ENTITY_DDL)
         cur.execute(_ENTITY_INDEXES_DDL)
+        cur.execute(_WATCH_DDL)
+        cur.execute(_WATCH_INDEXES_DDL)
         cur.execute(_BOT_USER_DDL)
         cur.execute(_BOT_REQUEST_DDL)
         cur.execute(_BOT_INDEXES_DDL)

@@ -17,14 +17,22 @@ from typing import Any
 from loguru import logger
 from temporalio import activity
 
-from src.analytics.contracts import DeliverIn, DeliverResult, MonitorIn, MonitorResult
+from src.analytics.contracts import (
+    DeliverIn,
+    DeliverResult,
+    MonitorIn,
+    MonitorResult,
+    WatchSweepResult,
+)
 from src.analytics.events_burst import build_burst_cypher
 from src.config import settings
 from src.graph.alerts import upsert_alert
 from src.graph.store import build_graph_store
 from src.retrieval.date_filters import today_epoch_days
+from src.storage.watch import WatchRepository
 from src.workflow.heartbeat import heartbeat_every
 from src.workflow.monitor.delivery import post_alert
+from src.workflow.monitor.watch_sweep import run_watch_sweep
 
 # Maximum rows per sweep pass — keeps a single sweep bounded even on large graphs.
 _TOP_N = 200
@@ -276,4 +284,18 @@ async def deliver_alerts(p: DeliverIn) -> DeliverResult:
         return DeliverResult(error=str(exc))
 
 
-MONITOR_ACTIVITIES = [detect_alerts, deliver_alerts]
+@activity.defn
+async def sweep_watch() -> WatchSweepResult:
+    """Entity-watch sweep: journals past their cursors -> watch_event rows
+    for subscribed entities (Postgres ``watch`` table, not the Nebula
+    ``watched`` flag). Fail-soft like the rest of the monitor."""
+    try:
+        async with heartbeat_every(30.0, {"stage": "watch"}):
+            by_kind = await run_watch_sweep(WatchRepository())
+        return WatchSweepResult(events=sum(by_kind.values()), by_kind=by_kind)
+    except Exception as exc:
+        logger.warning("sweep_watch failed: {e}", e=exc)
+        return WatchSweepResult(error=str(exc))
+
+
+MONITOR_ACTIVITIES = [sweep_watch, detect_alerts, deliver_alerts]

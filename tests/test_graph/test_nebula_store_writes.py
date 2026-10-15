@@ -20,6 +20,16 @@ def _no_entity_mirror(monkeypatch):
     monkeypatch.setattr(nebula_store_mod, "mirror_entities", lambda rows: None)
 
 
+# Columns upsert_nodes does not own (wiki sweep, analytics materialize, the
+# monitor's watch flag); they are read back and written again unchanged.
+PRESERVED_COLS = (
+    "wiki_dirty, wiki_dirty_at, wiki_hash, wiki_synced_at, wiki_page_title, "
+    "wikibase_qid, pagerank, betweenness, eigenvector, risk_score, risk_band, "
+    "risk_components, completeness_score, watched, risk_score_prev"
+)
+DEFAULT_TAIL = 'false, 0, "", 0, "", "", 0.0, 0.0, 0.0, 0.0, "", "", 0.0, false, 0.0'
+
+
 class _Cast:
     """Wraps a plain python value with a nebula-ValueWrapper-like .cast()."""
 
@@ -35,13 +45,23 @@ class _FakeSession:
     read-backs (used by upsert_nodes' created_at/first_doc_id preserve
     logic) with canned rows, or a failure response when fetch_fails=True."""
 
-    def __init__(self, fetch_rows: list[dict] | None = None, fetch_fails: bool = False):
+    def __init__(self, fetch_rows: list[dict] | None = None, fetch_fails: bool = False,
+                 edge_rows: list[dict] | None = None):
         self.executed = []
+        self._edge_rows = edge_rows
         self._fetch_rows = fetch_rows if fetch_rows is not None else []
         self._fetch_fails = fetch_fails
 
     def execute(self, stmt, *a, **k):
         self.executed.append(stmt)
+        if self._edge_rows is not None and "FETCH PROP ON `RELATED`" in stmt:
+            rows = self._edge_rows
+            cols = list(rows[0]) if rows else ["s", "d"]
+            return SimpleNamespace(
+                is_succeeded=lambda: True, error_msg=lambda: "",
+                keys=lambda: cols, row_size=lambda: len(rows),
+                row_values=lambda i: [_Cast(rows[i].get(c)) for c in cols],
+            )
         if "FETCH PROP ON `Entity`" in stmt:
             if self._fetch_fails:
                 return SimpleNamespace(
@@ -50,15 +70,15 @@ class _FakeSession:
                     keys=lambda: [],
                     row_size=lambda: 0,
                 )
-            cols = ["vid", "ca", "fdi"]
             rows = self._fetch_rows
+            cols = list(rows[0]) if rows else ["vid", "ca", "fdi"]
             return SimpleNamespace(
                 is_succeeded=lambda: True,
                 error_msg=lambda: "",
                 keys=lambda: cols,
                 row_size=lambda: len(rows),
                 row_values=lambda i, _rows=rows, _cols=cols: [
-                    _Cast(_rows[i][c]) for c in _cols
+                    _Cast(_rows[i].get(c)) for c in _cols
                 ],
             )
         return SimpleNamespace(
@@ -104,7 +124,7 @@ def test_upsert_nodes_writes_er_canonical_name_from_properties():
     assert (
         "INSERT VERTEX `Entity` (name, description, mention_count, created_at, label, "
         "er_canonical_name, first_doc_id, event_type, event_ts_raw, event_start_epoch, "
-        "event_end_epoch, event_ts_precision) VALUES" in blob
+        "event_end_epoch, event_ts_precision, " + PRESERVED_COLS + ") VALUES" in blob
     )
     assert '"Canon"' in blob
 
@@ -116,10 +136,55 @@ def test_upsert_nodes_defaults_er_canonical_name_to_empty_when_absent():
                            properties={"description": "d", "mention_count": 3})
     store.upsert_nodes([node])
     blob = "\n".join(sess.executed)
-    assert blob.rstrip(";").endswith('"")')
+    assert '"Иванов", "d", 3, 0, "PERSON", "", "", ' in blob
 
 
 # --- created_at/first_doc_id read-back preserve (first-seen) -----------
+
+
+def test_upsert_nodes_preserves_watch_analytics_and_wiki_columns_for_existing_entity():
+    """INSERT VERTEX resets every omitted column, so a re-mention used to wipe
+    the watch flag, the materialized risk/centrality and the wiki linkage."""
+    vid_a = entity_vid("A")
+    sess = _FakeSession(fetch_rows=[{
+        "vid": vid_a, "ca": 111, "fdi": "d0",
+        "wiki_dirty": True, "wiki_dirty_at": 5, "wiki_hash": "h", "wiki_synced_at": 6,
+        "wiki_page_title": "A_(page)", "wikibase_qid": "Q42",
+        "pagerank": 0.25, "betweenness": 0.5, "eigenvector": 0.125,
+        "risk_score": 0.75, "risk_band": "high", "risk_components": "{}",
+        "completeness_score": 0.5, "watched": True, "risk_score_prev": 0.375,
+    }])
+    store = _store_with_session(sess)
+    node = SimpleNamespace(name="A", label="PERSON", properties={"description": "x"})
+
+    store.upsert_nodes([node])
+
+    inserts = [s for s in sess.executed if s.startswith("INSERT VERTEX")]
+    assert len(inserts) == 1
+    assert (
+        '"d0", "", "", 0, 0, "", true, 5, "h", 6, "A_(page)", "Q42", 0.25, 0.5, 0.125, '
+        '0.75, "high", "{}", 0.5, true, 0.375)'
+    ) in inserts[0]
+
+
+def test_upsert_nodes_readback_fetches_preserved_columns():
+    sess = _FakeSession()
+    store = _store_with_session(sess)
+    store.upsert_nodes([SimpleNamespace(name="A", label="", properties={})])
+    fetch = next(s for s in sess.executed if "FETCH PROP ON `Entity`" in s)
+    for col in ("watched", "risk_score", "pagerank", "wikibase_qid", "wiki_dirty"):
+        assert f"`Entity`.{col} AS {col}" in fetch
+
+
+def test_upsert_nodes_readback_failure_does_not_overwrite_existing_entities():
+    """Without the read-back we cannot tell new from existing, so the INSERT
+    must not touch existing vertices at all (IF NOT EXISTS)."""
+    sess = _FakeSession(fetch_fails=True)
+    store = _store_with_session(sess)
+    store.upsert_nodes([SimpleNamespace(name="A", label="", properties={})])
+    inserts = [s for s in sess.executed if s.startswith("INSERT VERTEX")]
+    assert len(inserts) == 1
+    assert inserts[0].startswith("INSERT VERTEX IF NOT EXISTS `Entity`")
 
 
 def test_upsert_nodes_preserves_created_at_and_first_doc_id_for_existing_entity():
@@ -137,7 +202,7 @@ def test_upsert_nodes_preserves_created_at_and_first_doc_id_for_existing_entity(
     assert len(inserts) == 1
     # created_at/first_doc_id come from the read-back (111/"d0"), NOT props
     # (999/"dNEW"); description still overwrites from props ("newdesc").
-    expected_row = f'{_q_expect(vid_a)}:("A", "newdesc", 0, 111, "PERSON", "", "d0", "", "", 0, 0, "")'
+    expected_row = f'{_q_expect(vid_a)}:("A", "newdesc", 0, 111, "PERSON", "", "d0", "", "", 0, 0, "", ' + DEFAULT_TAIL + ')'
     assert expected_row in inserts[0]
     assert "999" not in inserts[0]
     assert "dNEW" not in inserts[0]
@@ -156,7 +221,7 @@ def test_upsert_nodes_uses_props_for_new_entity_when_not_in_readback():
 
     inserts = [s for s in sess.executed if s.startswith("INSERT VERTEX")]
     assert len(inserts) == 1
-    expected_row = f'{_q_expect(vid_b)}:("B", "d", 0, 7, "ORG", "", "dB", "", "", 0, 0, "")'
+    expected_row = f'{_q_expect(vid_b)}:("B", "d", 0, 7, "ORG", "", "dB", "", "", 0, 0, "", ' + DEFAULT_TAIL + ')'
     assert expected_row in inserts[0]
 
 
@@ -176,7 +241,7 @@ def test_upsert_nodes_readback_failure_treats_all_as_new_and_still_inserts():
 
     inserts = [s for s in sess.executed if s.startswith("INSERT VERTEX")]
     assert len(inserts) == 1  # INSERT still issued (fail-open, no crash)
-    expected_row = f'{_q_expect(vid_c)}:("C", "d", 0, 42, "PERSON", "", "dC", "", "", 0, 0, "")'
+    expected_row = f'{_q_expect(vid_c)}:("C", "d", 0, 42, "PERSON", "", "dC", "", "", 0, 0, "", ' + DEFAULT_TAIL + ')'
     assert expected_row in inserts[0]
 
 
@@ -294,7 +359,7 @@ def test_upsert_nodes_batches_into_multi_values_statements(monkeypatch):
         assert stmt.startswith(
             "INSERT VERTEX `Entity` (name, description, mention_count, created_at, label, "
             "er_canonical_name, first_doc_id, event_type, event_ts_raw, event_start_epoch, "
-            "event_end_epoch, event_ts_precision) VALUES "
+            "event_end_epoch, event_ts_precision, " + PRESERVED_COLS + ") VALUES "
         )
     # first two statements have 2 comma-joined rows, last has 1
     assert inserts[0].count(":(") == 2
@@ -369,3 +434,35 @@ def test_upsert_relations_batch_size_ge_len_emits_one_statement(monkeypatch):
     inserts = [s for s in sess.executed if s.startswith("INSERT EDGE `RELATED`")]
     assert len(inserts) == 1  # one INSERT (a single FETCH read-back precedes it)
     assert inserts[0].count(" -> ") == 5
+
+
+# --- upsert_relations reports the pairs it created (entity-watch edge_new) --
+
+
+def test_upsert_relations_returns_only_pairs_missing_from_the_readback():
+    a, b, c = entity_vid("A"), entity_vid("B"), entity_vid("C")
+    sess = _FakeSession(edge_rows=[{"s": a, "d": b, "ca": 5, "fdi": "d0", "st": 0.0, "sa": 0}])
+    store = _store_with_session(sess)
+    rels = [
+        SimpleNamespace(source_id="A", target_id="B", label="X", properties={}),
+        SimpleNamespace(source_id="A", target_id="C", label="Y", properties={}),
+    ]
+    assert store.upsert_relations(rels) == [(a, c)]
+
+
+def test_upsert_relations_readback_failure_reports_no_new_pairs():
+    """Unknown != new: without the read-back, claim nothing (no false events)."""
+    sess = _FakeSession(fetch_fails=True)
+    sess.execute = _fail_fetch(sess.execute)
+    store = _store_with_session(sess)
+    rel = SimpleNamespace(source_id="A", target_id="B", label="X", properties={})
+    assert store.upsert_relations([rel]) == []
+
+
+def _fail_fetch(orig):
+    def run(stmt, *a, **k):
+        if "FETCH PROP ON `RELATED`" in stmt:
+            return SimpleNamespace(is_succeeded=lambda: False, error_msg=lambda: "boom",
+                                   keys=lambda: [], row_size=lambda: 0)
+        return orig(stmt, *a, **k)
+    return run

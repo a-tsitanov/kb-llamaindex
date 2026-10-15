@@ -3,7 +3,8 @@
 Drops:
   * Temporal   — terminate running + delete every workflow execution.
   * RabbitMQ   — purge every configured ingest queue + the DLQ.
-  * Postgres   — TRUNCATE app tables (`documents`, `ingest_metrics`).
+  * Postgres   — TRUNCATE app tables (`documents`, `ingest_metrics`, entity-watch
+                 journals/events; `watch` subscriptions are kept).
   * Milvus     — drop EVERY collection (chunks, community, ER, any `_bak*`).
   * Graph      — Nebula: DROP SPACE; Neo4j: DETACH DELETE (dispatched on
                  ``settings.graph.backend``).
@@ -83,7 +84,14 @@ def _parse_args() -> argparse.Namespace:
 
 # App tables (public schema).  Temporal's own databases live in the same
 # Postgres server but a DIFFERENT database, so this never touches them.
-_PG_TABLES = ("documents", "ingest_metrics")
+# Entity-watch journals/events go with the documents they describe; `watch`
+# (the subscriptions) is kept — its vid is a hash of the name, so it stays
+# valid across a re-ingest.
+_PG_TABLES = (
+    "documents", "ingest_metrics",
+    "entity_mention", "edge_new", "watch_event", "watch_seen",
+    "monitor_cursor", "risk_snapshot",
+)
 
 
 def wipe_postgres() -> None:

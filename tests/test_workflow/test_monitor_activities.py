@@ -136,3 +136,31 @@ async def test_detect_alerts_burst_gated_off(monkeypatch: pytest.MonkeyPatch) ->
     result = await ma.detect_alerts(MonitorIn())
     assert result.burst_alerts == 0
     assert [c for c, _ in store.calls if "burst_score" in c] == []  # burst query never issued
+
+
+# ── entity-watch sweep activity ──────────────────────────────────────
+
+
+async def test_sweep_watch_tallies_events(monkeypatch):
+    import src.workflow.monitor.activities as acts
+
+    async def _run(repo, **kw):
+        return {"new_mention": 2, "new_identifier": 1}
+
+    monkeypatch.setattr(acts, "run_watch_sweep", _run)
+    monkeypatch.setattr(acts, "WatchRepository", lambda: object())
+    out = await acts.sweep_watch()
+    assert out.events == 3 and out.by_kind == {"new_mention": 2, "new_identifier": 1}
+    assert out.error == ""
+
+
+async def test_sweep_watch_never_raises(monkeypatch):
+    import src.workflow.monitor.activities as acts
+
+    async def _boom(repo, **kw):
+        raise RuntimeError("pg down")
+
+    monkeypatch.setattr(acts, "run_watch_sweep", _boom)
+    monkeypatch.setattr(acts, "WatchRepository", lambda: object())
+    out = await acts.sweep_watch()
+    assert out.events == 0 and "pg down" in out.error
