@@ -61,20 +61,22 @@ services:
     ports: ["8070:8080"]
     restart: unless-stopped
 
-  # DeepSeek Harness web UI (agent + KB MCP tools, models via LiteLLM on srv02).
-  # The agent has a bash tool. dsh binds 127.0.0.1 only; LAN access goes through
-  # lan-proxy on 10.10.113.11:3080 (client allowlist LAN_ALLOW) + dsh token/cookie.
-  dsh-web:
-    image: dsh-web:offline
+  # Agent web UI (DeepSeek Harness, MIT, rebranded at image build: BRAND_NAME):
+  # agent + KB MCP tools, models via LiteLLM on srv02. The agent has a bash tool.
+  # It binds 127.0.0.1 only; LAN access goes through lan-proxy on
+  # 10.10.113.11:3080 (client allowlist LAN_ALLOW) + token/cookie login.
+  # Renamed from dsh-web (2026-10-14); data volumes keep their kb_dsh_* names.
+  agent-web:
+    image: agent-web:offline
     pull_policy: never
     cpuset: "20-39,60-79"
     environment:
       LITELLM_API_KEY: ${LITELLM_API_KEY:?set LITELLM_API_KEY}
       KB_MCP_TOKEN: ${KB_MCP_TOKEN:?set KB_MCP_TOKEN (one of API_KEYS) in .env.offline}
-      DSH_TRUSTED_HOST: "localhost:3080 10.10.113.11:3080"
-      # LAN access via the allowlisted L4 proxy (dsh itself stays on 127.0.0.1).
+      AGENT_TRUSTED_HOST: "localhost:3080 10.10.113.11:3080"
+      # LAN access via the allowlisted L4 proxy (the UI itself stays on 127.0.0.1).
       LAN_BIND: 10.10.113.11:3080
-      LAN_ALLOW: ${DSH_LAN_ALLOW:-10.10.0.0/16}
+      LAN_ALLOW: ${AGENT_LAN_ALLOW:-${DSH_LAN_ALLOW:-10.10.0.0/16}}
     volumes:
       - dsh_data:/data
       - dsh_workspace:/workspace
@@ -83,6 +85,26 @@ services:
     network_mode: host
     restart: unless-stopped
 
+  # LiteLLM (srv02:4000) re-published on srv01:4000. Through the corporate VPN
+  # only srv01 answers (srv02/03 replies are lost past the gateway), so VPN
+  # clients (e.g. the .31 gateway PC) use http://10.10.113.11:4000/v1.
+  # Same allowlisted L4 proxy as agent-web, run from the agent-web image.
+  llm-proxy:
+    image: agent-web:offline
+    pull_policy: never
+    entrypoint: ["node", "/opt/dsh/lan-proxy.mjs"]
+    environment:
+      LAN_BIND: 10.10.113.11:4000
+      LAN_TARGET_HOST: 10.10.113.12
+      LAN_TARGET_PORT: "4000"
+      LAN_ALLOW: ${AGENT_LAN_ALLOW:-${DSH_LAN_ALLOW:-10.10.0.0/16}}
+    network_mode: host
+    restart: unless-stopped
+
+# Explicit names = the volumes created by the former dsh-web service, so
+# sessions, workspace and .credentials.yaml (cookie signing secret) survive.
 volumes:
   dsh_data:
+    name: kb_dsh_data
   dsh_workspace:
+    name: kb_dsh_workspace

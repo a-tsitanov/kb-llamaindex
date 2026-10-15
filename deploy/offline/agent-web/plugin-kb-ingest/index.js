@@ -46,6 +46,8 @@ export async function convertAndIngest(webuiUrl, bytes, filename, documentDate, 
   const form = new FormData()
   form.append('markdown', markdown)
   form.append('filename', filename)
+  // keep the source file too, so the KB can serve the original for download
+  if (!/\.md$/i.test(filename)) form.append('original', new Blob([bytes]), filename)
   if (documentDate) form.append('document_date', documentDate)
   const ing = await relayJson(
     await fetch(`${webuiUrl}/api/ingest`, { method: 'POST', body: form, signal }),

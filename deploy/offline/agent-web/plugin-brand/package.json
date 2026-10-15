@@ -1,0 +1,24 @@
+{
+  "name": "kb-brand",
+  "version": "0.1.0",
+  "description": "KB agent web UI brand: sidebar mark + name and the empty-chat hero mark (replaces ui-brand-official)",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "platform": "web"
+    }
+  },
+  "license": "UNLICENSED",
+  "private": true
+}

@@ -1,6 +1,7 @@
-# Home-level patch for dsh web (offline cluster). Entries override shipped ones by id.
+# Home-level patch for the agent web UI (dsh web, offline cluster). Entries override shipped ones by id.
 
-# ── models: LiteLLM on srv02 (deepseek-v4-flash on the GPU vLLM) ──
+# ── models: LiteLLM on srv02 → Qwen3.6-35B-A3B on vLLM 10.10.113.14 (131k ctx);
+#    fallback inside LiteLLM: CPU llama.cpp only (.15 retired 2026-10-14) ──
 - id: llm-pi-ai
   name: '@deepseek-ai/dsh-llm-pi-ai'
   config:
@@ -12,11 +13,11 @@
         baseURL: http://10.10.113.12:4000/v1
         models:
           - id: large
-            name: deepseek-v4-flash (thinking)
-            contextWindow: 262144
+            name: Qwen3.6-35B-A3B (thinking)
+            contextWindow: 131072
           - id: small
-            name: deepseek-v4-flash (fast)
-            contextWindow: 262144
+            name: Qwen3.6-35B-A3B (fast)
+            contextWindow: 131072
 - id: agent-default-model
   name: '@deepseek-ai/dsh-agent-default-model'
   config:
@@ -78,3 +79,24 @@
   config:
     trustedHosts: !!js ctx.webRuntime.trustedHosts
     cookieMaxAgeDays: 365
+
+# ── branding: KB brand occupants instead of the official DeepSeek ones ──
+# dsh-web-app ships `ui-brand-official` (sidebar mark + name); disable it and
+# insert the kb-brand plugin (deploy/offline/agent-web/plugin-brand, text set at
+# build time via BRAND_NAME/BRAND_SHORT). kb-brand also fills the empty-chat hero
+# mark (conversation.hero.brand.mark) that otherwise falls back to the whale.
+- id: ui-brand-official
+  disabled: true
+- insert:
+    - id: ui-brand-kb
+      name: 'kb-brand'
+# "powered by dsh" PR badge skill: already disabled in dsh-base, pinned here.
+- id: skill-badge
+  disabled: true
+
+# ── Russian UI: language pack kb-locale-ru (plugin-locale-ru/ru.json) ──
+# Adds "Русский" to Settings → General → Language and makes it the default
+# until a user picks another language.
+- insert:
+    - id: ui-locale-ru
+      name: 'kb-locale-ru'

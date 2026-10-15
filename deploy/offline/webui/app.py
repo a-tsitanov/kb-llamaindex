@@ -18,7 +18,8 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, File, Form, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from starlette.background import BackgroundTask
 
 KB_API_URL = os.environ["KB_API_URL"].rstrip("/")
 KB_API_KEY = os.environ["KB_API_KEY"]
@@ -80,16 +81,25 @@ async def ingest(
     filename: str = Form(...),
     document_date: str = Form(""),
     department: str = Form(""),
+    original: UploadFile | None = File(None),
 ) -> JSONResponse:
     # KB picks the reader by extension: always hand it Markdown.
     name = Path(filename).stem + ".md"
     markdown = ASSET_IMG.sub(lambda m: m.group(1), markdown)
     data = {k: v for k, v in (("document_date", document_date), ("department", department)) if v}
+    files = {"file": (name, markdown.encode("utf-8"), "text/markdown")}
+    # The browser re-sends the source file it converted; the KB stores it
+    # next to the text so "скачать оригинал" returns the real .docx/.pdf.
+    if original is not None and original.filename:
+        files["original"] = (
+            original.filename, await original.read(),
+            original.content_type or "application/octet-stream",
+        )
     async with httpx.AsyncClient(timeout=TIMEOUT) as c:
         r = await c.post(
             f"{KB_API_URL}/api/v1/ingest",
             headers=KB_HEADERS,
-            files={"file": (name, markdown.encode("utf-8"), "text/markdown")},
+            files=files,
             data=data,
         )
     return _relay(r)
@@ -113,8 +123,40 @@ async def search(payload: dict) -> JSONResponse:
     return _relay(r)
 
 
-@app.get("/api/documents/{doc_id}", response_class=PlainTextResponse)
-async def document(doc_id: str) -> PlainTextResponse:
-    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
-        r = await c.get(f"{KB_API_URL}/api/v1/documents/{doc_id}", headers=KB_HEADERS)
-    return PlainTextResponse(r.text, status_code=r.status_code)
+@app.get("/api/documents/{doc_id}")
+async def document(doc_id: str, variant: str | None = None) -> Response:
+    """Stream the KB download through byte-for-byte (binaries included).
+
+    variant: original | text, passed on to the KB; omitted = KB default
+    (the original when one was stored, else the text)."""
+    params = {"variant": variant} if variant else None
+    client = httpx.AsyncClient(timeout=TIMEOUT)
+    r = await client.send(
+        client.build_request(
+            "GET", f"{KB_API_URL}/api/v1/documents/{doc_id}", headers=KB_HEADERS, params=params,
+        ),
+        stream=True,
+    )
+    if r.status_code != 200:
+        try:
+            await r.aread()
+        finally:
+            await r.aclose()
+            await client.aclose()
+        return _relay(r)
+
+    async def close() -> None:
+        await r.aclose()
+        await client.aclose()
+
+    # aiter_bytes undoes any content-encoding, so the upstream length only
+    # holds for an unencoded body (the KB API sends none).
+    keep = ("content-disposition",) if "content-encoding" in r.headers else (
+        "content-disposition", "content-length")
+    headers = {k: r.headers[k] for k in keep if k in r.headers}
+    return StreamingResponse(
+        r.aiter_bytes(),
+        media_type=r.headers.get("content-type", "application/octet-stream"),
+        headers=headers,
+        background=BackgroundTask(close),
+    )

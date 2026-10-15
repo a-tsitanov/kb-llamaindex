@@ -7,7 +7,7 @@
 import net from 'node:net'
 
 const [bindHost, bindPort] = (process.env.LAN_BIND ?? '').split(':')
-const target = { host: '127.0.0.1', port: Number(process.env.LAN_TARGET_PORT ?? 3080) }
+const target = { host: process.env.LAN_TARGET_HOST ?? '127.0.0.1', port: Number(process.env.LAN_TARGET_PORT ?? 3080) }
 const allow = (process.env.LAN_ALLOW ?? '10.10.0.0/16').split(/[\s,]+/).filter(Boolean).map((c) => {
   const [ip, bits = '32'] = c.split('/')
   const n = ip.split('.').reduce((a, o) => (a << 8) + Number(o), 0) >>> 0

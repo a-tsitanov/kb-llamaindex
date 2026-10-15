@@ -25,9 +25,11 @@ fi
 # bash tool). The compose service uses network_mode: host → srv01 127.0.0.1.
 # Optional LAN exposure through the allowlisted L4 proxy (see lan-proxy.mjs).
 if [ -n "$LAN_BIND" ]; then
+  export LAN_ALLOW="${LAN_ALLOW:-${AGENT_LAN_ALLOW:-10.10.0.0/16}}"
   ( while true; do node /opt/dsh/lan-proxy.mjs; sleep 2; done ) &
 fi
-# shellcheck disable=SC2086 — DSH_TRUSTED_HOST is a space-separated list
+# shellcheck disable=SC2086 — AGENT_TRUSTED_HOST is a space-separated list
+# (DSH_TRUSTED_HOST is the pre-rename name, still honoured).
 TRUSTED=""
-for h in ${DSH_TRUSTED_HOST:-localhost:3080}; do TRUSTED="$TRUSTED --trusted-host $h"; done
+for h in ${AGENT_TRUSTED_HOST:-${DSH_TRUSTED_HOST:-localhost:3080}}; do TRUSTED="$TRUSTED --trusted-host $h"; done
 exec dsh --profile web --host 127.0.0.1 --port 3080 --no-open $TRUSTED "$@"

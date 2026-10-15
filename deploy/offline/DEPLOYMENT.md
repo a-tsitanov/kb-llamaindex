@@ -12,7 +12,7 @@
 
 - Полный стек базы знаний (ingest → граф + векторы → поиск → MCP) развёрнут на **трёх серверах без GPU и без доступа в интернет**.
 - Всё работает в Docker, единый compose-проект `kb` поверх `docker-compose.prod.yml`, для каждого сервера свой override.
-- **LLM:** основная модель — `deepseek-v4-flash` на внешнем GPU-узле `10.10.151.15` (vLLM). Через LiteLLM к ней идут оба алиаса приложения:
+- **LLM:** с 2026-10-14 основная модель — Qwen3.6-35B-A3B NVFP4 на GPU-узле `10.10.113.14` (vLLM, 131k контекста, `deploy/offline/gpu14/`). Прежний узел `10.10.151.15` (`deepseek-v4-flash`) выведен из LiteLLM — сервер отключают. Через LiteLLM к модели идут оба алиаса приложения:
   - `small` — без размышлений;
   - `large` — с размышлениями.
 - **Запасной путь LLM:** CPU-модели Qwen3-30B-A3B (llama.cpp) на srv02 и srv03, включаются автоматически, если GPU недоступен.
@@ -60,7 +60,7 @@
 | srv01 | 10.10.113.11/24 | ext22-srv01 | данные + embeddings + docs2md + dsh |
 | srv02 | 10.10.113.12/24 | ext22-srv02 | приложение + поиск + LiteLLM + webui |
 | srv03 | 10.10.113.13/**23** | ext22-srv03 | LLM для ingest (worker-llm + CPU-резерв) |
-| GPU-узел | 10.10.151.15 | — | vLLM `deepseek-v4-flash` (развёрнут отдельно) |
+| GPU-узел | 10.10.113.14 | — | vLLM Qwen3.6-35B-A3B (user-unit `vllm`, `deploy/offline/gpu14/`); прежний 10.10.151.15 выведен 2026-10-14 |
 
 - Шлюз — `10.10.113.1`, DNS — `10.10.113.1`.
 - ⚠ Маска `/23` на srv03 отличается от остальных. Скрипт её не трогал, нужно согласовать с сетевиками.
@@ -126,10 +126,11 @@
 | kb-rabbitmq-1 | rabbitmq:3-management | 5672, 15672 | 0 | очереди `ingest.pending`, `ingest.dlq` |
 | kb-embed-1 | ghcr.io/ggml-org/llama.cpp:server | 8081 | 1 | embeddings `bge-m3` FP16, 1024, пулинг CLS |
 | kb-docs2md-1 | doc2md:offline | 8070 | 1 | конвертация документов в Markdown, OCR выключен |
-| kb-dsh-web-1 | dsh-web:offline | 127.0.0.1:3080 + LAN 10.10.113.11:3080 | 1 | DeepSeek Harness, см. раздел 7 |
+| kb-agent-web-1 | agent-web:offline | 127.0.0.1:3080 + LAN 10.10.113.11:3080 | 1 | веб-агент (DeepSeek Harness под брендом «KB Ассистент»), см. раздел 7 |
+| kb-llm-proxy-1 | agent-web:offline | LAN 10.10.113.11:4000 | — | L4-прокси LiteLLM srv02:4000 для VPN-клиентов |
 
 На хосте также работают chrony (NTP-сервер) и opensm (InfiniBand).
-Тома: `kb_pg_data`, `kb_milvus_data`, `kb_etcd_data`, `kb_minio_data`, `kb_nebula_meta`, `kb_nebula_storage`, `kb_redis_data`, `kb_rabbitmq_data`, `kb_dsh_data`, `kb_dsh_workspace`.
+Тома: `kb_pg_data`, `kb_milvus_data`, `kb_etcd_data`, `kb_minio_data`, `kb_nebula_meta`, `kb_nebula_storage`, `kb_redis_data`, `kb_rabbitmq_data`, `kb_dsh_data`, `kb_dsh_workspace` (имена старые, после переименования dsh-web → agent-web заданы явно в compose).
 
 ### srv02 — приложение и поиск (10.10.113.12)
 
@@ -211,7 +212,7 @@
 - `LITELLM_LOCAL_MODEL_COST_MAP=True`: без интернета litellm не пытается скачивать таблицу цен.
 - Какую роль обслуживает какой алиас, задаёт `src/config.py` (`_DEFAULT_ROLE_TIERS`). Переопределить можно без кода: `LITELLM_ROLE_TIERS='{"plan":"large"}'`.
 
-**Проверка маршрута:** заголовок ответа `x-litellm-model-api-base` у `small` и `large` равен `http://10.10.151.15:8000/v1`.
+**Проверка маршрута:** заголовок ответа `x-litellm-model-api-base` у `small` и `large` равен `http://10.10.113.14:8000/v1`.
 
 ---
 
@@ -248,18 +249,21 @@ webui / API /api/v1/search/{local,global,drift,auto} / MCP kb_search
 
 - Три сервера (`kb-llamaindex-search`, `-tools`, `-stats`) на srv02, транспорт Streamable HTTP, endpoint `/mcp`, авторизация `Bearer <одно из API_KEYS>`.
 - Подключены к DeepSeek Harness. Любой MCP-клиент в сети может подключиться с тем же ключом.
+- Наблюдение за сущностями (`kb-llamaindex-tools`): `kb_watch`, `kb_unwatch`, `kb_watchlist`, `kb_watch_feed`, `kb_ack`. Sweep в worker (группа `monitor`) раз в 5 мин, `MONITOR_ENABLED=true` в `docker-compose.srv02.yml`. Ссылка в карточке ленты — webui `:8090/api/documents/{id}` (`MONITOR_DOCUMENT_LINK`). Перезаливка без событий — `/ingest` с `backfill=true` (`loader.py --backfill`). Дизайн — `docs/superpowers/specs/2026-10-15-entity-watch-design.md`.
 
 ---
 
-## 7. DeepSeek Harness (агент) на srv01
+## 7. Веб-агент agent-web (DeepSeek Harness, ребрендинг) на srv01
 
 | Параметр | Значение |
 |---|---|
 | Версия | `@deepseek-ai/dsh` 0.2.0-rc.2 (зафиксирована в образе) |
-| Образ | `dsh-web:offline`: node:22-slim + dsh + ripgrep/git/python3, собран заранее, интернет при запуске не нужен |
-| Файлы | `deploy/offline/dsh/`: `Dockerfile`, `entrypoint.sh`, `cordis.patch.yml`, `lan-proxy.mjs`, `plugin-kb-ingest/` |
+| Образ | `agent-web:offline` (до 2026-10-14 — `dsh-web:offline`): node:22-slim + dsh + ripgrep/git/python3, собран заранее, интернет при запуске не нужен |
+| Бренд | build-arg `BRAND_NAME` (по умолч. «KB Ассистент») и `BRAND_SHORT` («KB»). Подставляется при сборке: `<title>`, manifest, favicon, строки UI, идентичность в системном промпте, префикс лога. Логотип и имя в сайдбаре и знак на пустом чате — плагин `kb-brand` (`plugin-brand/`), официальный `ui-brand-official` отключён. Сборка падает, если в бандлах осталось «DeepSeek Harness». Внутренние id (`__DSH_*__`, cookie `dsh-auth-*`, пакеты `@deepseek-ai/*`, env `DSH_*`) не меняются |
+| Файлы | `deploy/offline/agent-web/`: `Dockerfile`, `entrypoint.sh`, `cordis.patch.yml`, `lan-proxy.mjs`, `plugin-kb-ingest/`, `plugin-brand/`, `plugin-locale-ru/`, `brand/` (`rebrand.mjs`, favicon-шаблоны) |
+| Язык | интерфейс на русском: плагин `kb-locale-ru` (словарь `plugin-locale-ru/ru.json`, 2113 строк в 52 пространствах имён; `%BRAND_NAME%` подставляется при сборке). Русский выбран по умолчанию, пока пользователь не выберет другой язык (Настройки → Общие → Язык). Непереведённые ключи показываются на английском. При обновлении dsh словарь нужно сверить с новыми ключами |
 | Сеть | `network_mode: host`. Сам dsh слушает только `127.0.0.1:3080` (адрес `0.0.0.0` dsh запрещает сам) |
-| LAN-доступ | L4-прокси `lan-proxy.mjs` на `10.10.113.11:3080` → `127.0.0.1:3080`. Белый список клиентов `LAN_ALLOW=10.10.0.0/16`, меняется через `DSH_LAN_ALLOW` |
+| LAN-доступ | L4-прокси `lan-proxy.mjs` на `10.10.113.11:3080` → `127.0.0.1:3080`. Белый список клиентов `LAN_ALLOW=10.10.0.0/16`, меняется через `AGENT_LAN_ALLOW` (старое имя `DSH_LAN_ALLOW` тоже работает). Доверенные хосты — `AGENT_TRUSTED_HOST` |
 | Авторизация | токен в ссылке (новый при каждом перезапуске) → подписанный cookie на 365 дней. Секрет подписи хранится в `/data/dsh/.credentials.yaml` (том `kb_dsh_data`), поэтому cookie переживает перезапуски |
 | Модели | провайдер `kb-litellm` → LiteLLM srv02. По умолчанию `large`, есть и `small`. Облачные маршруты DeepSeek отключены |
 | MCP | `kb_search`, `kb_tools`, `kb_stats` → srv02 :9001–9003, токен `KB_MCP_TOKEN`, таймаут вызова 5 мин |
@@ -279,13 +283,14 @@ webui / API /api/v1/search/{local,global,drift,auto} / MCP kb_search
 
 **Получить ссылку для входа:**
 ```bash
-ssh pitcher@10.10.113.11 'docker logs kb-dsh-web-1 2>&1 | grep -oE "http://127.0.0.1:3080/\?token=[^ ]+" | tail -1'
+ssh pitcher@10.10.113.11 'docker logs kb-agent-web-1 2>&1 | grep -oE "http://127.0.0.1:3080/\?token=[^ ]+" | tail -1'
+# строка лога теперь начинается с «agent web:» (было «dsh web:»)
 # в ссылке заменить 127.0.0.1 на 10.10.113.11
 ```
 
 **Отозвать все входы:**
 ```bash
-docker exec kb-dsh-web-1 rm /data/dsh/.credentials.yaml && docker restart kb-dsh-web-1
+docker exec kb-agent-web-1 rm /data/dsh/.credentials.yaml && docker restart kb-agent-web-1
 ```
 
 ---
@@ -319,7 +324,7 @@ docker exec kb-dsh-web-1 rm /data/dsh/.credentials.yaml && docker restart kb-dsh
 | `sudo-setup.sh` | базовая настройка серверов (раздел 4) |
 | `Dockerfile.offline` | слой поверх образов приложения: NLTK stopwords и punkt_tab, `HF_HUB_OFFLINE=1` |
 | `webui/` | веб-форма (FastAPI + HTML) |
-| `dsh/` | DeepSeek Harness (раздел 7) |
+| `agent-web/` | веб-агент, DeepSeek Harness с ребрендингом (раздел 7) |
 | `PROGRESS.md`, `DEPLOYMENT.md`, `architecture.d2/.svg` | журнал, этот отчёт, схема |
 
 ### Ключевые переменные `.env.offline` (без значений)
@@ -381,7 +386,7 @@ $C up -d <svc>       # пересоздать после изменения env/
 
 Контейнеры с `restart: unless-stopped` поднимаются сами. Если поднимать вручную:
 
-1. **srv01:** `postgres etcd minio milvus nebula-metad nebula-storaged nebula-graphd redis rabbitmq embed docs2md dsh-web`
+1. **srv01:** `postgres etcd minio milvus nebula-metad nebula-storaged nebula-graphd redis rabbitmq embed docs2md agent-web llm-proxy`
 2. **srv02:** `temporal temporal-ui litellm llm-search` → (однократно, на чистой базе) `init` → `api worker ingest-consumer mcp-search mcp-tools mcp-stats webui prometheus grafana`
 3. **srv03:** `llm-ingest-0 llm-ingest-1 worker-llm`
 
@@ -389,11 +394,11 @@ $C up -d <svc>       # пересоздать после изменения env/
 
 | Задача | Как |
 |---|---|
-| Статус ingest | webui; `/kb-status` в dsh; SQL `select status,count(*) from documents group by 1` в Postgres srv01 |
+| Статус ingest | webui; `/kb-status` в agent-web; SQL `select status,count(*) from documents group by 1` в Postgres srv01 |
 | Очередь | `docker exec kb-rabbitmq-1 rabbitmqctl list_queues name messages_ready messages_unacknowledged` |
 | Сменить модель | править `litellm_config.offline.yaml` на srv02 → `docker restart kb-litellm-1` (приложение не трогать) |
 | Полная очистка данных | остановить `worker`, `ingest-consumer` (srv02) и `worker-llm` (srv03), затем `$C run --rm --no-deps init python -m scripts.wipe_db --yes --keep-wiki` (srv02), затем запустить их обратно |
-| Ссылка входа в dsh | раздел 7 |
+| Ссылка входа в agent-web | раздел 7 |
 | Обновить образ приложения | на маке: `docker buildx build --platform linux/amd64 …` + слой `Dockerfile.offline` → `docker save \| zstd \| ssh … 'zstd -dc \| docker load'` → `$C up -d <svc>` |
 | Поставить пакет на сервер | скачать `.deb` с зависимостями в контейнере `ubuntu:24.04 --platform linux/amd64` (`apt-get install --download-only`), перенести, `sudo dpkg -i` |
 

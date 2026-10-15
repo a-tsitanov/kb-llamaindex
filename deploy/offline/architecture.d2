@@ -1,4 +1,4 @@
-# Офлайн-кластер KB: что и как раскатано (состояние 2026-10-06)
+# Офлайн-кластер KB: что и как раскатано (состояние 2026-10-14)
 # Рендер: node ~/.claude/skills/d2/scripts/render.mjs deploy/offline/architecture.d2 deploy/offline/architecture.svg --layout elk
 
 direction: down
@@ -47,9 +47,10 @@ srv01: srv01 · 10.10.113.11 · ДАННЫЕ {
     class: socket
     embed: llama.cpp :8081\nbge-m3 FP16 (1024) {class: llm}
     docs2md: docs2md :8070\nOCR выключен {class: app}
-    dsh: dsh-web 127.0.0.1:3080\nDeepSeek Harness 0.2.0-rc.2\nnetwork_mode: host · cookie 365 дн\nLAN 10.10.113.11:3080 через lan-proxy\n(белый список 10.10.0.0/16) {class: ui}
+    dsh: agent-web 127.0.0.1:3080\n«KB Ассистент» (dsh 0.2.0-rc.2)\nnetwork_mode: host · cookie 365 дн\nLAN 10.10.113.11:3080 через lan-proxy\n(белый список 10.10.0.0/16) {class: ui}
     dshplug: плагин dsh-kb-ingest\n/kb-ingest · /kb-status\nkb_ingest_file · kb_ingest_status {class: ui}
     dsh -> dshplug: {style.stroke-dash: 2}
+    llmproxy: llm-proxy 10.10.113.11:4000\n(образ agent-web, L4 → LiteLLM srv02) {class: ui}
   }
   hostsvc: хост: chrony (NTP-сервер, stratum 8) · opensm (IB 100G) {class: ops}
 }
@@ -134,3 +135,4 @@ legend: Обозначения {
   e: служебное {class: ops}
   f: "→ сплошная оранжевая = GPU (основной путь)\n⇢ пунктир оранжевый = CPU-резерв\n⇢ фиолетовый пунктир = доступ пользователя" {shape: text}
 }
+srv01.s1.llmproxy -> srv02.s0.litellm: VPN-клиенты {style.stroke-dash: 3}

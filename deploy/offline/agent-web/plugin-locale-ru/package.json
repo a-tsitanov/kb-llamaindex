@@ -1,0 +1,22 @@
+{
+  "name": "kb-locale-ru",
+  "version": "0.1.0",
+  "description": "Russian UI language pack for the agent web UI (dsh 0.2.0-rc.2); default language when the user has not picked one",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "platform": "web"
+    }
+  },
+  "license": "UNLICENSED",
+  "private": true
+}

@@ -185,6 +185,9 @@ async function send(j) {
   set(j, "run", "отправка в базу…");
   const fd = new FormData();
   fd.append("markdown", j.md); fd.append("filename", j.name);
+  // Re-send the source file (a lazy File handle, not a copy) so the KB keeps the
+  // original next to the text; a plain .md is already the text itself.
+  if (j.file && !/\.md$/i.test(j.name)) fd.append("original", j.file, j.name);
   if ($("#docdate").value) fd.append("document_date", $("#docdate").value);
   if ($("#dept").value.trim()) fd.append("department", $("#dept").value.trim());
   try {
@@ -214,7 +217,7 @@ async function poll(j) {
 
 async function addFiles(list) {
   if (!jobs.length) $("#jobs").innerHTML = "";
-  const added = [...list].map(f => { const j = { id: ++seq, name: f.name, state: "run", text: "ожидание", md: null }; jobs.unshift(j); return [j, f]; });
+  const added = [...list].map(f => { const j = { id: ++seq, name: f.name, state: "run", text: "ожидание", md: null, file: f }; jobs.unshift(j); return [j, f]; });
   render();
   for (const [j, f] of added) await convert(j, f);   // one at a time: keeps doc2md and the LLM queue calm
 }
@@ -245,7 +248,9 @@ async function ask() {
     const src = b.sources || [];
     $("#sources").innerHTML = src.length ? src.map((s, i) => `
       <div class="src">
-        <div><b>[${i + 1}]</b> <a href="/api/documents/${encodeURIComponent(s.doc_id)}" target="_blank" rel="noopener">документ ${esc(String(s.doc_id).slice(0, 8))}</a>
+        <div><b>[${i + 1}]</b> документ ${esc(String(s.doc_id).slice(0, 8))}:
+          <a href="/api/documents/${encodeURIComponent(s.doc_id)}" download title="оригинал, а для старых документов — текст">скачать оригинал</a>
+          · <a href="/api/documents/${encodeURIComponent(s.doc_id)}?variant=text" target="_blank" rel="noopener">текст</a>
           <span class="meta">· релевантность ${Number(s.score || 0).toFixed(2)}</span></div>
         <div class="snip">${esc(s.content)}</div>
       </div>`).join("") : '<div class="meta">Источников нет.</div>';

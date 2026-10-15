@@ -27,6 +27,10 @@ x-remote-env: &remote-env
   # timed every call out and retried it from scratch (2026-10-04).
   LITELLM_TIMEOUT_S: "900"
   LITELLM_MAX_RETRIES: "1"
+  # Entity watch (monitor sweep every 5 min, feed via MCP kb_watch_feed). The
+  # feed links documents through webui, which holds the API key.
+  MONITOR_ENABLED: "true"
+  MONITOR_DOCUMENT_LINK: "http://10.10.113.12:8090/api/documents/{doc_id}"
 
 x-app: &app
   <<: *sock0

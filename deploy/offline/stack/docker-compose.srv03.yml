@@ -44,7 +44,7 @@ services:
       TEMPORAL_HOST: 10.10.113.12
       WORKER_GROUPS: llm
       # GPU vLLM is primary (2026-10-05): ~8-12 parallel calls saturate it
-      LLM_POOL_N: "8"
+      LLM_POOL_N: ${LLM_POOL_N:-8}
       LITELLM_TIMEOUT_S: "900"
       LITELLM_MAX_RETRIES: "1"
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:?set NEO4J_PASSWORD in .env.offline}
