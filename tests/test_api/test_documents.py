@@ -80,3 +80,74 @@ async def test_download_sanitizes_filename_header():
     # raw unescaped double-quote from the filename must NOT leak into the header
     assert 'e"vil' not in cd
     assert "filename*=UTF-8''" in cd
+
+
+# ── variant=original|text (original binary stored next to the converted text) ──
+
+def _row2(path, original_path=None):
+    return SimpleNamespace(path=path, original_path=original_path)
+
+
+def _storage_by_uri():
+    """stat/stream keyed by URI so the test can see which object was served."""
+    s = MagicMock()
+
+    def stat(uri):
+        name = uri.rsplit("/", 1)[-1]
+        return name, 3, "application/octet-stream"
+
+    s.stat_object.side_effect = stat
+    s.stream_object.side_effect = lambda uri: iter([uri.encode()])
+    return s
+
+
+_TXT = f"s3://b/{_DOC_ID}/report.md"
+_ORIG = f"s3://b/{_DOC_ID}/original/report.docx"
+
+
+async def _get_variant(row, query=""):
+    with patch("src.storage.postgres.AsyncPostgres.get",
+               new=AsyncMock(return_value=row)), \
+         patch("src.api.routes.documents.build_minio_storage",
+               return_value=_storage_by_uri()):
+        return await _get(f"/api/v1/documents/{_DOC_ID}{query}", headers=_key())
+
+
+@pytest.mark.asyncio
+async def test_download_defaults_to_original_when_present():
+    resp = await _get_variant(_row2(_TXT, _ORIG))
+    assert resp.status_code == 200, resp.text
+    assert resp.content == _ORIG.encode()
+    assert 'filename="report.docx"' in resp.headers["content-disposition"]
+    assert resp.headers["content-disposition"].startswith("attachment;")
+    # Content-Type guessed from the filename, not the stored octet-stream.
+    assert resp.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml")
+
+
+@pytest.mark.asyncio
+async def test_download_variant_text_serves_converted():
+    resp = await _get_variant(_row2(_TXT, _ORIG), "?variant=text")
+    assert resp.status_code == 200, resp.text
+    assert resp.content == _TXT.encode()
+    assert 'filename="report.md"' in resp.headers["content-disposition"]
+    assert resp.headers["content-type"].startswith("text/markdown")
+
+
+@pytest.mark.asyncio
+async def test_download_falls_back_to_text_without_original():
+    resp = await _get_variant(_row2(_TXT, None))
+    assert resp.status_code == 200, resp.text
+    assert resp.content == _TXT.encode()
+
+
+@pytest.mark.asyncio
+async def test_download_explicit_original_missing_404():
+    resp = await _get_variant(_row2(_TXT, None), "?variant=original")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_download_unknown_variant_422():
+    resp = await _get_variant(_row2(_TXT, _ORIG), "?variant=pdf")
+    assert resp.status_code == 422

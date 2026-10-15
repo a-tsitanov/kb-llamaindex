@@ -83,6 +83,9 @@ class IngestParams(_Frozen):
     # Channel group (news/analytics/.../data or "" = ungrouped). Stamped
     # onto each chunk's doc_group metadata for search filter/rerank/synth.
     group: str = ""
+    # Re-ingest of an already-known document: the entity-watch journals are
+    # still written, but the monitor sweep raises no events from them.
+    backfill: bool = False
 
 
 class Ctx(_Frozen):
@@ -95,6 +98,7 @@ class Ctx(_Frozen):
     doc_date_epoch: int | None = None
     inserted_at_epoch: int | None = None
     group: str = ""
+    backfill: bool = False
 
 
 class SchedulerParams(_Frozen):

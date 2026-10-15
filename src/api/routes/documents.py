@@ -1,18 +1,23 @@
 """`GET /api/v1/documents/{doc_id}` — download the original source file.
 
-Streams the original uploaded file from MinIO (the URI is stored in
-Postgres `documents.path`).  doc_id is the value search responses expose
-in `sources[]` / `documents[]`.
+Streams an uploaded file from MinIO.  Two variants (ADR-0014 addendum):
+``original`` = the binary the text was converted from
+(`documents.original_path`, e.g. .docx/.pdf), ``text`` = the ingested file
+(`documents.path`).  Without ``?variant=`` the original is served when one
+was stored, else the text.  doc_id is the value search responses expose in
+`sources[]` / `documents[]`.
 """
 
 from __future__ import annotations
 
+import mimetypes
 import uuid
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 
@@ -29,7 +34,15 @@ router = APIRouter(tags=["documents"])
     summary="Download the original source file of an ingested document",
 )
 @inject
-async def download_document(doc_id: str, pg: FromDishka[AsyncPostgres]):
+async def download_document(
+    doc_id: str,
+    pg: FromDishka[AsyncPostgres],
+    variant: Literal["original", "text"] | None = Query(
+        default=None,
+        description="original = uploaded binary (if stored), text = "
+                    "ingested text; default original, falling back to text",
+    ),
+):
     try:
         row = await pg.get(uuid.UUID(doc_id))
     except (ValueError, TypeError):
@@ -37,7 +50,11 @@ async def download_document(doc_id: str, pg: FromDishka[AsyncPostgres]):
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "document not found")
 
-    path = row.path
+    original_path = getattr(row, "original_path", None)
+    if variant == "original" and not original_path:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "original file not available")
+    path = row.path if variant == "text" else (original_path or row.path)
     # Legacy local-path docs (pre-MinIO): stream from disk if present.
     if not path.startswith("s3://"):
         local = Path(path)
@@ -77,5 +94,8 @@ async def download_document(doc_id: str, pg: FromDishka[AsyncPostgres]):
         "Content-Disposition": disposition,
         "Content-Length": str(size),
     }
+    # Browsers often upload as application/octet-stream; the extension is
+    # the better signal.  Fall back to whatever MinIO stored.
+    content_type = mimetypes.guess_type(filename)[0] or content_type
     return StreamingResponse(
         storage.stream_object(path), media_type=content_type, headers=headers)

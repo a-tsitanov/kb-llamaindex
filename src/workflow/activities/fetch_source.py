@@ -41,6 +41,7 @@ async def fetch_source(params: IngestParams) -> Ctx:
             doc_date_epoch=params.doc_date_epoch,
             inserted_at_epoch=params.inserted_at_epoch,
             group=params.group,
+            backfill=params.backfill,
         )
 
     storage = build_minio_storage()
@@ -69,4 +70,5 @@ async def fetch_source(params: IngestParams) -> Ctx:
         doc_date_epoch=params.doc_date_epoch,
         inserted_at_epoch=params.inserted_at_epoch,
         group=params.group,
+        backfill=params.backfill,
     )

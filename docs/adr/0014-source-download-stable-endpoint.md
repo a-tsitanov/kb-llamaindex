@@ -41,6 +41,23 @@ Postgres и стримит файл из MinIO (`stat_object` + `stream_object`)
 - **Ссылки на источники, сгенерированные LLM** — риск
   галлюцинированных/некорректных URL; ссылки строятся детерминированно взамен.
 
+## Дополнение (2026-10-14): оригинал рядом с текстом
+
+Клиенты, конвертирующие файлы до загрузки (web UI офлайн-кластера, loadtest
+loader через docs2md), отправляют в `POST /api/v1/ingest` текст (`file`, `.md`) и
+опционально исходный бинарь (`original`, например `.docx`/`.pdf`). Оригинал
+кладётся в MinIO как `<doc_id>/original/<санитизированное имя>`, его URI — в
+nullable-колонку `documents.original_path` (добавляется идемпотентно
+`scripts/setup_db.py`). Пайплайн его не читает.
+
+`GET /api/v1/documents/{doc_id}?variant=original|text`: без параметра отдаётся
+оригинал, если он сохранён, иначе текст (`documents.path`) — поэтому ссылки wiki
+и поиска не меняются и ведут на оригинал там, где он есть; `variant=text` всегда
+отдаёт текст; `variant=original` без сохранённого оригинала → 404.
+`Content-Type` определяется по расширению имени (fallback — тип, сохранённый в
+MinIO), `Content-Disposition` — прежний санитизированный `attachment`. Старые
+документы оригинала не имеют.
+
 ## Ссылки
 
 - `src/api/routes/documents.py`, `src/workflow/wiki/article.py` (`_fmt_sources`,

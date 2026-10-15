@@ -38,6 +38,8 @@ class DocumentRow:
     summary: str
     created_at: datetime
     updated_at: datetime
+    # s3:// URI of the uploaded original binary; None = text-only upload.
+    original_path: str | None = None
 
     @classmethod
     def from_dict(cls, row: dict[str, Any]) -> DocumentRow:
@@ -51,6 +53,8 @@ class DocumentRow:
             summary=row["summary"] or "",
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            # .get: the column is absent until setup_db adds it.
+            original_path=row.get("original_path") or None,
         )
 
 
@@ -83,18 +87,23 @@ class AsyncPostgres:
         department: str = "", doc_type: str = "",
         doc_date: str | None = None,
         source_channel: str = "", source_group: str = "",
+        original_path: str | None = None,
     ) -> None:
+        cols = ["id", "path", "department", "doc_type", "doc_date",
+                "source_channel", "source_group"]
+        vals: list[Any] = [str(doc_id), path, department, doc_type, doc_date,
+                           source_channel, source_group]
+        # Only name the column when there is a value, so text-only ingests
+        # keep working on a DB that setup_db hasn't migrated yet.
+        if original_path is not None:
+            cols.append("original_path")
+            vals.append(original_path)
         async with self._conn() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    """
-                    INSERT INTO documents
-                        (id, path, department, doc_type, doc_date,
-                         source_channel, source_group, status)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending')
-                    """,
-                    (str(doc_id), path, department, doc_type, doc_date,
-                     source_channel, source_group),
+                    f"INSERT INTO documents ({', '.join(cols)}, status) "
+                    f"VALUES ({', '.join(['%s'] * len(cols))}, 'pending')",
+                    tuple(vals),
                 )
             await conn.commit()
 
