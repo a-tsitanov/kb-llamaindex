@@ -1078,5 +1078,14 @@
   "1076": "_no_entity_mirror",
   "1077": "__init__.py",
   "1078": "__init__.py",
-  "1079": "__init__.py"
+  "1079": "__init__.py",
+  "1080": "ADR-0012: Wikibase как канонический якорь + непрерывный wiki-редактор с anti-drift bot-секциями",
+  "1081": "EventsSettings",
+  "1082": "_StubCursor",
+  "1083": "test_heartbeat.py",
+  "1084": "_walk_seeds",
+  "1085": "check_ingestion.py",
+  "1086": "_FakeReportStore",
+  "1087": "test_search_deps_lock.py",
+  "1088": "_NebulaStmtStore"
 }

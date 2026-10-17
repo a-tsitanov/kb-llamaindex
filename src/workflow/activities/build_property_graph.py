@@ -144,13 +144,21 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
 
         # Entity-watch journals: every entity of this document + the pairs
         # the write just created. Fail-open inside — never fails the build.
+        # Watch is default-only: the monitor sweep never reads (or trims) a
+        # non-default graph's journals, so they would only grow.
         ctx = merged.kg.parsed.ctx
-        from src.storage.watch import WatchRepository
+        if graph.is_default:
+            from src.storage.watch import WatchRepository
 
-        await record_watch_journals(
-            WatchRepository(graph=graph), entities, relations, created_pairs,
-            doc_id=ctx.doc_id, doc_date_epoch=ctx.doc_date_epoch, backfill=ctx.backfill,
-        )
+            await record_watch_journals(
+                WatchRepository(graph=graph), entities, relations, created_pairs,
+                doc_id=ctx.doc_id, doc_date_epoch=ctx.doc_date_epoch, backfill=ctx.backfill,
+            )
+        else:
+            logger.debug(
+                "watch journals skipped (entity watch is default-only)  graph={g} doc={d}",
+                g=graph.id, d=ctx.doc_id,
+            )
 
         if edge_conflicts:
             # Audit trail for the beliefs this write retired / rejected. The

@@ -116,9 +116,9 @@ def wipe_postgres() -> None:
 
 
 def wipe_milvus() -> None:
-    """Drop EVERY collection, not just ``settings.milvus.collection`` —
-    the stack has chunks (`kb_llamaindex`), `community_report_vec`,
-    `entity_er_vec`, plus any `_bak*` rollback clones from migrations."""
+    """Drop EVERY collection, not just one graph's chunks collection —
+    every graph has its own chunks / ER-vector / community-report-vector
+    collections, plus any `_bak*` rollback clones from migrations."""
     from pymilvus import MilvusClient
 
     mv = settings.milvus

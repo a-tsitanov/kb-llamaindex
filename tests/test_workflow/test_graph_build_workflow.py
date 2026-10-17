@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import socket
 import uuid
+from datetime import timedelta
 
 import pytest
 from temporalio import activity
@@ -41,6 +42,10 @@ pytestmark = pytest.mark.skipif(
     not _temporal_up(),
     reason="docker-compose Temporal (localhost:7233) not reachable",
 )
+
+# Live Temporal: bound every run so a stuck worker/stack fails the test
+# instead of hanging the suite.
+_EXEC_TIMEOUT = timedelta(seconds=120)
 
 
 @activity.defn(name="merge_and_resolve")
@@ -83,6 +88,7 @@ async def test_graph_build_workflow_chains_and_returns_both_pieces():
         result = await client.execute_workflow(
             GraphBuildWorkflow.run, kg,
             id=f"graph-{uuid.uuid4()}", task_queue=queue,
+            execution_timeout=_EXEC_TIMEOUT,
         )
 
     assert isinstance(result, GraphBuildResult)

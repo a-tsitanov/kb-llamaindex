@@ -41,6 +41,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 from loguru import logger
 
 from src.config import settings
@@ -928,6 +929,16 @@ WATCH_KINDS: tuple[str, ...] = (
 )
 
 
+async def _watch_graph() -> GraphContext:
+    """The tool's graph, refused unless it is the default one: the monitor
+    sweep (``sweep_watch``) only reads the default graph's journals, so a
+    watch elsewhere would never fire (mirrors the HTTP 409 for monitor/wiki)."""
+    graph = await current_graph()
+    if not graph.is_default:
+        raise ToolError("entity watch is available only for the default graph")
+    return graph
+
+
 def _entity_search(graph: GraphContext):
     from src.storage.entity_search import EntitySearchRepository
 
@@ -1050,19 +1061,19 @@ async def kb_watch(name: str, kinds: list[str] | None = None, note: str = "") ->
     events (new_mention, new_connection, new_identifier, new_event, contradiction);
     empty = all. `note` is a free-text reason. Only events detected after
     the subscription are shown."""
-    return await _watch(name, kinds, note, graph=await current_graph())
+    return await _watch(name, kinds, note, graph=await _watch_graph())
 
 
 @mcp.tool(timeout=120)
 async def kb_unwatch(name_or_vid: str) -> dict[str, Any]:
     """Remove an entity from the watchlist (by its watched name or vid)."""
-    return await _unwatch(name_or_vid, graph=await current_graph())
+    return await _unwatch(name_or_vid, graph=await _watch_graph())
 
 
 @mcp.tool(timeout=120)
 async def kb_watchlist() -> dict[str, Any]:
     """List watched entities with their event kinds, note and since-when."""
-    return await _watchlist(graph=await current_graph())
+    return await _watchlist(graph=await _watch_graph())
 
 
 @mcp.tool(timeout=120)
@@ -1071,13 +1082,13 @@ async def kb_watch_feed(include_acked: bool = False, limit: int = 50) -> dict[st
     source document (title, date, `link` to GET the document — add
     `?variant=original` for the uploaded file). Unacknowledged events only
     unless `include_acked`. Acknowledge with `kb_ack`."""
-    return await _watch_feed(include_acked, limit, graph=await current_graph())
+    return await _watch_feed(include_acked, limit, graph=await _watch_graph())
 
 
 @mcp.tool(timeout=120)
 async def kb_ack(event_ids: list[int] | None = None, all: bool = False) -> dict[str, Any]:
     """Mark feed events as read (`event_ids` from `kb_watch_feed`, or `all`)."""
-    return await _ack(event_ids, all, graph=await current_graph())
+    return await _ack(event_ids, all, graph=await _watch_graph())
 
 
 def main() -> None:

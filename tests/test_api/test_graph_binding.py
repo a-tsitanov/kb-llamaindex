@@ -138,3 +138,27 @@ async def test_multi_graph_key_without_header_is_400(monkeypatch):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         r = await ac.get("/api/v1/entities", params={"query": "x"}, headers={"X-API-Key": "k"})
     assert r.status_code == 400
+
+
+async def test_ingest_original_object_key_is_graph_prefixed(as_key):
+    from src.storage.postgres import AsyncPostgres
+
+    as_key(USER)
+    storage = MagicMock()
+    storage.put_object.side_effect = lambda key, *_a, **_k: f"s3://b/{key}"
+    with (
+        patch("src.api.routes.ingest.build_minio_storage", return_value=storage),
+        patch.object(AsyncPostgres, "insert_pending", new=AsyncMock()),
+        patch("src.api.routes.ingest.get_temporal_client", new=AsyncMock(return_value=MagicMock())),
+        patch("src.api.routes.ingest.submit_document", AsyncMock()),
+    ):
+        r = await _post(
+            "/api/v1/ingest", headers={"X-API-Key": "k"},
+            files={"file": ("f.md", b"hi", "text/markdown"),
+                   "original": ("f.docx", b"PK", "application/octet-stream")},
+        )
+    assert r.status_code == 202, r.text
+    keys = [c.args[0] for c in storage.put_object.call_args_list]
+    assert len(keys) == 2
+    assert keys[0].startswith("acme/") and keys[0].endswith("/f.md")
+    assert keys[1].startswith("acme/") and keys[1].endswith("/original/f.docx")

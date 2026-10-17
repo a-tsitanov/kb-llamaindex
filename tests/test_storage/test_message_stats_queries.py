@@ -27,6 +27,15 @@ pytestmark = pytest.mark.skipif(
     not _pg_reachable(), reason="local Postgres unreachable"
 )
 
+
+@pytest.fixture(autouse=True)
+def _bounded_pg_sessions(monkeypatch):
+    """Live-PG test: a running stack may hold locks on these tables. libpq
+    applies PGOPTIONS to every connection it opens (direct and pooled), so
+    each session gets ``SET lock_timeout='5s'; SET statement_timeout='30s'``
+    and fails fast instead of blocking the suite."""
+    monkeypatch.setenv("PGOPTIONS", "-c lock_timeout=5s -c statement_timeout=30s")
+
 _TAG = "stats-test-" + uuid.uuid4().hex[:8]  # unique marker for cleanup via path
 _CH_ALPHA = f"alpha-{_TAG}"
 _CH_BETA = f"beta-{_TAG}"

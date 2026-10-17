@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import socket
 import uuid
+from datetime import timedelta
 
 import pytest
 from temporalio import activity
@@ -49,6 +50,10 @@ pytestmark = pytest.mark.skipif(
     not _temporal_up(),
     reason="docker-compose Temporal (localhost:7233) not reachable",
 )
+
+# Live Temporal: bound every run so a stuck worker/stack fails the test
+# instead of hanging the suite.
+_EXEC_TIMEOUT = timedelta(seconds=120)
 
 
 async def _connect() -> Client:
@@ -168,6 +173,7 @@ async def test_happy_path_completed(monkeypatch):
         result = await client.execute_workflow(
             DocumentIngestWorkflow.run, params,
             id=f"ingest-{params.doc_id}", task_queue=queue,
+            execution_timeout=_EXEC_TIMEOUT,
         )
     assert result.graph_status == "completed"
     assert result.chunk_count == 3
@@ -197,6 +203,7 @@ async def test_graph_failure_downgrades_to_vector_only(monkeypatch):
         result = await client.execute_workflow(
             DocumentIngestWorkflow.run, params,
             id=f"ingest-{params.doc_id}", task_queue=queue,
+            execution_timeout=_EXEC_TIMEOUT,
         )
     assert result.graph_status == "vector_only"
 
@@ -232,6 +239,7 @@ async def test_graph_failure_via_child_downgrades(monkeypatch):
         result = await client.execute_workflow(
             DocumentIngestWorkflow.run, params,
             id=f"ingest-{params.doc_id}", task_queue=queue,
+            execution_timeout=_EXEC_TIMEOUT,
         )
     assert result.graph_status == "vector_only"
 
@@ -267,6 +275,7 @@ async def test_vector_failure_runs_mark_failed_and_raises(monkeypatch):
             await client.execute_workflow(
                 DocumentIngestWorkflow.run, params,
                 id=f"ingest-{params.doc_id}", task_queue=queue,
+                execution_timeout=_EXEC_TIMEOUT,
             )
 
     assert len(mark_failed_calls) == 1
@@ -319,6 +328,7 @@ async def test_wikibase_status_propagates_to_result(monkeypatch):
         result = await client.execute_workflow(
             DocumentIngestWorkflow.run, params,
             id=f"ingest-{params.doc_id}", task_queue=queue,
+            execution_timeout=_EXEC_TIMEOUT,
         )
     assert result.graph_status == "completed"
     assert result.wikibase_status == "ok"

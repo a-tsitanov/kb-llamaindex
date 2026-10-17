@@ -155,8 +155,8 @@
     "semantic_hash": "e0c4e168e93309045ac2f14fe7321852"
   },
   "scripts/wipe_db.py": {
-    "mtime": 1792250421.139356,
-    "ast_hash": "b4a5b5b835057e1b72ded768cd39934d",
+    "mtime": 1792263883.4956338,
+    "ast_hash": "8b4a0031441f5c4cd1132f68abee2c83",
     "semantic_hash": ""
   },
   "src/__init__.py": {
@@ -355,8 +355,8 @@
     "semantic_hash": ""
   },
   "src/api/routes/ingest.py": {
-    "mtime": 1792261952.215699,
-    "ast_hash": "5d9b4ab82bad23f7d8855b0aed5e6bde",
+    "mtime": 1792263757.361156,
+    "ast_hash": "a37fb770f9f1f4778fd1952890f02502",
     "semantic_hash": ""
   },
   "src/api/routes/search_v2.py": {
@@ -770,8 +770,8 @@
     "semantic_hash": ""
   },
   "src/mcp/tools_server.py": {
-    "mtime": 1792262103.0243104,
-    "ast_hash": "e680c8473b6bd20f24b0ecf4f1c345e3",
+    "mtime": 1792263757.3616521,
+    "ast_hash": "0da1a5db73ca6f0e78d4f05ea434e0b8",
     "semantic_hash": ""
   },
   "src/models/__init__.py": {
@@ -970,8 +970,8 @@
     "semantic_hash": ""
   },
   "src/workflow/activities/build_property_graph.py": {
-    "mtime": 1792262140.2654145,
-    "ast_hash": "2cc1951c8e7b52f76432cff9db214153",
+    "mtime": 1792263757.3620965,
+    "ast_hash": "3cb7df80f1a3a085a3d1ea9defdd07d5",
     "semantic_hash": ""
   },
   "src/workflow/activities/classify_document.py": {
@@ -2530,8 +2530,8 @@
     "semantic_hash": "5a243cf2f31c821d216d359c2b00d833"
   },
   "tests/test_retrieval/test_nebula_read_slice.py": {
-    "mtime": 1792262259.7384946,
-    "ast_hash": "9062705c3ade3656dba7de3c676e98d6",
+    "mtime": 1792263789.9105759,
+    "ast_hash": "29bcba75a56cfe709ffd9f6661c90c82",
     "semantic_hash": ""
   },
   "tests/test_retrieval/test_query_planner.py": {
@@ -2570,9 +2570,9 @@
     "semantic_hash": "16777ff19a3a5a46b2a11177b0dc8d3e"
   },
   "tests/test_scripts/test_setup_db_source_columns.py": {
-    "mtime": 1790270342.2335136,
-    "ast_hash": "61fd72ddfb1fe465684bc52b2d570ae6",
-    "semantic_hash": "61fd72ddfb1fe465684bc52b2d570ae6"
+    "mtime": 1792263852.3783941,
+    "ast_hash": "84370548b58508b9e6af53ea4067384e",
+    "semantic_hash": ""
   },
   "tests/test_scripts/test_setup_wikibase.py": {
     "mtime": 1790520391.057961,
@@ -2620,13 +2620,13 @@
     "semantic_hash": ""
   },
   "tests/test_storage/test_ingest_metrics.py": {
-    "mtime": 1790519924.2418153,
-    "ast_hash": "e7a541c70890628203ac79ff817b1a55",
+    "mtime": 1792263852.3788347,
+    "ast_hash": "9fa381b80392f81572ca17674aa2815f",
     "semantic_hash": ""
   },
   "tests/test_storage/test_insert_pending_source.py": {
-    "mtime": 1790514964.255342,
-    "ast_hash": "02dcd09fd0f1ec51a435aa5a238cf8c0",
+    "mtime": 1792263852.3790202,
+    "ast_hash": "ece8e108ba35a6b12a96e17443d53f30",
     "semantic_hash": ""
   },
   "tests/test_storage/test_mediawiki.py": {
@@ -2635,8 +2635,8 @@
     "semantic_hash": "3b3ae790a955d084a0cd9678c681a8d2"
   },
   "tests/test_storage/test_message_stats_queries.py": {
-    "mtime": 1790514964.235557,
-    "ast_hash": "7a6aa82830044e4fbfc247a57e657ac2",
+    "mtime": 1792263852.3791068,
+    "ast_hash": "046625dff4638190563020bb1fab7c01",
     "semantic_hash": ""
   },
   "tests/test_storage/test_minio.py": {
@@ -2680,8 +2680,8 @@
     "semantic_hash": "081c2bd6e59c5092fd8dde24ada89e4f"
   },
   "tests/test_workflow/test_build_property_graph.py": {
-    "mtime": 1792261960.763653,
-    "ast_hash": "ae7324d5df81fc77464da75db5cc5d69",
+    "mtime": 1792263741.9338617,
+    "ast_hash": "2db8575831ca7666e3496b45cd996416",
     "semantic_hash": ""
   },
   "tests/test_workflow/test_build_property_graph_heartbeat.py": {
@@ -2720,9 +2720,9 @@
     "semantic_hash": ""
   },
   "tests/test_workflow/test_document_ingest_workflow.py": {
-    "mtime": 1790270342.238102,
-    "ast_hash": "ec1595ac8913e631407a7111b6cd17ee",
-    "semantic_hash": "ec1595ac8913e631407a7111b6cd17ee"
+    "mtime": 1792263875.1748064,
+    "ast_hash": "1613f8935dbf365920de6ed65cb24254",
+    "semantic_hash": ""
   },
   "tests/test_workflow/test_drift_fallback.py": {
     "mtime": 1790270342.2381666,
@@ -2745,9 +2745,9 @@
     "semantic_hash": "f883679b08ce9085fe70a96266e736f8"
   },
   "tests/test_workflow/test_graph_build_workflow.py": {
-    "mtime": 1790270342.238509,
-    "ast_hash": "18c8c4d1a4bbcd76d2477b36cf709320",
-    "semantic_hash": "18c8c4d1a4bbcd76d2477b36cf709320"
+    "mtime": 1792263875.1746442,
+    "ast_hash": "ec183532b348550b08ef77fb304751c2",
+    "semantic_hash": ""
   },
   "tests/test_workflow/test_heartbeat.py": {
     "mtime": 1790270342.23862,
@@ -2880,9 +2880,9 @@
     "semantic_hash": ""
   },
   "tests/test_workflow/test_search_orchestrator.py": {
-    "mtime": 1790270342.2426426,
-    "ast_hash": "d31119b4ad791483c4f1c8d0195ffdd6",
-    "semantic_hash": "d31119b4ad791483c4f1c8d0195ffdd6"
+    "mtime": 1792263875.1747475,
+    "ast_hash": "3257ec41299225f81adbf67ab6fefd7f",
+    "semantic_hash": ""
   },
   "tests/test_workflow/test_search_orchestrator_helpers.py": {
     "mtime": 1790270342.2427063,
@@ -2975,9 +2975,9 @@
     "semantic_hash": "59edcad608f315976eb24ddf23085910"
   },
   "tests/test_workflow/test_workflow_local.py": {
-    "mtime": 1790270342.245032,
-    "ast_hash": "0431498d780058e34a39dab916131552",
-    "semantic_hash": "0431498d780058e34a39dab916131552"
+    "mtime": 1792263826.9471555,
+    "ast_hash": "87f5b962b2f7b2d7accad254fddd633c",
+    "semantic_hash": ""
   },
   "CHANGELOG.md": {
     "mtime": 1790270342.0660384,
@@ -4285,8 +4285,8 @@
     "semantic_hash": ""
   },
   "tests/test_api/test_graph_binding.py": {
-    "mtime": 1790519941.6147037,
-    "ast_hash": "c47b30213ce1a76638b44141f7111cba",
+    "mtime": 1792263724.3835223,
+    "ast_hash": "32e54162c1269dd459cd132ff6d37f10",
     "semantic_hash": ""
   },
   "tests/test_api/test_resolve_graph.py": {
@@ -4620,8 +4620,8 @@
     "semantic_hash": ""
   },
   "tests/test_mcp/test_watch_tools.py": {
-    "mtime": 1792262226.025074,
-    "ast_hash": "89cea2e1f0c402841e59081481c2f840",
+    "mtime": 1792263724.386419,
+    "ast_hash": "0764a1ec7231857f9cc3c22ae8860f0f",
     "semantic_hash": ""
   },
   "tests/test_offline_webui/__init__.py": {

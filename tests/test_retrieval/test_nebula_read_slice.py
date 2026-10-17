@@ -8,6 +8,30 @@ from src.graph.retriever import GRAPH_WALK_MAX_HOPS, GraphRetriever, RoundGraphD
 from src.tenancy.context import default_graph_context
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_seed_paths(monkeypatch):
+    """``aretrieve`` seeds from an embedding (LiteLLM), a Milvus kNN and the
+    Postgres entity mirror. Stub all three so no test here touches the
+    network; tests that care about a seed path override these stubs."""
+
+    class _Embed:
+        async def aget_text_embedding(self, q):
+            return [0.0, 0.0, 0.0]
+
+    class _EVS:
+        def knn(self, vec, k):
+            return []
+
+    async def _no_hits(self, query, *, mode="substring", label=None, limit=10):
+        return []
+
+    monkeypatch.setattr("src.ingestion.embeddings.build_embedding_model", lambda: _Embed())
+    monkeypatch.setattr(
+        "src.graph.entity_vector_store.build_entity_vector_store", lambda graph: _EVS(),
+    )
+    monkeypatch.setattr("src.storage.entity_search.EntitySearchRepository.search", _no_hits)
+
+
 class _FakeStore:
     def __init__(self, rows=None, subgraph_rows=None):
         self._rows = rows or []

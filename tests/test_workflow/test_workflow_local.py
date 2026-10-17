@@ -1,5 +1,5 @@
 """End-to-end test against docker-compose Temporal + live Milvus /
-Neo4j / MinIO / Postgres.
+NebulaGraph / MinIO / Postgres.
 
 Skipped when any of the infra ports isn't reachable.  The test takes
 ~30-90 s on a warm machine (LLM-bound during extract_kg).
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import socket
 import uuid
+from datetime import timedelta
 from pathlib import Path
 
 import psycopg
@@ -39,12 +40,12 @@ def _port_open(host: str, port: int, timeout: float = 0.5) -> bool:
 pytestmark = pytest.mark.skipif(
     not all([
         _port_open("localhost", 19530),  # milvus
-        _port_open("localhost", 7687),   # neo4j
+        _port_open("localhost", 9669),   # nebula graphd
         _port_open("localhost", 9000),   # minio
         _port_open("localhost", 5432),   # postgres
         _port_open("localhost", 7233),   # temporal
     ]),
-    reason="live infra (milvus/neo4j/minio/postgres/temporal) not reachable",
+    reason="live infra (milvus/nebula/minio/postgres/temporal) not reachable",
 )
 
 
@@ -59,6 +60,8 @@ async def test_full_pipeline_happy_path(monkeypatch):
     doc_id = uuid.uuid4()
     with psycopg.connect(settings.postgres.dsn) as conn:
         with conn.cursor() as cur:
+            cur.execute("SET lock_timeout = '5s'")
+            cur.execute("SET statement_timeout = '30s'")
             cur.execute(
                 "INSERT INTO documents (id, path, status) VALUES (%s, %s, 'pending')",
                 (str(doc_id), str(fixture)),
@@ -102,6 +105,7 @@ async def test_full_pipeline_happy_path(monkeypatch):
         result = await client.execute_workflow(
             DocumentIngestWorkflow.run, params,
             id=f"ingest-{doc_id}", task_queue=queue,
+            execution_timeout=timedelta(seconds=300),
         )
 
     assert result.doc_id == str(doc_id)

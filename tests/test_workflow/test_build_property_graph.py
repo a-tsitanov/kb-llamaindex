@@ -199,6 +199,49 @@ async def test_writes_watch_journals_with_the_pairs_the_graph_created(monkeypatc
     assert args[1] is entities and args[2] is relations
     assert args[3] == [("va", "vb")]
     assert kwargs == {"doc_id": "d", "doc_date_epoch": 19794, "backfill": True}
+    # the journal repository is scoped to the activity's graph
+    assert args[0].graph.id == merged.graph_id == "default"
+
+
+@pytest.mark.asyncio
+async def test_skips_watch_journals_for_non_default_graph(monkeypatch):
+    """Entity watch is default-only (the monitor sweep reads only the default
+    graph's journals) — a non-default graph must not grow journals."""
+    from src.config import settings
+
+    monkeypatch.setattr(settings.signals, "source_trust", {})
+    monkeypatch.setattr(settings.events, "first_seen_enabled", False)
+
+    n = MagicMock(node_id="a")
+    n.metadata = {}
+    staging = MagicMock()
+    staging.read_pickle.return_value = ([MagicMock()], [MagicMock()], [n])
+    graph_store = MagicMock()
+    graph_store.upsert_relations.return_value = [("va", "vb")]
+
+    ctx = Ctx(doc_id="d", local_path="/x", cleanup_dir=None, workflow_run_id="r",
+              graph_id="acme")
+    parsed = Parsed(ctx=ctx, nodes_uri="s3://kb-staging/r/parsed.pkl", chunk_count=1)
+    kg = KGExtracted(parsed=parsed, nodes_with_kg_uri="s3://kb-staging/r/kg.pkl")
+    merged = Merged(kg=kg, merged_entities_uri="s3://kb-staging/r/merged.pkl")
+    assert merged.graph_id == "acme"
+
+    journal = AsyncMock()
+    with patch(
+        "src.workflow.activities.build_property_graph.build_staging_store",
+        return_value=staging,
+    ), patch(
+        "src.workflow.activities.build_property_graph.build_graph_store",
+        return_value=graph_store,
+    ), patch(
+        "src.workflow.activities.build_property_graph.record_watch_journals", new=journal,
+    ), patch(
+        "src.workflow.activities.build_property_graph.activity"
+    ):
+        out = await build_property_graph(merged)
+
+    journal.assert_not_awaited()
+    assert out.relations == 1
 
 
 def test_backfill_flag_flows_from_ingest_params_to_ctx():

@@ -171,7 +171,9 @@ async def upload_document(
             orig_bytes = await original.read()
             original_uri = await asyncio.to_thread(
                 storage.put_object,
-                f"{doc_id}/original/{_safe_filename(original.filename)}",
+                graph_object_key(
+                    graph, f"{doc_id}/original/{_safe_filename(original.filename)}",
+                ),
                 io.BytesIO(orig_bytes),
                 len(orig_bytes),
                 original.content_type or "application/octet-stream",

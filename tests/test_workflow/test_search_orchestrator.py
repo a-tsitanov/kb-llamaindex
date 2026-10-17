@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import socket
 import uuid
+from datetime import timedelta
 
 import pytest
 from temporalio import activity
@@ -58,6 +59,10 @@ pytestmark = pytest.mark.skipif(
     not _temporal_up(),
     reason="docker-compose Temporal (localhost:7233) not reachable",
 )
+
+# Live Temporal: bound every run so a stuck worker/stack fails the test
+# instead of hanging the suite.
+_EXEC_TIMEOUT = timedelta(seconds=120)
 
 
 def _node(cid: str) -> SerializedNode:
@@ -118,6 +123,7 @@ async def test_subquery_dedups_and_no_reasoning(monkeypatch):
             SubQueryRetrievalWorkflow.run,
             SubQueryParams(subquestion="кто такой Иванов?"),
             id=f"sub-{uuid.uuid4()}", task_queue=queue,
+            execution_timeout=_EXEC_TIMEOUT,
         )
     assert [n.chunk_id for n in out.sources] == ["c1", "c2"]
 
@@ -162,6 +168,7 @@ async def test_orchestrator_plans_fans_out_merges_synth_once(monkeypatch):
             SearchOrchestratorWorkflow.run,
             OrchestratorParams(query="кто Иванов и где работает?"),
             id=f"orch-{uuid.uuid4()}", task_queue=queue,
+            execution_timeout=_EXEC_TIMEOUT,
         )
     assert out.answer == "FINAL ANSWER"
     # shared + a1 + b1 = 3 unique chunks (the duplicate "shared" collapsed).
@@ -201,6 +208,7 @@ async def test_orchestrator_atomic_single_child(monkeypatch):
             SearchOrchestratorWorkflow.run,
             OrchestratorParams(query="кто такой Иванов?"),
             id=f"orch-{uuid.uuid4()}", task_queue=queue,
+            execution_timeout=_EXEC_TIMEOUT,
         )
     assert out.answer == "ATOMIC ANSWER"
     assert len(out.step_stats) == 1
@@ -262,6 +270,7 @@ async def test_orchestrator_coverage_gap_runs_one_extra_subquery(monkeypatch):
             SearchOrchestratorWorkflow.run,
             OrchestratorParams(query="base q", max_coverage_rounds=1),
             id=f"orch-{uuid.uuid4()}", task_queue=queue,
+            execution_timeout=_EXEC_TIMEOUT,
         )
     # base sub-question + exactly one coverage sub-question ("MISSING TOPIC").
     assert retrieve_calls == ["base q", "MISSING TOPIC"]
@@ -296,6 +305,7 @@ async def test_orchestrator_coverage_complete_no_extra_round(monkeypatch):
             SearchOrchestratorWorkflow.run,
             OrchestratorParams(query="base q", max_coverage_rounds=1),
             id=f"orch-{uuid.uuid4()}", task_queue=queue,
+            execution_timeout=_EXEC_TIMEOUT,
         )
     assert retrieve_calls == ["base q"]  # no extra round
     assert synth_calls == [["base"]]
@@ -338,6 +348,7 @@ async def test_orchestrator_coverage_fail_open_on_activity_error(monkeypatch):
             SearchOrchestratorWorkflow.run,
             OrchestratorParams(query="base q", max_coverage_rounds=1),
             id=f"orch-{uuid.uuid4()}", task_queue=queue,
+            execution_timeout=_EXEC_TIMEOUT,
         )
     assert out.answer == "ANSWER"
     assert synth_calls == [1]  # synthesized over the base source, no extra
@@ -371,6 +382,7 @@ async def test_orchestrator_coverage_bounded_to_max_rounds(monkeypatch):
             SearchOrchestratorWorkflow.run,
             OrchestratorParams(query="base q", max_coverage_rounds=1),
             id=f"orch-{uuid.uuid4()}", task_queue=queue,
+            execution_timeout=_EXEC_TIMEOUT,
         )
     # base + exactly ONE coverage round (second gap never acted upon).
     assert retrieve_calls == ["base q", "MISSING TOPIC"]

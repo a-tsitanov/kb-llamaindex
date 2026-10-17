@@ -35,6 +35,15 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(autouse=True)
+def _bounded_pg_sessions(monkeypatch):
+    """Live-PG test: a running stack may hold locks on these tables. libpq
+    applies PGOPTIONS to every connection it opens (direct and pooled), so
+    each session gets ``SET lock_timeout='5s'; SET statement_timeout='30s'``
+    and fails fast instead of blocking the suite."""
+    monkeypatch.setenv("PGOPTIONS", "-c lock_timeout=5s -c statement_timeout=30s")
+
+
 def _row(workflow_run_id: str, name: str, attempt: int = 1) -> MetricRow:
     now = datetime.now(UTC)
     return MetricRow(
