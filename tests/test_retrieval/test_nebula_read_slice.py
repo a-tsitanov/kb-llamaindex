@@ -85,9 +85,6 @@ async def test_find_by_name_nebula_ors_the_tokens():
 @pytest.mark.asyncio
 async def test_find_by_name_nebula_is_case_tolerant(monkeypatch):
     """The index is case-sensitive; a lower-case request also tries the capitalised form."""
-    monkeypatch.setattr(
-        "src.graph.retriever.settings.graph.backend", "nebula", raising=False,
-    )
     store = _FakeStore(rows=[])
     await GraphRetriever.for_store(store).afind_entities_by_name("лихачёв")
     joined = "\n".join(store.queries)
@@ -99,9 +96,6 @@ async def test_find_by_name_nebula_is_case_tolerant(monkeypatch):
 async def test_find_by_name_nebula_ranks_the_full_name_first(monkeypatch):
     """"Алексей Лихачёв" used to return ten other Алексей (the OR of prefixes filled the
     LIMIT unranked); the entity matching every word must come first."""
-    monkeypatch.setattr(
-        "src.graph.retriever.settings.graph.backend", "nebula", raising=False,
-    )
     rows = ([{"name": f"Алексей Кущ{i}", "label": "Person"} for i in range(12)]
             + [{"name": "Алексей Лихачёв", "label": "Person", "description": "глава Росатома"},
                {"name": "Алексей Лихачёв (однофамилец)", "label": "Person"}])
@@ -117,9 +111,6 @@ async def test_find_by_name_nebula_ranks_the_full_name_first(monkeypatch):
 async def test_find_by_name_nebula_phrase_hit_is_not_drowned_by_a_common_first_name(monkeypatch):
     """Live graph: 200 entities start with "Алексей"; the phrase lookup must still surface
     "Алексей Лихачёв" even though the token lookup's LIMIT never reaches it."""
-    monkeypatch.setattr(
-        "src.graph.retriever.settings.graph.backend", "nebula", raising=False,
-    )
 
     class _ByTerm(_FakeStore):
         def structured_query(self, query, param_map=None):

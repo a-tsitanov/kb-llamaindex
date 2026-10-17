@@ -280,19 +280,24 @@ async def test_warm_up_model_in_deps_does_not_skip_init(monkeypatch):
         def get(self, name):
             return "llm"
 
-    def no_graph():
+    def no_graph(graph):
         raise RuntimeError("no graph in this test")
 
+    from src.tenancy.context import default_graph_context
+
+    graph = default_graph_context()
     monkeypatch.setattr(emb, "build_embedding_model", lambda: "embed")
-    monkeypatch.setattr(vi, "build_vector_store", lambda: "store")
+    monkeypatch.setattr(vi, "build_vector_store", lambda graph, **kw: "store")
     monkeypatch.setattr(vi, "build_vector_index", lambda store, embed: _Index())
     monkeypatch.setattr(pool, "get_llm_pool", lambda: _Pool())
     monkeypatch.setattr(gstore, "build_graph_store", no_graph)
-    monkeypatch.setattr(cr, "ChunkRepository", lambda pg: "chunks")
-    monkeypatch.setattr(pg, "AsyncPostgres", lambda: None)
+    monkeypatch.setattr(cr, "ChunkRepository", lambda *, graph, pg: "chunks")
+    monkeypatch.setattr(pg, "AsyncPostgres", lambda *, graph: None)
     monkeypatch.setattr(ts, "_deps", {"cross_encoder": object()})  # warm-up finished first
-    await ts._init()
-    assert ts._deps["retriever"] == "retriever" and "graph" in ts._deps
+    monkeypatch.setattr(ts, "_deps_by_graph", {})
+    monkeypatch.setattr(ts, "_embed", {})
+    deps = await ts._init(graph)
+    assert deps["retriever"] == "retriever" and "graph" in deps
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,9 @@ import pytest
 
 from src.graph.nebula_store import entity_vid
 from src.mcp import tools_server as ts
+from src.tenancy.context import new_graph_context
 
+G = new_graph_context("acme")
 DOC = "d0c5e6a0-0000-0000-0000-000000000001"
 
 
@@ -58,8 +60,15 @@ def repos(monkeypatch):
     def _set(search=None, watch=None):
         search = search or _Search()
         watch = watch or _Watch()
-        monkeypatch.setattr(ts, "_entity_search", lambda: search)
-        monkeypatch.setattr(ts, "_watch_repo", lambda: watch)
+        def _scoped(repo):
+            def _get(graph):
+                # every helper reaches the repositories through the tool's graph
+                assert graph is G
+                return repo
+            return _get
+
+        monkeypatch.setattr(ts, "_entity_search", _scoped(search))
+        monkeypatch.setattr(ts, "_watch_repo", _scoped(watch))
         return search, watch
     return _set
 
@@ -74,7 +83,7 @@ def _ent(name, label="Person", mc=3):
 
 async def test_watch_exact_name_subscribes(repos):
     _, watch = repos(search=_Search(exact=[_ent("Блинов Андрей Степанович")]))
-    out = await ts._watch("Блинов Андрей Степанович", None, "КУСП 805")
+    out = await ts._watch("Блинов Андрей Степанович", None, "КУСП 805", graph=G)
     assert out["status"] == "watching"
     assert watch.added == [("default", entity_vid("Блинов Андрей Степанович"),
                             "Блинов Андрей Степанович", [], "КУСП 805")]
@@ -82,13 +91,13 @@ async def test_watch_exact_name_subscribes(repos):
 
 async def test_watch_single_fuzzy_hit_subscribes(repos):
     _, watch = repos(search=_Search(substring=[_ent("Блинов Андрей Степанович")]))
-    out = await ts._watch("Блинов", None, "")
+    out = await ts._watch("Блинов", None, "", graph=G)
     assert out["status"] == "watching" and len(watch.added) == 1
 
 
 async def test_watch_ambiguous_returns_candidates_without_subscribing(repos):
     _, watch = repos(search=_Search(substring=[_ent("Блинов А.С."), _ent("Блинов Андрей Степанович")]))
-    out = await ts._watch("Блинов", None, "")
+    out = await ts._watch("Блинов", None, "", graph=G)
     assert out["status"] == "ambiguous"
     assert [c["name"] for c in out["candidates"]] == ["Блинов А.С.", "Блинов Андрей Степанович"]
     assert watch.added == []
@@ -96,13 +105,13 @@ async def test_watch_ambiguous_returns_candidates_without_subscribing(repos):
 
 async def test_watch_not_found(repos):
     repos()
-    out = await ts._watch("Никто", None, "")
+    out = await ts._watch("Никто", None, "", graph=G)
     assert out["status"] == "not_found"
 
 
 async def test_watch_rejects_unknown_kinds(repos):
     _, watch = repos(search=_Search(exact=[_ent("A")]))
-    out = await ts._watch("A", ["new_mention", "gossip"], "")
+    out = await ts._watch("A", ["new_mention", "gossip"], "", graph=G)
     assert "error" in out and watch.added == []
 
 
@@ -112,21 +121,21 @@ async def test_watch_rejects_unknown_kinds(repos):
 async def test_unwatch_by_name_or_vid(repos):
     vid = entity_vid("Блинов")
     _, watch = repos(watch=_Watch(watches=[{"entity_vid": vid, "entity_name": "Блинов"}]))
-    assert (await ts._unwatch("Блинов"))["status"] == "removed"
-    assert (await ts._unwatch(vid))["status"] == "removed"
+    assert (await ts._unwatch("Блинов", graph=G))["status"] == "removed"
+    assert (await ts._unwatch(vid, graph=G))["status"] == "removed"
     assert watch.removed == [("default", vid), ("default", vid)]
 
 
 async def test_unwatch_unknown(repos):
     repos()
-    assert (await ts._unwatch("Никто"))["status"] == "not_watched"
+    assert (await ts._unwatch("Никто", graph=G))["status"] == "not_watched"
 
 
 async def test_watchlist_is_json_safe(repos):
     created = datetime(2026, 10, 15, 10, 0, tzinfo=UTC)
     repos(watch=_Watch(watches=[{"entity_vid": "v", "entity_name": "Блинов", "kinds": [],
                                  "muted_until": None, "note": "", "created_at": created}]))
-    out = await ts._watchlist()
+    out = await ts._watchlist(graph=G)
     assert out["watches"][0]["created_at"] == created.isoformat()
 
 
@@ -173,7 +182,7 @@ def test_feed_card_link_follows_configured_template(monkeypatch):
 
 async def test_feed_marks_returned_events_seen(repos):
     _, watch = repos(watch=_Watch(feed_rows=[_row(5, "new_mention", DOC)]))
-    out = await ts._watch_feed(False, 20)
+    out = await ts._watch_feed(False, 20, graph=G)
     assert out["count"] == 1 and len(out["cards"]) == 1
     assert watch.feed_args == ("default", False, 20)
     assert watch.seen == [("default", [5])]
@@ -184,16 +193,16 @@ async def test_feed_marks_returned_events_seen(repos):
 
 async def test_ack_ids(repos):
     _, watch = repos()
-    out = await ts._ack([1, 2], False)
+    out = await ts._ack([1, 2], False, graph=G)
     assert out == {"acked": 2}
     assert watch.acked == [("default", [1, 2], False)]
 
 
 async def test_ack_all(repos):
     repos()
-    assert (await ts._ack(None, True))["acked"] == 7
+    assert (await ts._ack(None, True, graph=G))["acked"] == 7
 
 
 async def test_ack_needs_ids_or_all(repos):
     repos()
-    assert "error" in await ts._ack(None, False)
+    assert "error" in await ts._ack(None, False, graph=G)

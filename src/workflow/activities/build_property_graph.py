@@ -148,7 +148,7 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
         from src.storage.watch import WatchRepository
 
         await record_watch_journals(
-            WatchRepository(), entities, relations, created_pairs,
+            WatchRepository(graph=graph), entities, relations, created_pairs,
             doc_id=ctx.doc_id, doc_date_epoch=ctx.doc_date_epoch, backfill=ctx.backfill,
         )
 

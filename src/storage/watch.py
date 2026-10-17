@@ -18,7 +18,8 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 
-from src.storage.pg_pool import get_pg_pool
+from src.storage.pg_scope import graph_connection, search_path_sql
+from src.tenancy.context import GraphContext
 
 # Journal table -> its insert-time column. Doubles as the whitelist for the
 # table name spliced into read_journal's SQL.
@@ -99,22 +100,29 @@ WHERE e.detected_at >= w.created_at
 
 
 class WatchRepository:
-    """Async wrapper over the entity-watch tables."""
+    """Async wrapper over the entity-watch tables of one graph (its schema)."""
 
-    def __init__(self, dsn: str | None = None) -> None:
+    def __init__(self, dsn: str | None = None, *, graph: GraphContext) -> None:
+        # None → shared pool; explicit dsn → legacy direct connect.
         self._dsn = dsn
+        self._graph = graph
+
+    @property
+    def graph(self) -> GraphContext:
+        return self._graph
 
     @asynccontextmanager
     async def _conn(self) -> AsyncIterator[psycopg.AsyncConnection]:
         if self._dsn is None:
-            pool = await get_pg_pool()
             # Short acquisition budget: journal writes sit on the ingest path
             # and are fail-open, so a Postgres outage must cost seconds, not
             # the pool's full timeout.
-            async with pool.connection(timeout=5) as conn:
+            async with graph_connection(self._graph, timeout=5) as conn:
                 yield conn
         else:
             async with await psycopg.AsyncConnection.connect(self._dsn) as conn:
+                await conn.execute(search_path_sql(self._graph))
+                await conn.commit()
                 yield conn
 
     # ── journals (ingest) ───────────────────────────────────────────

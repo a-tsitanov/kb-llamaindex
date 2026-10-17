@@ -30,7 +30,7 @@ from src.graph.store import build_graph_store
 from src.retrieval.date_filters import today_epoch_days
 from src.storage.watch import WatchRepository
 from src.tenancy.activity import resolve_graph_for_activity
-from src.tenancy.context import GraphContext
+from src.tenancy.context import DEFAULT_GRAPH_ID, GraphContext
 from src.workflow.heartbeat import heartbeat_every
 from src.workflow.monitor.delivery import post_alert
 from src.workflow.monitor.watch_sweep import run_watch_sweep
@@ -267,10 +267,12 @@ async def deliver_alerts(p: DeliverIn) -> DeliverResult:
 async def sweep_watch() -> WatchSweepResult:
     """Entity-watch sweep: journals past their cursors -> watch_event rows
     for subscribed entities (Postgres ``watch`` table, not the Nebula
-    ``watched`` flag). Fail-soft like the rest of the monitor."""
+    ``watched`` flag). Fail-soft like the rest of the monitor. Default graph
+    only (the monitor is default-only; the activity takes no input)."""
     try:
+        graph = await resolve_graph_for_activity(DEFAULT_GRAPH_ID)
         async with heartbeat_every(30.0, {"stage": "watch"}):
-            by_kind = await run_watch_sweep(WatchRepository())
+            by_kind = await run_watch_sweep(WatchRepository(graph=graph))
         return WatchSweepResult(events=sum(by_kind.values()), by_kind=by_kind)
     except Exception as exc:
         logger.warning("sweep_watch failed: {e}", e=exc)

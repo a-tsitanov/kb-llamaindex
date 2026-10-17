@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.storage.postgres import AsyncPostgres, DocumentRow
+from src.tenancy.context import default_graph_context
 
 
 def _row(**extra):
@@ -40,7 +41,7 @@ def _fake_pg():
     conn.cursor.return_value = cur
     conn.commit = AsyncMock()
 
-    pg = AsyncPostgres()
+    pg = AsyncPostgres(graph=default_graph_context())
 
     @asynccontextmanager
     async def _conn():

@@ -1,9 +1,10 @@
 """Postgres lookups for the KB name resolver (``src/graph/name_resolution.py``).
 
 Pure query builders (asserted in tests, no live DB) + a thin async repository over the
-process pool. All lookups take an already normalized name (``norm_name`` / ``translit_key``)
-and read the ``entity`` mirror / ``entity_alias`` table; the graph stays canonical — the
-resolver re-checks every hit against it (liveness), so a stale mirror row never wins.
+graph-scoped process pool (``graph_connection`` → the graph's schema). All lookups take
+an already normalized name (``norm_name`` / ``translit_key``) and read the ``entity``
+mirror / ``entity_alias`` table; the graph stays canonical — the resolver re-checks
+every hit against it (liveness), so a stale mirror row never wins.
 """
 
 from __future__ import annotations
@@ -12,7 +13,8 @@ from typing import Any
 
 from psycopg.rows import dict_row
 
-from src.storage.pg_pool import get_pg_pool
+from src.storage.pg_scope import graph_connection
+from src.tenancy.context import GraphContext
 
 _ENTITY = "name, label, description, mention_count"
 _LIVE = "alive IS NOT FALSE"
@@ -75,12 +77,19 @@ def q_trigram(norm: str, limit: int) -> tuple[str, list[Any]]:
 
 class EntityLexicon:
     """The resolver's Postgres side. Every method returns row dicts; errors propagate (the
-    resolver decides what a failed step means)."""
+    resolver decides what a failed step means). Bound to one graph: every query runs on
+    that graph's schema (``entity`` / ``entity_alias`` are graph-scoped tables)."""
+
+    def __init__(self, *, graph: GraphContext) -> None:
+        self._graph = graph
+
+    @property
+    def graph(self) -> GraphContext:
+        return self._graph
 
     async def _rows(self, built: tuple[str, list[Any]]) -> list[dict[str, Any]]:
         sql, params = built
-        pool = await get_pg_pool()
-        async with pool.connection(timeout=1) as conn, \
+        async with graph_connection(self._graph, timeout=1) as conn, \
                 conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(sql, params)
             return list(await cur.fetchall())

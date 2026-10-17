@@ -31,6 +31,7 @@ from src.graph.entity_resolution import (
     _is_cyrillic_name,
     resolve_entities,
 )
+from src.tenancy.context import GraphContext, default_graph_context
 
 # ── stubs ───────────────────────────────────────────────────────────
 
@@ -122,6 +123,7 @@ class _GraphStoreStub:
 
     rows: list[dict] = field(default_factory=list)
     raises: bool = False
+    graph: GraphContext = field(default_factory=default_graph_context)
 
     def structured_query(self, query: str, param_map: dict | None = None) -> list[dict]:
         if self.raises:
@@ -824,7 +826,7 @@ def _no_watch_rewrite_db(request, monkeypatch):
         return
     import src.graph.entity_resolution as er
 
-    async def _noop(loser, canon):
+    async def _noop(graph, loser, canon):
         return None
 
     monkeypatch.setattr(er, "_rewrite_watch_vid", _noop)
@@ -839,18 +841,23 @@ async def test_watch_rewrite_follows_each_successful_merge_only(monkeypatch):
             if loser == "Loser A":
                 raise RuntimeError("nGQL re-insert failed")
 
-    rewrites: list[tuple[str, str]] = []
+    rewrites: list[tuple[object, str, str]] = []
 
-    async def _rec(loser, canon):
-        rewrites.append((loser, canon))
+    async def _rec(graph, loser, canon):
+        rewrites.append((graph, loser, canon))
 
+    class _Store:
+        graph = object()
+
+    store = _Store()
     monkeypatch.setattr(er, "build_er_graph_ops", lambda store: _FlakyOps())
     monkeypatch.setattr(er, "_rewrite_watch_vid", _rec)
 
-    await er._cleanup_stored_losers(object(), [("Loser A", "Canon A"), ("Loser B", "Canon B")])
+    await er._cleanup_stored_losers(store, [("Loser A", "Canon A"), ("Loser B", "Canon B")])
 
-    # the failed merge left the loser intact, so its watch rows stay too
-    assert rewrites == [("Loser B", "Canon B")]
+    # the failed merge left the loser intact, so its watch rows stay too;
+    # the rewrite runs in the merged store's graph
+    assert rewrites == [(store.graph, "Loser B", "Canon B")]
 
 
 @pytest.mark.asyncio
@@ -860,16 +867,22 @@ async def test_watch_rewrite_maps_names_to_vids_and_never_raises(monkeypatch):
     from src.graph.nebula_store import entity_vid
 
     calls: list[tuple] = []
+    graphs: list[object] = []
+    graph = object()
 
     class _Repo:
+        def __init__(self, *, graph):
+            graphs.append(graph)
+
         async def rewrite_vid(self, loser_vid, canon_vid, canon_name):
             calls.append((loser_vid, canon_vid, canon_name))
             raise RuntimeError("pg down")
 
     monkeypatch.setattr(watch_mod, "WatchRepository", _Repo)
-    await er._rewrite_watch_vid("Исаев В.И.", "Исаев Валентин Игоревич")  # must not raise
+    await er._rewrite_watch_vid(graph, "Исаев В.И.", "Исаев Валентин Игоревич")  # must not raise
     assert calls == [(entity_vid("Исаев В.И."), entity_vid("Исаев Валентин Игоревич"),
                       "Исаев Валентин Игоревич")]
+    assert graphs == [graph]
 
 
 # ── person-name rule ────────────────────────────────────────────────

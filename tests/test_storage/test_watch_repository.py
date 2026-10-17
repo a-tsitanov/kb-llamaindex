@@ -7,7 +7,10 @@ from datetime import date
 
 from psycopg.rows import dict_row
 
+from src.storage import pg_scope
+from src.storage import watch as watch_mod
 from src.storage.watch import WatchRepository
+from src.tenancy.context import default_graph_context, new_graph_context
 
 
 @dataclass
@@ -65,7 +68,7 @@ class _Conn:
 
 def _repo(rows=None):
     conn = _Conn(cur=_Cur(rows=list(rows or [])))
-    repo = WatchRepository()
+    repo = WatchRepository(graph=default_graph_context())
 
     @asynccontextmanager
     async def _c():
@@ -231,3 +234,62 @@ async def test_ack_all_marks_every_visible_event():
     sql, params = conn.cur.executed[0]
     assert "INSERT INTO watch_seen" in sql and "SELECT" in sql
     assert params == ("default",)
+
+
+# ── graph scoping ────────────────────────────────────────────────────
+
+
+class _ScopedConn:
+    """Records the search_path SET + commits, then serves the watch queries."""
+
+    def __init__(self):
+        self.log: list = []
+        self.cur = _Cur()
+
+    async def execute(self, q, params=None):
+        self.log.append(q.as_string(None) if hasattr(q, "as_string") else str(q))
+
+    async def commit(self):
+        self.log.append("commit")
+
+    def cursor(self, *a, **kw):
+        self.cur.row_factory = kw.get("row_factory")
+        return self.cur
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+async def test_pooled_connection_runs_in_the_graph_schema(monkeypatch):
+    conn = _ScopedConn()
+
+    class _Pool:
+        @asynccontextmanager
+        async def connection(self, timeout=None):
+            yield conn
+
+    async def _get_pool():
+        return _Pool()
+
+    monkeypatch.setattr(pg_scope, "get_pg_pool", _get_pool)
+    repo = WatchRepository(graph=new_graph_context("acme"))
+    assert repo.graph.id == "acme"
+    await repo.watched()
+    assert conn.log[:2] == ['SET search_path TO "g_acme", public', "commit"]
+    assert conn.cur.executed  # the query ran on the scoped connection
+
+
+async def test_dsn_connection_sets_the_graph_schema(monkeypatch):
+    conn = _ScopedConn()
+
+    async def _connect(dsn):
+        assert dsn == "postgresql://x"
+        return conn
+
+    monkeypatch.setattr(watch_mod.psycopg.AsyncConnection, "connect", _connect)
+    repo = WatchRepository("postgresql://x", graph=new_graph_context("acme"))
+    await repo.watched()
+    assert conn.log[:2] == ['SET search_path TO "g_acme", public', "commit"]

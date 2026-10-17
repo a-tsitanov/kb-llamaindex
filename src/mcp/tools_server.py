@@ -264,11 +264,7 @@ async def _resolver(graph: GraphContext):
         else:
             from src.graph.name_resolution import NameResolver, nebula_fetch
             from src.storage.entity_lexicon import EntityLexicon
-            # TODO(merge phase 2): EntityLexicon reads the graph-scoped
-            # `entity` / `entity_alias` tables through the unscoped pool; it
-            # must take `graph=` (graph_connection(graph)) before this is
-            # isolation-safe for non-default graphs.
-            deps["resolver"] = NameResolver(EntityLexicon(), nebula_fetch(gs))
+            deps["resolver"] = NameResolver(EntityLexicon(graph=graph), nebula_fetch(gs))
     return deps["resolver"]
 
 
@@ -941,11 +937,7 @@ def _entity_search(graph: GraphContext):
 def _watch_repo(graph: GraphContext):
     from src.storage.watch import WatchRepository
 
-    # TODO(merge phase 2): the watch tables are graph-scoped but
-    # WatchRepository still opens the unscoped pool; pass `graph=` once it
-    # takes one (graph_connection(graph)).
-    del graph
-    return WatchRepository()
+    return WatchRepository(graph=graph)
 
 
 def _json_safe(value: Any) -> Any:

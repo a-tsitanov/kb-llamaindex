@@ -11,10 +11,10 @@ from tests.test_graph.test_name_resolution import GRAPH, FakeLexicon, fetch_from
 def wired(monkeypatch):
     seen = {}
 
-    async def resolver():
+    async def resolver(graph):
         return NameResolver(FakeLexicon(), fetch_from(GRAPH))
 
-    async def gs():
+    async def gs(graph):
         return object()
 
     async def sp(store, a, b, max_hops=6):
@@ -68,7 +68,7 @@ async def test_depth_and_hops_are_clamped_with_a_note(monkeypatch):
         seen["hops"] = hops
         return atomic_tools.ToolResult(sources=[], observation='{"entities": []}')
 
-    async def none():
+    async def none(graph):
         return None
     monkeypatch.setattr(atomic_tools, "graph_search", fake_gs)
     monkeypatch.setattr(atomic_tools, "find_neighbours", fake_fn)
@@ -98,10 +98,10 @@ async def test_relations_between_resolves_strictly_and_returns_live_edges(monkey
 
     store = Store()
 
-    async def resolver():
+    async def resolver(graph):
         return NameResolver(FakeLexicon(), fetch_from(GRAPH))
 
-    async def gs():
+    async def gs(graph):
         return store
     monkeypatch.setattr(ts, "_resolver", resolver)
     monkeypatch.setattr(ts, "_gs", gs)

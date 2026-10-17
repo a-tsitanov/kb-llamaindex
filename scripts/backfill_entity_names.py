@@ -11,11 +11,14 @@ Three passes, each a dry run (counts + a report) unless ``--apply``:
             living entities (Fomc ≡ ФРС) never becomes one. The dry run writes every
             proposed alias and a random sample for manual review.
 
-Run ``names`` and ``liveness`` before ``aliases`` (it reads entity.alive).
+Run ``names`` and ``liveness`` before ``aliases`` (it reads entity.alive). Every pass
+works on one graph (``--graph``, default ``default``): its Postgres schema and its
+Nebula space.
 
-    python scripts/backfill_entity_names.py names [--apply]
-    python scripts/backfill_entity_names.py liveness [--apply]
+    python scripts/backfill_entity_names.py names [--apply] [--graph ID]
+    python scripts/backfill_entity_names.py liveness [--apply] [--graph ID]
     python scripts/backfill_entity_names.py aliases [--apply] [--report out.csv] [--sample 200]
+        [--graph ID]
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from typing import Any
 
+from src.tenancy.context import GraphContext
 from src.utils.names import norm_name, translit_key
 
 CONFIDENCE = 0.85
@@ -88,15 +92,16 @@ def plan_aliases(pairs: Iterable[tuple[str, str]], alive: dict[str, int],
 # ── passes ────────────────────────────────────────────────────────────
 
 
-def _pg():
-    from src.storage.pg_sync_pool import get_pg_sync_pool
-    return get_pg_sync_pool()
+def _pg(graph: GraphContext):
+    """A connection on ``graph``'s schema (``search_path`` scoped)."""
+    from src.storage.pg_scope import graph_sync_connection
+    return graph_sync_connection(graph)
 
 
-def pass_names(apply: bool, batch: int = 5000) -> None:
+def pass_names(graph: GraphContext, apply: bool, batch: int = 5000) -> None:
     last, total = "", 0
     while True:
-        with _pg().connection() as conn, conn.cursor() as cur:
+        with _pg(graph) as conn, conn.cursor() as cur:
             cur.execute("SELECT vid, name FROM entity WHERE vid > %s AND "
                         "(name_norm IS NULL OR name_translit IS NULL) ORDER BY vid LIMIT %s",
                         [last, batch])
@@ -113,13 +118,13 @@ def pass_names(apply: bool, batch: int = 5000) -> None:
     print(f"names: done, {total} rows {'updated' if apply else 'to update (dry run)'}")
 
 
-def pass_liveness(apply: bool, batch: int = 500) -> None:
+def pass_liveness(graph: GraphContext, apply: bool, batch: int = 500) -> None:
     from src.graph.nebula_store import _q
     from src.graph.store import build_graph_store
-    store = build_graph_store()
+    store = build_graph_store(graph)
     last, seen, dead_total = "", 0, 0
     while True:
-        with _pg().connection() as conn, conn.cursor() as cur:
+        with _pg(graph) as conn, conn.cursor() as cur:
             cur.execute("SELECT vid FROM entity WHERE vid > %s ORDER BY vid LIMIT %s",
                         [last, batch])
             vids = [r[0] for r in cur.fetchall()]
@@ -139,9 +144,9 @@ def pass_liveness(apply: bool, batch: int = 500) -> None:
           f"({'written' if apply else 'dry run'})")
 
 
-def pass_aliases(apply: bool, report: str, sample: int) -> None:
+def pass_aliases(graph: GraphContext, apply: bool, report: str, sample: int) -> None:
     from src.graph.nebula_store import entity_vid
-    with _pg().connection() as conn, conn.cursor() as cur:
+    with _pg(graph) as conn, conn.cursor() as cur:
         cur.execute("SELECT name, mention_count, alive FROM entity")
         alive, dead = {}, set()
         for name, mc, is_alive in cur.fetchall():
@@ -167,7 +172,7 @@ def pass_aliases(apply: bool, report: str, sample: int) -> None:
     print(f"aliases: all → {report}, review sample → {review}")
     if not apply:
         return
-    with _pg().connection() as conn, conn.cursor() as cur:
+    with _pg(graph) as conn, conn.cursor() as cur:
         cur.executemany(
             "INSERT INTO entity_alias (alias, alias_norm, alias_translit, canonical_vid, "
             "canonical_name, source, confidence) VALUES (%s, %s, %s, %s, %s, "
@@ -184,13 +189,17 @@ def main() -> None:
     ap.add_argument("--apply", action="store_true", help="write (default: dry run)")
     ap.add_argument("--report", default="entity_aliases.csv")
     ap.add_argument("--sample", type=int, default=200)
+    ap.add_argument("--graph", default="default", help="target graph id (default: %(default)s)")
     args = ap.parse_args()
+    from src.tenancy.context import cli_graph_context
+
+    graph = cli_graph_context(args.graph)
     if args.pass_ == "names":
-        pass_names(args.apply)
+        pass_names(graph, args.apply)
     elif args.pass_ == "liveness":
-        pass_liveness(args.apply)
+        pass_liveness(graph, args.apply)
     else:
-        pass_aliases(args.apply, args.report, args.sample)
+        pass_aliases(graph, args.apply, args.report, args.sample)
 
 
 if __name__ == "__main__":

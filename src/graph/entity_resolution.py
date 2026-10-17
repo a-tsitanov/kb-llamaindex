@@ -1216,15 +1216,16 @@ def _apply_name_map(
 # ── existing canonicals (incremental ER) ───────────────────────────
 
 
-async def _rewrite_watch_vid(loser_name: str, canon_name: str) -> None:
+async def _rewrite_watch_vid(graph: Any, loser_name: str, canon_name: str) -> None:
     """Carry entity-watch rows (subscriptions, journals, events) from a merged
-    loser onto its canonical entity. Fail-open: a stale vid only costs the
-    watcher events until the next merge of the same pair."""
+    loser onto its canonical entity, in the merged graph's schema. Fail-open:
+    a stale vid only costs the watcher events until the next merge of the
+    same pair."""
     from src.graph.nebula_store import entity_vid
     from src.storage.watch import WatchRepository
 
     try:
-        await WatchRepository().rewrite_vid(
+        await WatchRepository(graph=graph).rewrite_vid(
             entity_vid(loser_name), entity_vid(canon_name), canon_name,
         )
     except Exception as exc:
@@ -1260,7 +1261,7 @@ async def _cleanup_stored_losers(
                 loser=loser_name,
                 canon=canon_name,
             )
-            await _rewrite_watch_vid(loser_name, canon_name)
+            await _rewrite_watch_vid(graph_store.graph, loser_name, canon_name)
         except Exception as exc:
             # Safe-by-inaction: leave the loser node INTACT (with its
             # edges) rather than deleting it without repointing.  Worst
