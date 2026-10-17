@@ -1,0 +1,10 @@
+# Offline layer on top of the app image: pre-fetch the runtime downloads that
+# llama-index does lazily (NLTK stopwords + punkt_tab) and forbid HF hub calls,
+# so containers start on hosts with no internet.
+#   docker buildx build --platform linux/amd64 -f deploy/offline/Dockerfile.offline \
+#     --build-arg BASE=kb-app:offline -t kb-app:offline .
+ARG BASE
+FROM ${BASE}
+RUN python -c "from llama_index.core.utils import globals_helper as g; print(len(g.stopwords)); import nltk; nltk.data.find('tokenizers/punkt_tab')"
+ENV HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1

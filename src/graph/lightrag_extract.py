@@ -44,10 +44,12 @@ from pydantic import ConfigDict, Field
 from src.graph.event_extract import events_to_graph
 from src.graph.lightrag_parse import (
     _normalize_entity_name,
+    drop_prompt_example_entities,
     drop_unsupported_dates,
     ensure_orphan_entities,
     parse_lightrag_output,
     parsed_relations_to_relations,
+    prompt_example_entity_names,
 )
 from src.graph.lightrag_prompts import (
     COMPLETE_DELIM,
@@ -297,6 +299,18 @@ class LightRAGExtractor(TransformComponent):
             logger.debug(
                 "lightrag-extract chunk={c}: dropped {n} unsupported date bounds",
                 c=chunk_id, n=dropped_dates,
+            )
+        # 2c. Anti-fabrication: an entity named only in the few-shot
+        #     examples (not in this chunk) was copied from the prompt.
+        dropped_examples = drop_prompt_example_entities(
+            parsed,
+            node.get_content() or "",
+            prompt_example_entity_names([*self.examples, EVENT_INSTRUCTION]),
+        )
+        if dropped_examples:
+            logger.info(
+                "lightrag-extract chunk={c}: dropped {n} entities copied from prompt examples",
+                c=chunk_id, n=dropped_examples,
             )
 
         # 3. Resolve relation src/tgt names → entity ids; synthesise

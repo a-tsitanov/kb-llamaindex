@@ -1,0 +1,9 @@
+{
+  "name": "dsh-kb-ingest",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness plugin: upload documents into the KB (/kb-ingest, /kb-status, kb_ingest_file, kb_ingest_status)",
+  "type": "module",
+  "main": "index.js",
+  "license": "UNLICENSED",
+  "private": true
+}

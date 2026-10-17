@@ -166,7 +166,16 @@ class DeliverResult(_Frozen):
     error: str = ""
 
 
+class WatchSweepResult(_Frozen):
+    """Entity-watch sweep tally (events detected, by kind)."""
+
+    events: int = 0
+    by_kind: dict[str, int] = {}
+    error: str = ""
+
+
 class SweepResult(_Frozen):
+    watch_events: int = 0
     new_connection_alerts: int = 0
     risk_rise_alerts: int = 0
     burst_alerts: int = 0

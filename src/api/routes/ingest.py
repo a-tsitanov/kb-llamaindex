@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import re
 import uuid
 from pathlib import Path
 
@@ -34,6 +35,18 @@ from src.workflow.contracts import IngestParams
 from src.workflow.ingest_submit import submit_document
 
 router = APIRouter(tags=["ingestion"])
+
+# Anything outside this set in a client-supplied original filename becomes
+# "_" (path separators, quotes, control chars) so it can't escape the
+# `<doc_id>/original/` prefix or break the download Content-Disposition.
+_UNSAFE_NAME = re.compile(r"[^\w.\- ()\[\]]+", re.UNICODE)
+
+
+def _safe_filename(name: str) -> str:
+    """Basename-only, separator/control-free, no leading dots."""
+    base = re.split(r"[\\/]", name)[-1]
+    base = _UNSAFE_NAME.sub("_", base).strip(" .")
+    return base[:200] or "original"
 
 
 class IngestEnqueuedResponse(BaseModel):
@@ -58,6 +71,7 @@ class JobProgressResponse(BaseModel):
 )
 async def upload_document(
     file: UploadFile = File(...),
+    original: UploadFile | None = File(default=None),
     department: str = Form(default=""),
     force: bool = Form(default=False),
     document_date: str | None = Form(default=None),
@@ -65,6 +79,9 @@ async def upload_document(
     group: str = Form(default=""),
     channel: str = Form(default=""),
     priority: int | None = Form(default=None),
+    # Re-ingest of already-known material: the entity-watch journals are still
+    # written, but the watch sweep raises no events for these rows.
+    backfill: bool = Form(default=False),
     x_version_tag: str | None = Header(default=None, alias="X-Version-Tag"),
     graph: GraphContext = Depends(resolve_graph),
 ) -> IngestEnqueuedResponse:
@@ -146,6 +163,19 @@ async def upload_document(
             len(contents),
             file.content_type or "application/octet-stream",
         )
+        # Optional original binary (e.g. the .docx `file` was converted
+        # from): stored next to it for download only — the pipeline never
+        # reads it.  Same in-memory read as the main file.
+        original_uri: str | None = None
+        if original is not None and original.filename:
+            orig_bytes = await original.read()
+            original_uri = await asyncio.to_thread(
+                storage.put_object,
+                f"{doc_id}/original/{_safe_filename(original.filename)}",
+                io.BytesIO(orig_bytes),
+                len(orig_bytes),
+                original.content_type or "application/octet-stream",
+            )
     except (S3Error, MaxRetryError, OSError) as exc:
         logger.warning(
             "minio upload failed  doc_id={d}  err={e}", d=doc_id, e=exc,
@@ -160,6 +190,7 @@ async def upload_document(
         doc_id, s3_uri, department=department, doc_type=doc_type,
         doc_date=document_date or None,
         source_channel=channel, source_group=group,
+        original_path=original_uri,
     )
 
     # Analytics labels: explicit header wins, else AnalyticsSettings default.
@@ -200,6 +231,7 @@ async def upload_document(
         inserted_at_epoch=inserted_at_epoch,
         group=group,
         graph_id=graph.id,
+        backfill=backfill,
     )
     # Admission is always on: hand the document to the configured backlog
     # backend (INGEST_QUEUE_BACKEND).  Default `temporal` = signal-with-start

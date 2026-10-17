@@ -12,16 +12,31 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from src.utils.names import norm_name, translit_key
+
 if TYPE_CHECKING:
     from src.tenancy.context import GraphContext
 
-_UPSERT = (
+# Before scripts/setup_db.py adds the name-resolution columns (deploy order) the writer
+# falls back to the old statement instead of silently losing every mirror write.
+_UPSERT_LEGACY = (
     "INSERT INTO entity (vid, name, label, description, mention_count) "
     "VALUES (%s, %s, %s, %s, %s) "
     "ON CONFLICT (vid) DO UPDATE SET "
     "name = EXCLUDED.name, label = EXCLUDED.label, "
     "description = EXCLUDED.description, "
     "mention_count = EXCLUDED.mention_count, updated_at = now()"
+)
+
+_UPSERT = (
+    "INSERT INTO entity (vid, name, label, description, mention_count, "
+    "name_norm, name_translit, alive) "
+    "VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE) "
+    "ON CONFLICT (vid) DO UPDATE SET "
+    "name = EXCLUDED.name, label = EXCLUDED.label, "
+    "description = EXCLUDED.description, "
+    "mention_count = EXCLUDED.mention_count, name_norm = EXCLUDED.name_norm, "
+    "name_translit = EXCLUDED.name_translit, alive = TRUE, updated_at = now()"
 )
 
 
@@ -62,11 +77,22 @@ def mirror_entities(graph: GraphContext, rows: list[dict[str, Any]]) -> None:
 
         values = [
             (r["vid"], r["name"], r.get("label") or "",
-             r.get("description") or "", int(r.get("mention_count") or 0))
+             r.get("description") or "", int(r.get("mention_count") or 0),
+             norm_name(r["name"]), translit_key(r["name"]))
             for r in rows
         ]
-        with graph_sync_connection(graph, timeout=1) as conn, conn.cursor() as cur:
-            cur.executemany(_UPSERT, values)
+        import psycopg
+
+        # search_path SET is committed by graph_sync_connection, so the
+        # rollback below does not drop the graph scoping.
+        with graph_sync_connection(graph, timeout=1) as conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.executemany(_UPSERT, values)
+            except psycopg.errors.UndefinedColumn:
+                conn.rollback()
+                with conn.cursor() as cur:
+                    cur.executemany(_UPSERT_LEGACY, [v[:5] for v in values])
     except Exception as exc:
         logger.warning("entity mirror upsert failed (search only): {e}", e=exc)
 

@@ -1,0 +1,71 @@
+# LiteLLM for the offline 3-server cluster. App requests only the aliases
+# small / large / bge-m3 (see .env.offline).
+#
+# Both chat tiers run on vLLM at 10.10.113.14 (2x RTX 5060 Ti, TP=2): since
+# 2026-10-14 Qwen3.6-35B-A3B NVFP4 (MoE, ~3B active), 131k ctx, still served
+# under the name `qwen38` (user systemd unit `vllm` on .14, deploy/offline/gpu14/).
+# Thinking: OFF for small, ON for large.
+#   small  = ingest extraction  -> qwen38 on .14  (fallback: CPU)
+#   large  = search synthesis   -> qwen38 on .14  (fallback: CPU)
+#   bge-m3 = embeddings (1024)  -> srv01 socket 1
+# CPU llama.cpp servers (~25 tok/s) are the only fallback; the GPU vLLM at
+# 10.10.151.15 (deepseek-v4-flash) was removed 2026-10-14 (server retired).
+
+model_list:
+  # ---- primary: vLLM on .14 (Qwen3.6-35B-A3B, served as qwen38) ----
+  - model_name: small
+    litellm_params:
+      model: hosted_vllm/qwen38
+      api_base: http://10.10.113.14:8000/v1
+      api_key: none
+      timeout: 600
+      extra_body: {"chat_template_kwargs": {"enable_thinking": false}}
+  - model_name: large
+    litellm_params:
+      model: hosted_vllm/qwen38
+      api_base: http://10.10.113.14:8000/v1
+      api_key: none
+      timeout: 600
+      # thinking ON for the final answer only (large = `synthesis` role).
+      extra_body: {"chat_template_kwargs": {"enable_thinking": true}}
+
+  # ---- fallbacks: CPU llama.cpp (Qwen3-30B-A3B Q4_K_M) ----
+  - model_name: small-cpu
+    litellm_params:
+      model: openai/qwen3-30b-a3b
+      api_base: http://10.10.113.13:8082/v1
+      api_key: none
+  - model_name: small-cpu
+    litellm_params:
+      model: openai/qwen3-30b-a3b
+      api_base: http://10.10.113.13:8083/v1
+      api_key: none
+  - model_name: large-cpu
+    litellm_params:
+      model: openai/qwen3-30b-a3b
+      api_base: http://10.10.113.12:8085/v1
+      api_key: none
+
+  # ---- embeddings ----
+  - model_name: bge-m3
+    litellm_params:
+      model: openai/bge-m3
+      api_base: http://10.10.113.11:8081/v1
+      api_key: none
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  num_retries: 0
+
+router_settings:
+  routing_strategy: least-busy
+  num_retries: 2
+  timeout: 900
+  allowed_fails: 3
+  cooldown_time: 60
+  # .14 down/overloaded -> CPU fallbacks (slow but alive). The GPU vLLM on .15
+  # (deepseek-v4-flash) was removed 2026-10-14: that server is being retired.
+  fallbacks:
+    - small: [small-cpu]
+    - large: [large-cpu, small-cpu]

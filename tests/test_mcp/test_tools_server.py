@@ -18,6 +18,8 @@ _EXPECTED_TOOLS = {
     "find_entity_by_id",
     "find_entity_by_name",
     "find_neighbours",
+    "resolve_names",
+    "relations_between",
     "get_chunks_by_doc_id",
     "read_full_document",
     # Track 7b: read-only GDS graph-analysis tools.
@@ -32,6 +34,12 @@ _EXPECTED_TOOLS = {
     # Channel-side series — inputs to MCP-3's stat_align.
     "topic_trend",
     "polarity_evolution",
+    # Entity watch: subscriptions + the per-document event feed.
+    "kb_watch",
+    "kb_unwatch",
+    "kb_watchlist",
+    "kb_watch_feed",
+    "kb_ack",
 }
 
 

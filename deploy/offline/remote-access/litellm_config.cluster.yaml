@@ -1,0 +1,50 @@
+# LiteLLM for the .31 stack (2026-10-08): every model comes from the offline
+# cluster LiteLLM, reached over the corporate VPN (BIBB, ppp0 on .31) via the
+# srv01 re-publish http://10.10.113.11:4000 (srv02 itself is not reachable
+# through the VPN). Upstream: GPU vLLM deepseek-v4-flash (small = no thinking,
+# large = thinking) with CPU Qwen fallbacks; bge-m3 embeddings on srv01
+# (vectors verified identical to the previous local Ollama bge-m3, cos=1.0).
+# The cluster key is passed as OPENAI_API_KEY (the only extra env the
+# litellm compose service forwards). Ollama on .31 is no longer used.
+# Revert: drop LITELLM_CONFIG from .env -> back to litellm_config.prod.yaml.
+
+model_list:
+  - model_name: small
+    litellm_params:
+      model: openai/small
+      api_base: http://10.10.113.11:4000/v1
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: large
+    litellm_params:
+      model: openai/large
+      api_base: http://10.10.113.11:4000/v1
+      api_key: os.environ/OPENAI_API_KEY
+  # Lens planner/normalizer and the agent alias map onto the cluster tiers.
+  - model_name: small-ornith
+    litellm_params:
+      model: openai/small
+      api_base: http://10.10.113.11:4000/v1
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: agent
+    litellm_params:
+      model: openai/large
+      api_base: http://10.10.113.11:4000/v1
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: bge-m3
+    litellm_params:
+      model: openai/bge-m3
+      api_base: http://10.10.113.11:4000/v1
+      api_key: os.environ/OPENAI_API_KEY
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  num_retries: 0
+
+router_settings:
+  routing_strategy: simple-shuffle
+  num_retries: 2
+  # upstream may fall back to CPU models (minutes per call)
+  timeout: 900
+  allowed_fails: 3
+  cooldown_time: 60

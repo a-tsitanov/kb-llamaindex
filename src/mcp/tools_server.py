@@ -33,8 +33,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
+import os
+import threading
 from calendar import monthrange
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastmcp import FastMCP
@@ -49,6 +52,7 @@ from src.mcp._shared import (
     parse_args,
 )
 from src.retrieval import atomic_tools
+from src.retrieval.graph_rank import GraphRanker
 from src.stats.align import GRANULARITIES
 from src.tenancy.context import GraphContext
 
@@ -73,14 +77,18 @@ _lock = asyncio.Lock()
 # per-process ``LLMPool``; the embed model is cached once in ``_embed``.
 _deps_by_graph: dict[str, dict[str, Any]] = {}
 _embed: dict[str, Any] = {}
+# Process-wide, graph-agnostic deps (the bge cross-encoder; the warm-up
+# thread fills it before any graph is touched).
+_deps: dict[str, Any] = {}
 
 
 async def _init(graph: GraphContext) -> dict[str, Any]:
-    """First-call-per-graph init: build ``graph``'s retriever /
+    """First-call-per-graph init: build ``graph``'s retriever / index /
     graph_retriever / graph_store / chunk_repository via the same
     factories used by the FastAPI route handlers and the Temporal
     search-side activities (see ``src/workflow/_search_deps.py``).
-    Returns the graph's deps dict."""
+    Returns the graph's deps dict.  The embed model is graph-agnostic
+    and cached once in ``_embed`` (the dense prefilter reuses it)."""
     deps = _deps_by_graph.get(graph.id)
     if deps is not None:
         return deps
@@ -102,6 +110,7 @@ async def _init(graph: GraphContext) -> dict[str, Any]:
         store = build_vector_store(graph)
         index = build_vector_index(store, _embed["model"])
         deps["retriever"] = index.as_retriever(similarity_top_k=10)
+        deps["index"] = index
 
         try:
             from src.graph.retriever import GraphRetriever
@@ -139,8 +148,146 @@ async def _r(graph: GraphContext):
     return (await _init(graph))["retriever"]
 
 
+# ── relevance ranking (dense prefilter → bge cross-encoder) ───────────
+# Needs the `rerank` image extra (sentence-transformers + CPU torch + the baked
+# BAAI/bge-reranker-v2-m3). Without it the cross-encoder is skipped (fail-soft) and only
+# the dense prefilter / the store order remain. MCP_TOOLS_RERANK=false turns it all off.
+_RERANK_ON = os.environ.get("MCP_TOOLS_RERANK", "true").strip().lower() == "true"
+# CPU cross-encoder ≈ 0.3 s per pair (measured 2026-10-01: 32 pairs 10 s, 16 pairs 4.7 s)
+_RERANK_KEEP = int(os.environ.get("MCP_TOOLS_RERANK_KEEP", "16"))
+_PREFILTER_KEEP = int(os.environ.get("MCP_TOOLS_PREFILTER_KEEP", "128"))
+_VECTOR_POOL = int(os.environ.get("MCP_TOOLS_VECTOR_POOL", "30"))
+_RANK_BUDGET_S = float(os.environ.get("MCP_TOOLS_RANK_BUDGET_S", "30"))
+_CHUNK_CHARS = 1200
+# graph_search depth / find_neighbours hops: 2 hops around a hub is thousands of vertices
+# (live 2026-10-01: graph_search depth=2 timed out at 120 s, find_neighbours hops=2 took
+# 55 s); multi-hop chains are graph_walk's job
+_MAX_DEPTH = int(os.environ.get("MCP_TOOLS_MAX_DEPTH", "1"))
+
+
+def _clamp_depth(asked: int) -> tuple[int, dict[str, Any]]:
+    d = max(1, min(int(asked or 1), _MAX_DEPTH))
+    note = ({"depth_note": f"глубина {asked} снижена до {d}: для цепочек используй graph_walk"}
+            if int(asked or 1) > d else {})
+    return d, note
+_ce_lock = threading.Lock()  # tool calls run in parallel: load the 2 GB model once
+_ce_slot = asyncio.Semaphore(1)  # one predict at a time: torch already uses every core
+
+
+def _cross_encoder():
+    if "cross_encoder" not in _deps:
+        with _ce_lock:
+            if "cross_encoder" not in _deps:
+                try:
+                    from src.retrieval.reranker import build_reranker
+                    _deps["cross_encoder"] = build_reranker(top_n=_VECTOR_POOL)
+                except Exception as exc:  # no torch in a lean image, model missing, ...
+                    logger.warning("MCP-2: reranker unavailable, results stay unranked: {e}",
+                                   e=exc)
+                    _deps["cross_encoder"] = None
+    return _deps["cross_encoder"]
+
+
+async def _load_cross_encoder():
+    return await asyncio.to_thread(_cross_encoder) if _RERANK_ON else None
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    na, nb = math.sqrt(sum(x * x for x in a)), math.sqrt(sum(x * x for x in b))
+    return sum(x * y for x, y in zip(a, b, strict=False)) / (na * nb) if na and nb else 0.0
+
+
+async def _dense_scores(query: str, texts: list[str]) -> list[float]:
+    embed = _embed["model"]
+    q = await embed.aget_query_embedding(query)
+    vs = await embed.aget_text_embedding_batch(texts)
+    return [_cosine(q, v) for v in vs]
+
+
+async def _predict(pairs: list[tuple[str, str]]) -> list[float]:
+    ce = await _load_cross_encoder()
+    if ce is None:
+        raise RuntimeError("cross-encoder unavailable")
+    async with _ce_slot:
+        scores = await asyncio.to_thread(ce._model.predict, pairs)
+    return [float(x) for x in scores]
+
+
+async def _cross_scores(query: str, texts: list[str]) -> list[float]:
+    return await _predict([(query, t) for t in texts])
+
+
+async def _ranker(graph: GraphContext) -> GraphRanker | None:
+    if not _RERANK_ON:
+        return None
+    await _init(graph)  # loads the shared embed model the dense prefilter uses
+    ce = await _load_cross_encoder()
+    return GraphRanker(prefilter=_dense_scores, rerank=_cross_scores if ce else None,
+                       prefilter_keep=_PREFILTER_KEEP, rerank_keep=_RERANK_KEEP,
+                       budget_s=_RANK_BUDGET_S)
+
+
+async def _rerank_chunks(query: str, nodes: list, top_k: int) -> list:
+    """Cross-encoder order of the whole retrieved pool, cut to ``top_k`` (a pool larger than
+    the reranker's own ``top_n`` is never silently truncated)."""
+    if not nodes:
+        return nodes
+    # the same deadline as the graph ranker: over it vector_search keeps the dense order
+    # (atomic_tools.vector_search catches the error); passages are cut — the cross-encoder
+    # reads 512 tokens at most and the CPU cost grows with length
+    scores = await asyncio.wait_for(
+        _predict([(query, n.node.get_content()[:_CHUNK_CHARS]) for n in nodes]),
+        _RANK_BUDGET_S)
+    for n, s in zip(nodes, scores, strict=True):
+        n.score = s
+    return sorted(nodes, key=lambda n: -n.score)[:top_k]
+
+
 async def _g(graph: GraphContext):
     return (await _init(graph))["graph"]
+
+
+# ── name resolution (src/graph/name_resolution.py) ─────────────────
+# Every name-taking tool resolves the name to ONE canonical entity first and reports it in
+# `resolution`. MCP_TOOLS_RESOLVE=false restores the old per-tool matching.
+_RESOLVE_ON = os.environ.get("MCP_TOOLS_RESOLVE", "true").strip().lower() == "true"
+
+
+async def _resolver(graph: GraphContext):
+    if not _RESOLVE_ON:
+        return None
+    deps = await _init(graph)
+    if "resolver" not in deps:
+        gs = deps.get("graph_store")
+        if gs is None:
+            deps["resolver"] = None
+        else:
+            from src.graph.name_resolution import NameResolver, nebula_fetch
+            from src.storage.entity_lexicon import EntityLexicon
+            # TODO(merge phase 2): EntityLexicon reads the graph-scoped
+            # `entity` / `entity_alias` tables through the unscoped pool; it
+            # must take `graph=` (graph_connection(graph)) before this is
+            # isolation-safe for non-default graphs.
+            deps["resolver"] = NameResolver(EntityLexicon(), nebula_fetch(gs))
+    return deps["resolver"]
+
+
+async def _resolve_all(
+    names: list[str], graph: GraphContext,
+) -> tuple[list[str], list[dict], list[dict]]:
+    """→ (canonical names that resolved, every resolution, the ones that did not)."""
+    resolver = await _resolver(graph)
+    if resolver is None:
+        return list(names), [], []
+    resolved, report, missing = [], [], []
+    for n in names:
+        res = await resolver.resolve(n)
+        report.append(res.to_dict())
+        if res.name is None:
+            missing.append(res.to_dict())
+        else:
+            resolved.append(res.name)
+    return resolved, report, missing
 
 
 async def _c(graph: GraphContext):
@@ -156,8 +303,10 @@ async def _gs(graph: GraphContext):
 
 @mcp.tool(timeout=1800)
 async def vector_search(query: str, top_k: int = 10) -> dict[str, Any]:
-    """Hybrid (BM25 + dense vector + RRF) semantic search over document
-    chunks. Returns the top_k matching chunks with text + metadata.
+    """Dense vector (embedding) semantic search over document chunks, re-ranked
+    by a cross-encoder when available (a wider pool is retrieved and the best
+    `top_k` kept). Returns the top_k chunks with text + metadata. Not keyword /
+    BM25 search: exact rare terms may be missed — try `graph_search` too.
 
     USE FOR: factual / "what / how / why" questions answered by the text
     of documents. This is the default for content questions.
@@ -167,9 +316,13 @@ async def vector_search(query: str, top_k: int = 10) -> dict[str, Any]:
     with its `doc_id`.
     """
     graph = await current_graph()
-    r = await atomic_tools.vector_search(
-        await _r(graph), query=query, top_k=top_k,
-    )
+    deps = await _init(graph)
+    if await _load_cross_encoder() is not None:
+        pool = deps["index"].as_retriever(similarity_top_k=max(_VECTOR_POOL, top_k))
+        r = await atomic_tools.vector_search(pool, query=query, top_k=top_k,
+                                             rerank=_rerank_chunks)
+    else:
+        r = await atomic_tools.vector_search(deps["retriever"], query=query, top_k=top_k)
     return {"sources": json.loads(r.observation)}
 
 
@@ -179,20 +332,21 @@ async def graph_search(query: str, depth: int = 1) -> dict[str, Any]:
     Returns matched entities + their neighbours up to `depth` triplet-hops
     + related chunks.
 
-    `depth` controls neighbour expansion (1-3, default 1): 1 = matched
-    nodes + immediate relations; raise for wider context (more nodes /
-    tokens / latency).
+    `depth`: 1 = matched nodes + immediate relations (larger values are cut
+    to the server maximum, default 1 — use `graph_walk` for chains).
     USE FOR: graph / relationship questions when you have NO specific
     entity pinned yet — discovery ("что в графе связано с темой X").
     PREFER INSTEAD: `find_entity_by_id` (you have an exact identifier),
     `find_entity_by_name` (you have a partial name), `find_neighbours`
     (you have a known entity, want 1 hop), `graph_walk` (known entity,
-    multi-hop chains). Returns empty lists if the graph store is unavailable."""
+    multi-hop chains). Entities come back most relevant to `query` first
+    (`relevance` = cross-encoder score). Returns empty lists if the graph is
+    unavailable."""
     graph = await current_graph()
-    r = await atomic_tools.graph_search(
-        await _g(graph), query=query, depth=depth,
-    )
-    return json.loads(r.observation)
+    depth, note = _clamp_depth(depth)
+    r = await atomic_tools.graph_search(await _g(graph), query=query, depth=depth,
+                                        ranker=await _ranker(graph))
+    return {**note, **json.loads(r.observation)}
 
 
 @mcp.tool(timeout=1800)
@@ -206,11 +360,13 @@ async def graph_walk(
     to Y", "trace X's network N hops out". Optionally restrict to
     `rel_filter` relationship types. Returns entities + relations.
     NOT FOR: a single hop (use `find_neighbours`) or discovery without a
-    start entity (use `graph_search` / `find_entity_by_name` first)."""
+    start entity (use `graph_search` / `find_entity_by_name` first).
+    `start_entity` is resolved to one graph entity first (`resolution` says which);
+    an unknown or ambiguous name returns candidates and walks nothing."""
     graph = await current_graph()
     r = await atomic_tools.graph_walk(
         await _g(graph), start_entity=start_entity, hops=hops,
-        rel_filter=rel_filter,
+        rel_filter=rel_filter, resolver=await _resolver(graph),
     )
     return json.loads(r.observation)
 
@@ -225,10 +381,13 @@ async def find_entity_by_id(
     USE FOR: "whose number is +7…", "find INN 7707…" — when the user
     gives an exact identifier. One entity expected.
     PREFER INSTEAD: `find_entity_by_name` when you only have a partial /
-    approximate name; `graph_search` for non-name semantic queries."""
+    approximate name; `graph_search` for non-name semantic queries.
+    Case, ё/е, a merged-away name and another script ("Rosatom" / «Росатом») still
+    match; otherwise `status: not_found` with candidates."""
     graph = await current_graph()
     r = await atomic_tools.find_entity_by_id(
         await _g(graph), name=name, entity_type=entity_type,
+        resolver=await _resolver(graph),
     )
     return json.loads(r.observation)
 
@@ -237,8 +396,11 @@ async def find_entity_by_id(
 async def find_entity_by_name(
     query: str, limit: int = 10,
 ) -> dict[str, Any]:
-    """Fuzzy / partial NAME search via the full-text index ("Иванов" →
-    "Иванов Иван Иванович"; "Ромаш" → "ООО Ромашка").
+    """Entity lookup by NAME: exact, any case / ё-е, a name merged into another entity
+    («Росатом» → "Rosatom"), the other script ("Likhachev"), a surname inside a full name
+    ("Лихачев" → «Алексей Лихачёв»), a prefix or a close spelling. Each row says how it
+    matched (`matched_via`, `score`); `resolution.chosen` is the best one. Pass the name
+    only — not a question: extra words match unrelated names.
 
     USE FOR: resolving an approximate / partial name into canonical
     entities — usually the first step before drilling in with
@@ -248,29 +410,93 @@ async def find_entity_by_name(
     only (no chunks)."""
     graph = await current_graph()
     r = await atomic_tools.find_entity_by_name(
-        await _g(graph), query=query, limit=limit,
+        await _g(graph), query=query, limit=limit, resolver=await _resolver(graph),
     )
     return json.loads(r.observation)
+
+
+async def _edges_between(store: Any, a: str, b: str) -> list[dict[str, Any]]:
+    """Live RELATED edges between two exact entity names (either direction)."""
+    from datetime import date
+
+    from src.graph.nebula_store import _q, entity_vid
+    from src.graph.retriever import _relation_is_live
+    va, vb = entity_vid(a), entity_vid(b)
+    rows = await asyncio.to_thread(
+        store.structured_query,
+        f"GO FROM {_q(va)} OVER RELATED BIDIRECT WHERE id($$) == {_q(vb)} YIELD "
+        "src(edge) AS s, properties(edge).rel_type AS label, "
+        "properties(edge).polarity AS polarity, properties(edge).valid_to AS valid_to;")
+    today = date.today().isoformat()
+    return [{"src_id": a if r.get("s") == va else b, "tgt_id": b if r.get("s") == va else a,
+             "label": r.get("label") or "RELATED", "polarity": r.get("polarity")}
+            for r in rows or [] if _relation_is_live(r, now_iso=today)]
+
+
+@mcp.tool(timeout=60)
+async def relations_between(a: str, b: str) -> dict[str, Any]:
+    """Graph relations between two entities, each resolved strictly (exact / case / alias /
+    transliteration — no fuzzy guess). For clients that check a relation before drawing it;
+    a model should use `find_neighbours`. Returns {relations: [{src_id, tgt_id, label}],
+    resolution, unresolved?}."""
+    graph = await current_graph()
+    resolver = await _resolver(graph)
+    gs = await _gs(graph)
+    if resolver is None or gs is None:
+        return {"relations": [], "error": "name resolution unavailable"}
+    report, names = [], []
+    for n in (a, b):
+        res = await resolver.resolve(n, strict=True)
+        report.append(res.to_dict())
+        names.append(res.name)
+    if None in names:
+        return {"relations": [], "resolution": report,
+                "unresolved": [r["query"] for r, n in zip(report, names, strict=True) if n is None]}
+    return {"relations": await _edges_between(gs, names[0], names[1]), "resolution": report}
+
+
+@mcp.tool(timeout=120)
+async def resolve_names(text: str) -> dict[str, Any]:
+    """Names in a free-text request that are KB entities, with the entity each resolves to
+    (exact / case / ё-е / merged-away name / other script / legal form / case ending — no
+    fuzzy guesses). For clients that prepare a request before a model sees it; a model
+    should use `find_entity_by_name`."""
+    from src.graph.name_resolution import resolve_spans
+    graph = await current_graph()
+    resolver = await _resolver(graph)
+    if resolver is None:
+        return {"names": [], "error": "name resolution unavailable"}
+    return {"names": await resolve_spans(resolver, text)}
 
 
 @mcp.tool(timeout=1800)
 async def find_neighbours(
-    entity_name: str, hops: int = 1,
+    entity_name: str, hops: int = 1, query: str = "", types: list[str] | None = None,
 ) -> dict[str, Any]:
     """Neighbours + relations of a KNOWN entity, up to `hops` triplet-hops.
 
-    `hops` controls neighbour depth (1-3, default 1 = immediate). Raising
-    it widens context (more nodes / tokens / latency).
+    `hops`: 1 = immediate neighbours (larger values are cut to the server
+    maximum, default 1 — use `graph_walk` for chains).
     USE FOR: "who / what is connected to X", and as the core of an entity
     dossier.
     PREFER INSTEAD: `graph_walk` for deterministic edge-following with
     rel-type filtering; `graph_search` if the entity isn't pinned down
-    yet; `find_entity_*` to resolve the entity first."""
+    yet; `find_entity_*` to resolve the entity first.
+    Pass the user's question as `query` to get the neighbours most relevant to
+    it first (a well-known person has hundreds of neighbours; without `query`
+    they come in arbitrary order). `types` keeps only those entity types
+    (e.g. ["Person"] for «люди, связанные с X»).
+    `entity_name` is resolved to one graph entity first (`resolution`); an unknown or
+    ambiguous name returns candidates and no neighbours. `relevance_note` means nothing
+    matched the question well — do not present that list as the answer."""
     graph = await current_graph()
+    hops, note = _clamp_depth(hops)
     r = await atomic_tools.find_neighbours(
-        await _g(graph), entity_name=entity_name, hops=hops,
+        await _g(graph), entity_name=entity_name, hops=hops, query=query,
+        ranker=await _ranker(graph) if query.strip() else None,
+        resolver=await _resolver(graph), types=types,
     )
-    return json.loads(r.observation)
+    return {**note, **json.loads(r.observation)}
 
 
 @mcp.tool(timeout=1800)
@@ -348,14 +574,20 @@ async def graph_personalized_pagerank(
     (personalized) PageRank.
 
     USE FOR: "what's most connected to X and Y" — centrality relative to
-    `seeds` (exact entity names). Resolve names first with
-    `find_entity_by_name` if unsure. Empty seeds → empty result. Returns
-    top_n {name, score}; empty if the graph store is unavailable."""
+    `seeds` (entity names; each is resolved, see `resolution` / `unresolved`).
+    Empty seeds → empty result. Returns top_n {name, score}; empty if the graph
+    is unavailable."""
     graph = await current_graph()
     from src.graph import analysis
-    return {"top": await analysis.personalized_pagerank(
-        await _gs(graph), seeds, top_n=top_n,
-    )}
+    resolved, report, missing = await _resolve_all(seeds, graph)
+    out: dict[str, Any] = {"top": await analysis.personalized_pagerank(
+        await _gs(graph), resolved, top_n=top_n,
+    ) if resolved else []}
+    if report:
+        out["resolution"] = report
+    if missing:
+        out["unresolved"] = [m["query"] for m in missing]
+    return out
 
 
 @mcp.tool(timeout=1800)
@@ -374,17 +606,22 @@ async def graph_components() -> dict[str, Any]:
 async def graph_shortest_path(
     source: str, target: str, max_hops: int = 6,
 ) -> dict[str, Any]:
-    """Shortest undirected path between two entities by EXACT name.
+    """Shortest undirected path between two entities.
 
     USE FOR: "how are X and Y connected" — the concrete chain of entities
-    between them. Resolve names first with `find_entity_by_name` if
-    unsure. Returns {path:[names], hops}; {path:[], hops:-1} when there's
-    no path (or the graph store is unavailable)."""
+    between them. Both names are resolved first (`resolution`); a name that
+    does not resolve is listed in `unresolved`. Returns {path:[names], hops};
+    {path:[], hops:-1} when there's no path (or the graph is unavailable)."""
     graph = await current_graph()
     from src.graph import analysis
-    return await analysis.shortest_path(
-        await _gs(graph), source, target, max_hops=max_hops,
+    resolved, report, missing = await _resolve_all([source, target], graph)
+    if missing:
+        return {"path": [], "hops": -1, "resolution": report,
+                "unresolved": [m["query"] for m in missing]}
+    out = await analysis.shortest_path(
+        await _gs(graph), resolved[0], resolved[1], max_hops=max_hops,
     )
+    return {**out, "resolution": report} if report else out
 
 
 @mcp.tool(timeout=1800)
@@ -665,15 +902,190 @@ async def polarity_evolution(
     NOT FOR: mention counts (use `topic_trend`, whose rows DO feed
     `stat_align` unchanged)."""
     graph = await current_graph()
-    return await _polarity_evolution(
+    report = None
+    if name:
+        resolved, report, missing = await _resolve_all([name], graph)
+        if missing:
+            return {"name": name, "rel_type": rel_type, "rows": [],
+                    "resolution": report[0]}
+        name = resolved[0]
+    out = await _polarity_evolution(
         await _gs(graph), name, rel_type,
     )
+    return {**out, "resolution": report[0]} if report else out
 
 
 # Note: filter_by_metadata is not exposed via MCP-2.  It only makes
 # sense in the context of an existing accumulator, which atomic-MCP
 # clients don't maintain — they pass each tool call as a fresh
 # request and assemble context themselves.
+
+
+# ── Entity watch (docs/superpowers/specs/2026-10-15-entity-watch-design.md) ─
+# Subscriptions live in Postgres `watch`; the monitor sweep turns ingest
+# journals into `watch_event` rows; these tools read them as a feed. One
+# owner until the panel has users.
+
+_OWNER = "default"
+WATCH_KINDS: tuple[str, ...] = (
+    "new_mention", "new_connection", "new_identifier", "new_event", "contradiction",
+)
+
+
+def _entity_search(graph: GraphContext):
+    from src.storage.entity_search import EntitySearchRepository
+
+    return EntitySearchRepository(graph=graph)
+
+
+def _watch_repo(graph: GraphContext):
+    from src.storage.watch import WatchRepository
+
+    # TODO(merge phase 2): the watch tables are graph-scoped but
+    # WatchRepository still opens the unscoped pool; pass `graph=` once it
+    # takes one (graph_connection(graph)).
+    del graph
+    return WatchRepository()
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def _candidate(row: dict[str, Any]) -> dict[str, Any]:
+    return {k: row.get(k) for k in ("vid", "name", "label", "mention_count")}
+
+
+async def _watch(
+    name: str, kinds: list[str] | None, note: str, *, graph: GraphContext,
+) -> dict[str, Any]:
+    bad = sorted(set(kinds or []) - set(WATCH_KINDS))
+    if bad:
+        return {"error": f"unknown kinds {bad}; expected a subset of {list(WATCH_KINDS)}"}
+    search = _entity_search(graph)
+    hits = await search.search(name, mode="exact", limit=5)
+    if len(hits) != 1:
+        hits = await search.search(name, mode="substring", limit=10)
+    if not hits:
+        return {"status": "not_found", "query": name}
+    if len(hits) > 1:
+        return {"status": "ambiguous", "query": name,
+                "candidates": [_candidate(h) for h in hits]}
+    hit = hits[0]
+    await _watch_repo(graph).add_watch(_OWNER, hit["vid"], hit["name"], kinds=list(kinds or []), note=note)
+    return {"status": "watching", "entity": _candidate(hit), "kinds": list(kinds or [])}
+
+
+async def _unwatch(name_or_vid: str, *, graph: GraphContext) -> dict[str, Any]:
+    repo = _watch_repo(graph)
+    for w in await repo.list_watch(_OWNER):
+        if name_or_vid in (w["entity_vid"], w["entity_name"]):
+            await repo.remove_watch(_OWNER, w["entity_vid"])
+            return {"status": "removed", "entity": w["entity_name"]}
+    return {"status": "not_watched", "query": name_or_vid}
+
+
+async def _watchlist(*, graph: GraphContext) -> dict[str, Any]:
+    return {"watches": _json_safe(await _watch_repo(graph).list_watch(_OWNER))}
+
+
+def build_feed_cards(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group feed events into one card per document (events without a
+    document get a card each), cards ordered by their newest event."""
+    cards: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        doc = str(r["doc_id"]) if r.get("doc_id") else None
+        key = doc or f"event:{r['id']}"
+        card = cards.get(key)
+        if card is None:
+            path = r.get("doc_path") or ""
+            card = cards[key] = {
+                "doc_id": doc,
+                "doc_title": path.rsplit("/", 1)[-1] if path else None,
+                "doc_date": _json_safe(r.get("doc_date")),
+                "link": settings.monitor.document_link.format(doc_id=doc) if doc else None,
+                "latest": r["detected_at"],
+                "events": [],
+            }
+        card["latest"] = max(card["latest"], r["detected_at"])
+        card["events"].append({
+            "id": r["id"], "entity": r["entity_name"], "kind": r["kind"],
+            "why": r.get("why", ""), "detail": _json_safe(r.get("detail") or {}),
+            "detected_at": _json_safe(r["detected_at"]),
+            "acked": r.get("acked_at") is not None,
+        })
+    ordered = sorted(cards.values(), key=lambda c: c["latest"], reverse=True)
+    for c in ordered:
+        c["latest"] = _json_safe(c["latest"])
+    return ordered
+
+
+async def _watch_feed(
+    include_acked: bool, limit: int, *, graph: GraphContext,
+) -> dict[str, Any]:
+    repo = _watch_repo(graph)
+    rows = await repo.feed(_OWNER, include_acked=include_acked, limit=limit)
+    await repo.mark_seen(_OWNER, [r["id"] for r in rows])
+    return {"count": len(rows), "cards": build_feed_cards(rows)}
+
+
+async def _ack(
+    event_ids: list[int] | None, all_events: bool, *, graph: GraphContext,
+) -> dict[str, Any]:
+    if not all_events and not event_ids:
+        return {"error": "pass event_ids or all=true"}
+    n = await _watch_repo(graph).ack(_OWNER, event_ids=event_ids, all_events=all_events)
+    return {"acked": n}
+
+
+@mcp.tool(timeout=120)
+async def kb_watch(name: str, kinds: list[str] | None = None, note: str = "") -> dict[str, Any]:
+    """Put an entity (person, organisation, phone, …) on watch: new documents
+    mentioning it, new connections / identifiers and contradicting facts then
+    show up in `kb_watch_feed`.
+
+    `name` is resolved against the KB entity table (exact, then fuzzy). One
+    match ⇒ subscribed; several ⇒ returns `candidates` and subscribes to
+    nothing — call again with the exact candidate name. `kinds` limits the
+    events (new_mention, new_connection, new_identifier, new_event, contradiction);
+    empty = all. `note` is a free-text reason. Only events detected after
+    the subscription are shown."""
+    return await _watch(name, kinds, note, graph=await current_graph())
+
+
+@mcp.tool(timeout=120)
+async def kb_unwatch(name_or_vid: str) -> dict[str, Any]:
+    """Remove an entity from the watchlist (by its watched name or vid)."""
+    return await _unwatch(name_or_vid, graph=await current_graph())
+
+
+@mcp.tool(timeout=120)
+async def kb_watchlist() -> dict[str, Any]:
+    """List watched entities with their event kinds, note and since-when."""
+    return await _watchlist(graph=await current_graph())
+
+
+@mcp.tool(timeout=120)
+async def kb_watch_feed(include_acked: bool = False, limit: int = 50) -> dict[str, Any]:
+    """What is new about watched entities: events grouped into one card per
+    source document (title, date, `link` to GET the document — add
+    `?variant=original` for the uploaded file). Unacknowledged events only
+    unless `include_acked`. Acknowledge with `kb_ack`."""
+    return await _watch_feed(include_acked, limit, graph=await current_graph())
+
+
+@mcp.tool(timeout=120)
+async def kb_ack(event_ids: list[int] | None = None, all: bool = False) -> dict[str, Any]:
+    """Mark feed events as read (`event_ids` from `kb_watch_feed`, or `all`)."""
+    return await _ack(event_ids, all, graph=await current_graph())
 
 
 def main() -> None:
@@ -683,6 +1095,8 @@ def main() -> None:
         "kb-llamaindex-tools",
         transport=args["transport"], host=args["host"], port=args["port"],
     )
+    if _RERANK_ON:  # warm the cross-encoder so the first ranked call does not pay the load
+        threading.Thread(target=_cross_encoder, name="ce-warmup", daemon=True).start()
     if args["transport"] == "stdio":
         mcp.run(transport="stdio")
     else:

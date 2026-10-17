@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>База знаний</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #6b7280; --border: #dfe3ea;
+  --accent: #2f6fde; --accent-text: #ffffff; --ok: #1f8a4c; --warn: #b7791f; --err: #c53030;
+  --code-bg: #f1f3f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171c; --panel: #1c2027; --text: #e6e9ef; --muted: #9aa3b2; --border: #2e343e;
+    --accent: #5b8ef0; --accent-text: #0d1117; --ok: #4cc38a; --warn: #e0a84a; --err: #f07070;
+    --code-bg: #232831;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
+header h1 { font-size: 18px; margin: 0; }
+.health { margin-left: auto; font-size: 13px; color: var(--muted); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 4px 0 10px; background: var(--muted); }
+.dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.err { background: var(--err); }
+nav { display: flex; gap: 4px; }
+nav button { border: 1px solid var(--border); background: transparent; color: var(--text);
+  padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; }
+nav button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+main { max-width: 980px; margin: 0 auto; padding: 16px; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+.hidden { display: none; }
+#drop { border: 2px dashed var(--border); border-radius: 10px; padding: 28px 16px; text-align: center;
+  color: var(--muted); cursor: pointer; }
+#drop.over { border-color: var(--accent); color: var(--text); }
+.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin-top: 12px; }
+label { display: flex; flex-direction: column; font-size: 13px; color: var(--muted); gap: 4px; }
+input, select, textarea { font: inherit; color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+textarea { width: 100%; resize: vertical; min-height: 64px; }
+.btn { background: var(--accent); color: var(--accent-text); border: 0; border-radius: 6px;
+  padding: 8px 16px; cursor: pointer; font: inherit; }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--border); padding: 4px 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; }
+td.name { word-break: break-all; }
+.st-ok { color: var(--ok); } .st-err { color: var(--err); } .st-run { color: var(--warn); }
+pre.md { background: var(--code-bg); padding: 10px; border-radius: 6px; max-height: 320px; overflow: auto;
+  white-space: pre-wrap; word-break: break-word; font-size: 13px; margin: 8px 0 0; }
+.answer { white-space: pre-wrap; word-break: break-word; margin: 8px 0 0; }
+.meta { color: var(--muted); font-size: 13px; }
+.src { border-top: 1px solid var(--border); padding: 10px 0; }
+.src .snip { white-space: pre-wrap; word-break: break-word; font-size: 13px; color: var(--muted); margin-top: 4px; max-height: 7.5em; overflow: hidden; }
+a { color: var(--accent); }
+@media (max-width: 640px) { .health { margin-left: 0; width: 100%; } th:nth-child(3), td:nth-child(3) { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>База знаний</h1>
+  <nav>
+    <button data-tab="upload" class="active">Загрузка</button>
+    <button data-tab="search">Поиск</button>
+  </nav>
+  <div class="health" id="health">проверка сервисов…</div>
+</header>
+
+<main>
+  <section id="tab-upload">
+    <div class="panel">
+      <div id="drop">Перетащите файлы сюда или нажмите, чтобы выбрать<br>
+        <span class="meta">docx, xlsx, pptx, pdf (с текстовым слоем), odt, rtf, epub, html, csv, txt, md. Сканы не поддерживаются (OCR выключен).</span></div>
+      <input type="file" id="files" multiple class="hidden">
+      <div class="row">
+        <label>Дата документа (необязательно)<input type="date" id="docdate"></label>
+        <label>Отдел (необязательно)<input type="text" id="dept" placeholder="например, аналитика"></label>
+        <label style="flex-direction:row;align-items:center;gap:6px;color:var(--text)">
+          <input type="checkbox" id="autosend" checked> сразу отправлять в базу после конвертации</label>
+      </div>
+    </div>
+    <div class="panel">
+      <table>
+        <thead><tr><th>Файл</th><th>Статус</th><th>Markdown</th><th></th></tr></thead>
+        <tbody id="jobs"><tr><td colspan="4" class="meta">Пока ничего не загружено.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="tab-search" class="hidden">
+    <div class="panel">
+      <textarea id="query" placeholder="Задайте вопрос по базе знаний…"></textarea>
+      <div class="row">
+        <label>Режим
+          <select id="mode">
+            <option value="auto">авто</option>
+            <option value="local">локальный (факты, сущности)</option>
+            <option value="global">глобальный (обзор тем)</option>
+          </select></label>
+        <button class="btn" id="ask">Найти</button>
+        <span class="meta" id="search-status"></span>
+      </div>
+    </div>
+    <div class="panel hidden" id="result">
+      <div class="meta" id="result-meta"></div>
+      <div class="answer" id="answer"></div>
+      <h3 style="margin:16px 0 0;font-size:15px">Источники</h3>
+      <div id="sources"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+// ── tabs ──
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x === b));
+  $("#tab-upload").classList.toggle("hidden", b.dataset.tab !== "upload");
+  $("#tab-search").classList.toggle("hidden", b.dataset.tab !== "search");
+});
+
+// ── health ──
+async function health() {
+  try {
+    const h = await (await fetch("/api/health")).json();
+    const cls = v => v === "ok" ? "ok" : (String(v).startsWith("down") ? "err" : "warn");
+    const label = v => v === "degraded" ? "работает, без OCR" : v;
+    $("#health").innerHTML =
+      `<span class="dot ${cls(h.kb)}"></span>база: ${esc(label(h.kb))}` +
+      `<span class="dot ${cls(h.docs2md)}"></span>конвертер: ${esc(label(h.docs2md))}`;
+  } catch { $("#health").textContent = "сервисы недоступны"; }
+}
+health(); setInterval(health, 30000);
+
+// ── upload ──
+const jobs = [];   // {id, name, state, text, md, jobId}
+let seq = 0;
+
+function errText(body, status) {
+  const e = body && (body.error || body.detail);
+  if (e && e.code === "ocr_unavailable") return "нужен OCR (скан или картинка) — не поддерживается";
+  if (e && e.message) return e.message;
+  if (typeof e === "string") return e;
+  return "ошибка " + status;
+}
+
+function render() {
+  const tb = $("#jobs");
+  if (!jobs.length) return;
+  tb.innerHTML = jobs.map(j => {
+    const cls = j.state === "done" ? "st-ok" : (j.state === "error" ? "st-err" : "st-run");
+    const mdCell = j.md != null
+      ? `<details><summary>${j.md.length.toLocaleString("ru")} симв.</summary><pre class="md">${esc(j.md.slice(0, 20000))}${j.md.length > 20000 ? "\n…" : ""}</pre></details>`
+      : "—";
+    const action = j.state === "converted"
+      ? `<button class="btn ghost" data-send="${j.id}">В базу</button>` : "";
+    return `<tr><td class="name">${esc(j.name)}</td><td class="${cls}">${esc(j.text)}</td><td>${mdCell}</td><td>${action}</td></tr>`;
+  }).join("");
+  tb.querySelectorAll("[data-send]").forEach(b => b.onclick = () => send(jobs.find(j => j.id == b.dataset.send)));
+}
+
+function set(j, state, text) { j.state = state; j.text = text; render(); }
+
+async function convert(j, file) {
+  set(j, "run", "конвертация…");
+  const fd = new FormData(); fd.append("file", file);
+  try {
+    const r = await fetch("/api/convert", { method: "POST", body: fd });
+    const body = await r.json();
+    if (!r.ok) return set(j, "error", errText(body, r.status));
+    j.md = body.markdown || "";
+    if (!j.md.trim()) return set(j, "error", "пустой результат конвертации");
+    set(j, "converted", "сконвертирован");
+    if ($("#autosend").checked) await send(j);
+  } catch (e) { set(j, "error", "конвертер недоступен: " + e.message); }
+}
+
+async function send(j) {
+  set(j, "run", "отправка в базу…");
+  const fd = new FormData();
+  fd.append("markdown", j.md); fd.append("filename", j.name);
+  // Re-send the source file (a lazy File handle, not a copy) so the KB keeps the
+  // original next to the text; a plain .md is already the text itself.
+  if (j.file && !/\.md$/i.test(j.name)) fd.append("original", j.file, j.name);
+  if ($("#docdate").value) fd.append("document_date", $("#docdate").value);
+  if ($("#dept").value.trim()) fd.append("department", $("#dept").value.trim());
+  try {
+    const r = await fetch("/api/ingest", { method: "POST", body: fd });
+    const body = await r.json();
+    if (!r.ok) return set(j, "error", errText(body, r.status));
+    j.jobId = body.job_id;
+    set(j, "run", "в очереди");
+    poll(j);
+  } catch (e) { set(j, "error", "база недоступна: " + e.message); }
+}
+
+const STATUS_RU = { pending: "в очереди", queued: "в очереди", processing: "обработка (извлечение графа)…",
+  running: "обработка…", completed: "готово — доступен в поиске", failed: "ошибка обработки" };
+
+async function poll(j) {
+  try {
+    const r = await fetch("/api/ingest/" + j.jobId);
+    const b = await r.json();
+    const st = (b.status || "").toLowerCase();
+    if (st === "completed") return set(j, "done", STATUS_RU.completed);
+    if (st === "failed" || st === "error") return set(j, "error", STATUS_RU.failed + (b.error ? ": " + b.error : ""));
+    set(j, "run", STATUS_RU[st] || st || "обработка…");
+  } catch { /* transient — retry */ }
+  setTimeout(() => poll(j), 5000);
+}
+
+async function addFiles(list) {
+  if (!jobs.length) $("#jobs").innerHTML = "";
+  const added = [...list].map(f => { const j = { id: ++seq, name: f.name, state: "run", text: "ожидание", md: null, file: f }; jobs.unshift(j); return [j, f]; });
+  render();
+  for (const [j, f] of added) await convert(j, f);   // one at a time: keeps doc2md and the LLM queue calm
+}
+
+const drop = $("#drop"), input = $("#files");
+drop.onclick = () => input.click();
+input.onchange = () => { addFiles(input.files); input.value = ""; };
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); addFiles(e.dataTransfer.files); };
+
+// ── search ──
+async function ask() {
+  const q = $("#query").value.trim();
+  if (!q) return;
+  $("#ask").disabled = true;
+  const t0 = Date.now();
+  const tick = setInterval(() => $("#search-status").textContent = `ищу… ${Math.round((Date.now() - t0) / 1000)} с`, 1000);
+  try {
+    const r = await fetch("/api/search", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: q, mode: $("#mode").value }) });
+    const b = await r.json();
+    if (!r.ok) { $("#search-status").textContent = errText(b, r.status); return; }
+    $("#search-status").textContent = "";
+    $("#result").classList.remove("hidden");
+    $("#result-meta").textContent = `режим: ${b.mode} · ${(b.latency_ms / 1000).toFixed(1)} с`;
+    $("#answer").textContent = b.answer || "Ответ не найден.";
+    const src = b.sources || [];
+    $("#sources").innerHTML = src.length ? src.map((s, i) => `
+      <div class="src">
+        <div><b>[${i + 1}]</b> документ ${esc(String(s.doc_id).slice(0, 8))}:
+          <a href="/api/documents/${encodeURIComponent(s.doc_id)}" download title="оригинал, а для старых документов — текст">скачать оригинал</a>
+          · <a href="/api/documents/${encodeURIComponent(s.doc_id)}?variant=text" target="_blank" rel="noopener">текст</a>
+          <span class="meta">· релевантность ${Number(s.score || 0).toFixed(2)}</span></div>
+        <div class="snip">${esc(s.content)}</div>
+      </div>`).join("") : '<div class="meta">Источников нет.</div>';
+  } catch (e) { $("#search-status").textContent = "поиск недоступен: " + e.message; }
+  finally { clearInterval(tick); $("#ask").disabled = false; }
+}
+$("#ask").onclick = ask;
+$("#query").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) ask(); });
+</script>
+</body>
+</html>

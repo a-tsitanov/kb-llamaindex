@@ -116,6 +116,9 @@ class IngestParams(_Frozen):
     # onto each chunk's doc_group metadata for search filter/rerank/synth.
     group: str = ""
     graph_id: str = DEFAULT_GRAPH_ID
+    # Re-ingest of an already-known document: the entity-watch journals are
+    # still written, but the monitor sweep raises no events from them.
+    backfill: bool = False
 
 
 class Ctx(_Frozen):
@@ -129,6 +132,7 @@ class Ctx(_Frozen):
     inserted_at_epoch: int | None = None
     group: str = ""
     graph_id: str = DEFAULT_GRAPH_ID
+    backfill: bool = False
 
 
 class SchedulerParams(_Frozen):

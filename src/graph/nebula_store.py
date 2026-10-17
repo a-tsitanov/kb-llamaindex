@@ -91,6 +91,29 @@ def _q(value: Any) -> str:
     return f'"{s}"'
 
 
+# Entity columns that ingest does not own: the wiki sweep, the analytics
+# materialize and the monitor's watch flag write them. upsert_nodes reads them
+# back and writes them again unchanged (INSERT VERTEX resets omitted columns).
+_PRESERVED: tuple[tuple[str, str], ...] = (
+    ("wiki_dirty", "bool"), ("wiki_dirty_at", "int"), ("wiki_hash", "str"),
+    ("wiki_synced_at", "int"), ("wiki_page_title", "str"), ("wikibase_qid", "str"),
+    ("pagerank", "float"), ("betweenness", "float"), ("eigenvector", "float"),
+    ("risk_score", "float"), ("risk_band", "str"), ("risk_components", "str"),
+    ("completeness_score", "float"), ("watched", "bool"), ("risk_score_prev", "float"),
+)
+
+
+def _preserved_value(kind: str, value: Any) -> str:
+    """nGQL literal for a read-back value; None/empty becomes the column default."""
+    if kind == "bool":
+        return "true" if value is True else "false"
+    if kind == "int":
+        return str(int(value or 0))
+    if kind == "float":
+        return str(float(value or 0.0))
+    return _q(value or "")
+
+
 class NebulaGraphStore:
     def __init__(self, session: Any, reconnect: Any = None, *, graph: GraphContext):
         # The graph (and therefore the nebula space) this store's session is
@@ -133,45 +156,53 @@ class NebulaGraphStore:
         for chunk in _chunks(nodes, settings.nebula.write_batch_size):
             by_vid = {entity_vid(getattr(n, "name", "")): n for n in chunk}
 
-            # Read-back (best-effort): preserve created_at/first_doc_id for
-            # entities that already exist. INSERT VERTEX resets omitted
-            # columns on nebula, so without this every re-upsert would wipe
-            # first-seen provenance. Fail-open — a FETCH failure just means
-            # no preservation this round (all nodes treated as new); the
-            # INSERT below still runs so ingest is never blocked.
-            preserved: dict[str, tuple[Any, Any]] = {}
+            # Read-back (best-effort): INSERT VERTEX resets every omitted column
+            # on nebula, so for entities that already exist we fetch what ingest
+            # does not own and write it back unchanged: first-seen provenance
+            # (created_at/first_doc_id) plus the _PRESERVED columns (wiki sweep,
+            # analytics materialize, the monitor's watch flag). If the FETCH
+            # fails we cannot tell new from existing, so the INSERT goes out as
+            # IF NOT EXISTS: new entities land, existing ones stay untouched
+            # (their description/mention_count refresh is skipped this round).
+            # A materialize write landing between FETCH and INSERT is lost
+            # until its next run.
+            preserved: dict[str, dict[str, Any]] = {}
+            readback_ok = True
             if by_vid:
                 try:
                     vids = ", ".join(_q(v) for v in by_vid)
+                    extra = "".join(f", `Entity`.{c} AS {c}" for c, _ in _PRESERVED)
                     fetch_stmt = (
                         f"FETCH PROP ON `Entity` {vids} "
                         "YIELD id(vertex) AS vid, `Entity`.created_at AS ca, "
-                        "`Entity`.first_doc_id AS fdi;"
+                        f"`Entity`.first_doc_id AS fdi{extra};"
                     )
                     rows = self.structured_query(fetch_stmt)
-                    preserved = {r["vid"]: (r.get("ca"), r.get("fdi")) for r in rows}
+                    preserved = {r["vid"]: r for r in rows}
                 except Exception as exc:
-                    # Fail-open: this chunk's existing entities won't have their
-                    # created_at/first_doc_id preserved this round (they may
-                    # drift), but ingest continues. Logged so a persistent
-                    # read-back failure is not invisible (matches the
-                    # fail-open-but-logged convention of _exec/_execute_with_retry).
+                    # Logged so a persistent read-back failure is not invisible
+                    # (matches the fail-open-but-logged convention of
+                    # _exec/_execute_with_retry).
                     logger.warning(
-                        "upsert_nodes read-back failed (no first-seen preservation "
-                        "this round): {e}", e=repr(exc),
+                        "upsert_nodes read-back failed (existing entities left "
+                        "untouched this round): {e}", e=repr(exc),
                     )
                     preserved = {}
+                    readback_ok = False
 
-            def row(n: Any, _preserved: dict[str, tuple[Any, Any]] = preserved) -> str:
+            def row(n: Any, _preserved: dict[str, dict[str, Any]] = preserved) -> str:
                 props = getattr(n, "properties", {}) or {}
                 vid = entity_vid(getattr(n, "name", ""))
-                if vid in _preserved:
-                    ca_raw, fdi_raw = _preserved[vid]
-                    ca = int(ca_raw or 0)
-                    fdi = fdi_raw or ""
+                old = _preserved.get(vid)
+                if old is not None:
+                    ca = int(old.get("ca") or 0)
+                    fdi = old.get("fdi") or ""
                 else:
                     ca = int(props.get("created_at", 0) or 0)
                     fdi = props.get("first_doc_id", "") or ""
+                kept = ", ".join(
+                    _preserved_value(kind, (old or {}).get(col)) for col, kind in _PRESERVED
+                )
                 return (
                     f"{_q(vid)}:({_q(getattr(n, 'name', ''))}, "
                     f"{_q(props.get('description', ''))}, "
@@ -185,14 +216,16 @@ class NebulaGraphStore:
                     f"{_q(props.get('event_ts_raw', '') or '')}, "
                     f"{int(props.get('event_start_epoch') or 0)}, "
                     f"{int(props.get('event_end_epoch') or 0)}, "
-                    f"{_q(props.get('event_ts_precision', '') or '')})"
+                    f"{_q(props.get('event_ts_precision', '') or '')}, "
+                    f"{kept})"
                 )
 
+            insert = "INSERT VERTEX" if readback_ok else "INSERT VERTEX IF NOT EXISTS"
             stmt = (
-                "INSERT VERTEX `Entity` (name, description, mention_count, created_at, "
+                f"{insert} `Entity` (name, description, mention_count, created_at, "
                 "label, er_canonical_name, first_doc_id, "
                 "event_type, event_ts_raw, event_start_epoch, event_end_epoch, "
-                "event_ts_precision) VALUES "
+                f"event_ts_precision, {', '.join(c for c, _ in _PRESERVED)}) VALUES "
                 + ", ".join(row(n) for n in chunk)
                 + ";"
             )
@@ -204,10 +237,16 @@ class NebulaGraphStore:
                 [node_to_row(n, entity_vid(getattr(n, "name", ""))) for n in chunk],
             )
 
-    def upsert_relations(self, relations: list[Any]) -> None:
+    def upsert_relations(self, relations: list[Any]) -> list[tuple[str, str]]:
+        """Write RELATED edges; return the (src_vid, tgt_vid) pairs that did
+        not exist before this call (the entity-watch `edge_new` journal).
+
+        A chunk whose read-back failed contributes no pairs: unknown is not
+        new, and a missed event beats a false one."""
         # Nebula needs declared edge types. Entity-entity relations all become `RELATED`, with
         # the original type stored in the `rel_type` PROPERTY (a value,
         # so no edge-identifier injection). See ADR / Phase-2 spec.
+        created: list[tuple[str, str]] = []
         for chunk in _chunks(relations, settings.nebula.write_batch_size):
             # Read-back (best-effort): preserve created_at/first_doc_id for edges
             # that already exist. INSERT EDGE resets omitted columns on nebula, so
@@ -232,6 +271,7 @@ class NebulaGraphStore:
                         (r["s"], r["d"]): (r.get("ca"), r.get("fdi"), r.get("st"), r.get("sa"))
                         for r in rows
                     }
+                    created.extend(sorted(k for k in keys if k not in preserved))
                 except Exception as exc:
                     logger.warning(
                         "upsert_relations read-back failed (no first-seen preservation "
@@ -286,6 +326,7 @@ class NebulaGraphStore:
                 + ";"
             )
             self._exec(stmt)
+        return created
 
     # --- raw nGQL (Phase 2 read path builds on this) --------------------
     def structured_query(self, query: str, param_map: dict[str, Any] | None = None) -> list[dict]:

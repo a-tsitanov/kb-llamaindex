@@ -20,3 +20,15 @@ def test_detect_alerts_in_monitor_activities():
 
 def test_monitor_sweep_workflow_importable():
     assert MonitorSweepWorkflow is not None
+
+
+def test_sweep_watch_in_monitor_activities():
+    from src.workflow.monitor.activities import sweep_watch
+
+    assert sweep_watch in MONITOR_ACTIVITIES
+
+
+def test_sweep_runs_every_five_minutes_by_default():
+    from src.config import MonitorSettings
+
+    assert MonitorSettings.model_fields["sweep_interval_minutes"].default == 5

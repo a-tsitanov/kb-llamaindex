@@ -55,6 +55,29 @@ def build_entity_search_query(
     return sql, params
 
 
+def build_persons_by_surname_query(
+    stems: list[str], *, limit: int,
+) -> tuple[str, list[Any]]:
+    """Person rows whose name contains one of the surname stems, any word
+    order ("Поляков С.Н.", "С.Н. Поляков"). ILIKE with a leading `%` is
+    served by the trigram GIN index.
+
+    Stems come with `ё` folded to `е`; ILIKE does not fold it, so each `е`
+    also gets a `ё` variant ("королев" finds "Королёв")."""
+    patterns: list[str] = []
+    for stem in stems:
+        variants = [stem] + [
+            stem[:i] + "ё" + stem[i + 1:] for i, ch in enumerate(stem) if ch == "е"
+        ]
+        patterns.extend(f"%{v}%" for v in variants if f"%{v}%" not in patterns)
+    sql = (
+        f"SELECT {_COLUMNS} FROM entity "
+        "WHERE label = 'Person' AND name ILIKE ANY(%s) "
+        "ORDER BY mention_count DESC LIMIT %s"
+    )
+    return sql, [patterns, int(limit)]
+
+
 class EntitySearchRepository:
     """Async wrapper over the `entity` table."""
 
@@ -91,4 +114,18 @@ class EntitySearchRepository:
             return list(await cur.fetchall())
 
 
-__all__ = ["EntitySearchRepository", "build_entity_search_query"]
+    async def persons_by_surname(
+        self, stems: list[str], *, limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        stems = [s for s in stems if s]
+        if not stems:
+            return []
+        sql, params = build_persons_by_surname_query(stems, limit=limit)
+        async with self._conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(sql, params)
+            return list(await cur.fetchall())
+
+
+__all__ = [
+    "EntitySearchRepository", "build_entity_search_query", "build_persons_by_surname_query",
+]

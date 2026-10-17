@@ -1,0 +1,22 @@
+# User unit for the production vLLM on 10.10.113.14 (no sudo there).
+# Install:
+#   cp vllm.service ~/.config/systemd/user/ && systemctl --user daemon-reload
+#   systemctl --user enable --now vllm
+# Starts at boot without a login because linger is on (loginctl enable-linger).
+# Logs: journalctl --user -u vllm -f
+[Unit]
+Description=vLLM OpenAI server (Qwen3.6-35B-A3B NVFP4, TP=2)
+After=network-online.target
+
+[Service]
+Environment=NAME=qwen38 NVCC=1 KV=fp8 FOREGROUND=1 MAX_LEN=131072
+ExecStart=/bin/bash %h/serve.sh nvidia--Qwen3.6-35B-A3B-NVFP4 tp
+Restart=on-failure
+RestartSec=30
+# model load + CUDA graph capture takes ~2 min; the JIT cache is already warm
+TimeoutStartSec=900
+TimeoutStopSec=60
+KillMode=control-group
+
+[Install]
+WantedBy=default.target

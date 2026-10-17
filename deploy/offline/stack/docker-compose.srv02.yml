@@ -1,0 +1,132 @@
+# srv02 (10.10.113.12) — APP + SEARCH node. Override on top of docker-compose.prod.yml:
+#
+#   docker compose -p kb -f docker-compose.prod.yml -f deploy/offline/stack/docker-compose.srv02.yml \
+#     --env-file deploy/offline/stack/.env.offline up -d \
+#     temporal temporal-ui litellm llm-search init api worker ingest-consumer \
+#     mcp-search mcp-tools mcp-stats prometheus grafana
+#
+# Backends live on srv01 (data) — every service-name host is rewritten to an IP,
+# and cross-host depends_on are dropped (!reset): restart policies cover start order.
+# Socket 0 = app code + temporal; socket 1 = search LLM (Qwen3-30B-A3B).
+
+x-sock0: &sock0 {cpuset: "0-19,40-59"}
+
+x-remote-env: &remote-env
+  MILVUS_HOST: 10.10.113.11
+  POSTGRES_HOST: 10.10.113.11
+  MINIO_ENDPOINT: 10.10.113.11:9000
+  NEBULA_HOST: 10.10.113.11
+  REDIS_HOST: 10.10.113.11
+  RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@10.10.113.11:5672/
+  TEMPORAL_HOST: temporal
+  WORKER_GROUPS: ""
+  # Neo4j is gone (nebula is the graph backend) but the prod preflight still
+  # rejects the "changeme" default — feed it a real random secret.
+  NEO4J_PASSWORD: ${NEO4J_PASSWORD:?set NEO4J_PASSWORD in .env.offline}
+  # CPU LLMs: one extraction answer is 60-100 s of generation. The 60 s default
+  # timed every call out and retried it from scratch (2026-10-04).
+  LITELLM_TIMEOUT_S: "900"
+  LITELLM_MAX_RETRIES: "1"
+  # Entity watch (monitor sweep every 5 min, feed via MCP kb_watch_feed). The
+  # feed links documents through webui, which holds the API key.
+  MONITOR_ENABLED: "true"
+  MONITOR_DOCUMENT_LINK: "http://10.10.113.12:8090/api/documents/{doc_id}"
+
+x-app: &app
+  <<: *sock0
+  image: kb-app:offline
+  pull_policy: never
+
+services:
+  temporal:
+    <<: *sock0
+    environment:
+      POSTGRES_SEEDS: 10.10.113.11
+    ports: ["7233:7233"]
+    depends_on: !reset {}
+  temporal-ui:
+    <<: *sock0
+
+  litellm:
+    <<: *sock0
+    image: ghcr.io/berriai/litellm:main-stable
+    pull_policy: never
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_API_KEY:-sk-litellm-stub}
+      # Admin UI (http://10.10.113.12:4000/ui) needs a DB; models stay in the
+      # config file (STORE_MODEL_IN_DB off). DB `litellm` lives on srv01 postgres.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@10.10.113.11:5432/litellm
+      UI_USERNAME: admin
+      UI_PASSWORD: ${LITELLM_UI_PASSWORD:?set LITELLM_UI_PASSWORD in .env.offline}
+      # no internet: skip the remote model-cost-map fetch (~30 s of retries at boot)
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+    volumes: ["./deploy/offline/stack/litellm_config.offline.yaml:/app/config.yaml:ro"]
+    ports: ["4000:4000"]
+    restart: unless-stopped
+
+  # Search / answer-synthesis LLM: "large" alias. Few slots → low latency.
+  llm-search:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    pull_policy: never
+    cpuset: "20-39,60-79"
+    command: >
+      --model /models/Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf --alias qwen3-30b-a3b
+      --ctx-size 65536 --parallel 2 --threads 20 --load-mode none --jinja
+      --cache-reuse 256 --host 0.0.0.0 --port 8080
+    volumes: ["/opt/models:/models:ro"]
+    ports: ["8085:8080"]
+    restart: unless-stopped
+
+  init:
+    <<: *app
+    environment: *remote-env
+    depends_on: !reset {}
+  api:
+    <<: *app
+    environment: *remote-env
+    depends_on: !reset {}
+  worker:
+    <<: *app
+    image: kb-app-rerank:offline
+    environment:
+      <<: *remote-env
+      # everything except the LLM extraction pool (that runs on srv03)
+      WORKER_GROUPS: main,merge,search,large,graph_build,wiki,scheduler,monitor
+    depends_on: !reset {}
+  ingest-consumer:
+    <<: *app
+    environment: *remote-env
+    depends_on: !reset {}
+  mcp-search:
+    <<: *app
+    environment: *remote-env
+    depends_on: !reset {}
+  mcp-tools:
+    <<: *app
+    environment: *remote-env
+    depends_on: !reset {}
+  mcp-stats:
+    <<: *app
+    environment: *remote-env
+    depends_on: !reset {}
+  prometheus:
+    <<: *sock0
+  grafana:
+    <<: *sock0
+    depends_on: !reset {}
+
+  # Web UI: upload -> docs2md -> ingest, and search. Runs on the app image (no
+  # extra image offline); the KB API key stays server-side. Open on the LAN.
+  webui:
+    <<: *sock0
+    image: kb-app:offline
+    pull_policy: never
+    command: ["uvicorn", "app:app", "--app-dir", "/webui", "--host", "0.0.0.0", "--port", "8090"]
+    environment:
+      KB_API_URL: http://api:8000
+      KB_API_KEY: ${API_KEYS:?set API_KEYS in .env.offline}
+      DOCS2MD_URL: http://10.10.113.11:8070
+    volumes: ["./deploy/offline/webui:/webui:ro"]
+    ports: ["8090:8090"]
+    restart: unless-stopped

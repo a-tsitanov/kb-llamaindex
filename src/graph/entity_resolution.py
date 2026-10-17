@@ -65,6 +65,13 @@ from src.graph.lightrag_parse import (
     _normalize_entity_name,
 )
 from src.graph.merge import _maybe_summarize_descriptions
+from src.graph.person_names import (
+    PersonName,
+    birth_year,
+    different_persons,
+    parse_person_name,
+    same_person,
+)
 from src.retrieval._common import strip_thinking
 
 # ── identifier labels excluded from ER ──────────────────────────────
@@ -187,6 +194,19 @@ class ERConfig:
     vector_knn_k: int = 20
     """Neighbours fetched per new entity from the ER vector store when
     ``use_native_vector_knn`` is on (the per-entity candidate fan-out)."""
+
+    person_name_rule: bool = True
+    """Deterministic rule for Russian person names (`person_names.py`):
+    "Поляков" / "Поляков С.Н." / "Поляков Сергей Николаевич" / oblique
+    cases merge without the LLM when the match is unambiguous; pairs whose
+    initials, patronymic, sex or birth year disagree never reach cosine
+    auto-merge or the judge. False restores the old initials signature."""
+
+    person_namesake_limit: int = 200
+    """With `person_name_rule` and a graph store: stored Person entities
+    sharing a surname stem with a new one, loaded from the Postgres
+    `entity` mirror (cosine kNN misses "Поляков С.Н." vs the full FIO when
+    descriptions differ). 0 disables the lookup."""
 
     verdict_cache_enabled: bool = True
     """When True AND an `er_store` is passed to `resolve_entities`,
@@ -514,12 +534,123 @@ def _candidate_pairs(
 # ── deterministic pre-pass ─────────────────────────────────────────
 
 
-def _deterministic_pairs(items: list[_Item]) -> list[tuple[str, str]]:
+def _person_forms(items: list[_Item]) -> dict[str, tuple[PersonName, str | None]]:
+    """norm -> (parsed name, birth year) for Person items with a parseable
+    Russian name."""
+    out: dict[str, tuple[PersonName, str | None]] = {}
+    for it in items:
+        if it.label != "Person":
+            continue
+        parsed = parse_person_name(it.name)
+        if parsed is not None:
+            out[it.norm] = (parsed, birth_year(it.description))
+    return out
+
+
+def _same(forms: dict[str, tuple[PersonName, str | None]], a: str, b: str) -> bool:
+    (pa, ya), (pb, yb) = forms[a], forms[b]
+    return same_person(pa, pb, year_a=ya, year_b=yb)
+
+
+def _person_rule_pairs(items: list[_Item]) -> list[tuple[str, str]]:
+    """Pairs of forms of one person, merged only when the match is unique.
+
+    "Соколов С.С." next to both "Соколов Семён Степанович" and "Соколов
+    Сергей Сергеевич" matches two people that differ from each other, so it
+    gets no pair (the judge decides). A form pairs only when everything it
+    matches also matches each other.
+
+    A bare surname ("Поляков") pairs only inside the current document (new
+    items): across documents the same surname is a different person too
+    often. Its uniqueness is checked among new items only.
+    """
+    forms = _person_forms(items)
+    by_stem: dict[str, list[_Item]] = defaultdict(list)
+    for it in items:
+        if it.norm in forms:
+            by_stem[forms[it.norm][0].surname_stem].append(it)
+
+    out: list[tuple[str, str]] = []
+    for group in by_stem.values():
+        if len(group) < 2:
+            continue
+        unique: dict[str, bool] = {}
+        for x in group:
+            bare = forms[x.norm][0].bare
+            pool = [
+                y for y in group
+                if y.norm != x.norm
+                and (y.source == "new" if bare else not forms[y.norm][0].bare)
+                and _same(forms, x.norm, y.norm)
+            ]
+            unique[x.norm] = all(
+                _same(forms, p.norm, q.norm)
+                for i, p in enumerate(pool) for q in pool[i + 1:]
+            )
+        for i, x in enumerate(group):
+            for y in group[i + 1:]:
+                if x.norm == y.norm or not (unique[x.norm] and unique[y.norm]):
+                    continue
+                if (forms[x.norm][0].bare or forms[y.norm][0].bare) and not (
+                    x.source == "new" and y.source == "new"
+                ):
+                    continue
+                if _same(forms, x.norm, y.norm):
+                    out.append((x.norm, y.norm))
+    return out
+
+
+def _person_cluster_certain(cluster_items: list[_Item]) -> bool:
+    """All members are parseable person names that agree with each other —
+    the LLM cluster check has nothing to add. A bare surname only has to
+    share the stem and not contradict the sex: "Поляков" sits in one
+    cluster with "Полякова Сергея Николаевича" through the full forms."""
+    forms = _person_forms(cluster_items)
+    if len(forms) != len(cluster_items):
+        return False
+
+    def agree(a: str, b: str) -> bool:
+        pa, pb = forms[a][0], forms[b][0]
+        if pa.bare or pb.bare:
+            return pa.surname_stem == pb.surname_stem and not (
+                pa.sex and pb.sex and pa.sex != pb.sex
+            )
+        return _same(forms, a, b)
+
+    norms = list(forms)
+    return all(agree(a, b) for i, a in enumerate(norms) for b in norms[i + 1:])
+
+
+def _veto_different_persons(
+    pairs: list[tuple[str, str, float]], items_by_norm: dict[str, _Item],
+) -> tuple[list[tuple[str, str, float]], int]:
+    """Drop candidate pairs whose names prove two different persons."""
+    kept: list[tuple[str, str, float]] = []
+    vetoed = 0
+    for a, b, cos in pairs:
+        ia, ib = items_by_norm.get(a), items_by_norm.get(b)
+        if ia is not None and ib is not None and ia.label == ib.label == "Person":
+            pa, pb = parse_person_name(ia.name), parse_person_name(ib.name)
+            if pa is not None and pb is not None and different_persons(
+                pa, pb,
+                year_a=birth_year(ia.description), year_b=birth_year(ib.description),
+            ):
+                vetoed += 1
+                continue
+        kept.append((a, b, cos))
+    return kept, vetoed
+
+
+def _deterministic_pairs(
+    items: list[_Item], *, person_rule: bool = False,
+) -> list[tuple[str, str]]:
     """Find pairs that match without any LLM / embedding signal:
 
     * Same `_deep_normalize` form (case-/diacritic-/punct-insensitive).
-    * `_initials_signature` collision (Surname + 2 initials matching
-      a Given Surname full-form entry).
+    * `person_rule`: Russian person-name forms (`_person_rule_pairs`);
+      the initials signature then covers only non-Cyrillic names.
+    * Otherwise `_initials_signature` collision (Surname + initial
+      matching a Given Surname full-form entry).
     """
     out: list[tuple[str, str]] = []
 
@@ -541,6 +672,8 @@ def _deterministic_pairs(items: list[_Item]) -> list[tuple[str, str]]:
     for it in items:
         if it.label != "Person":
             continue
+        if person_rule and _is_cyrillic_name(it.name):
+            continue
         sig = _initials_signature(it.name)
         if sig is not None:
             by_sig[sig].append(it)
@@ -551,6 +684,8 @@ def _deterministic_pairs(items: list[_Item]) -> list[tuple[str, str]]:
                 if other.norm != anchor:
                     out.append((anchor, other.norm))
 
+    if person_rule:
+        out.extend(_person_rule_pairs(items))
     return out
 
 
@@ -865,14 +1000,25 @@ def _pick_canonical(cluster_items: list[_Item], cfg: ERConfig) -> _Item:
       3. Tiebreak: longest name (more specific).
       4. Tiebreak: Cyrillic surface form preferred when language=Russian.
       5. Alphabetical (deterministic).
+
+    With `person_name_rule`, a Person name's completeness (full FIO over
+    initials over a bare surname, then the nominative) ranks right after
+    `stored` — the canonical of a person is the full name, not the form
+    mentioned most.
     """
 
-    def key(it: _Item) -> tuple[int, int, int, int, str]:
+    def key(it: _Item) -> tuple[int, int, int, int, int, int, str]:
         stored_pref = 1 if it.source == "stored" else 0
         cyr_pref = 0
         if cfg.language.lower().startswith("rus"):
             cyr_pref = 1 if _is_cyrillic_name(it.name) else 0
-        return (stored_pref, it.mention_count, len(it.name), cyr_pref, it.name)
+        completeness = nominative = 0
+        if cfg.person_name_rule and it.label == "Person":
+            parsed = parse_person_name(it.name)
+            if parsed is not None:
+                completeness, nominative = parsed.completeness, int(parsed.nominative)
+        return (stored_pref, completeness, nominative, it.mention_count,
+                len(it.name), cyr_pref, it.name)
 
     return max(cluster_items, key=key)
 
@@ -918,6 +1064,11 @@ async def _consolidate_cluster(
             if fp not in file_paths:
                 file_paths.append(fp)
 
+    # A canonical loaded from the `entity` mirror (namesake lookup) has no
+    # embedding; borrow a member's so the vector index still finds it.
+    embedding = canonical.embedding or next(
+        (it.embedding for it in cluster_items if it.embedding), [],
+    )
     properties: dict[str, Any] = {
         "description": merged_desc,
         "source_chunks": source_chunks,
@@ -925,14 +1076,15 @@ async def _consolidate_cluster(
         "mention_count": mention_counts,
         "aliases": aliases,
         "er_canonical_name": canonical.name,
-        "er_embedding": json.dumps(canonical.embedding),
+        "er_embedding": json.dumps(embedding),
     }
     if er_review_needed:
         properties["er_review_needed"] = True
-    # Vector kNN: also carry the embedding as a list property; the Milvus
-    # EntityVectorStore upsert at the end of ER reads it from here.
-    if cfg.use_native_vector_knn and canonical.embedding:
-        properties["er_vec"] = list(canonical.embedding)
+    # Vector kNN: also carry the embedding (a member's when the canonical
+    # came from the `entity` mirror without one) as a list property; the
+    # Milvus EntityVectorStore upsert at the end of ER reads it from here.
+    if cfg.use_native_vector_knn and embedding:
+        properties["er_vec"] = list(embedding)
 
     return EntityNode(
         name=canonical.name,
@@ -1064,6 +1216,24 @@ def _apply_name_map(
 # ── existing canonicals (incremental ER) ───────────────────────────
 
 
+async def _rewrite_watch_vid(loser_name: str, canon_name: str) -> None:
+    """Carry entity-watch rows (subscriptions, journals, events) from a merged
+    loser onto its canonical entity. Fail-open: a stale vid only costs the
+    watcher events until the next merge of the same pair."""
+    from src.graph.nebula_store import entity_vid
+    from src.storage.watch import WatchRepository
+
+    try:
+        await WatchRepository().rewrite_vid(
+            entity_vid(loser_name), entity_vid(canon_name), canon_name,
+        )
+    except Exception as exc:
+        logger.warning(
+            "entity-watch vid rewrite skipped for {l}→{c}: {e}",
+            l=loser_name, c=canon_name, e=exc,
+        )
+
+
 async def _cleanup_stored_losers(
     graph_store: Any,
     pairs: list[tuple[str, str]],
@@ -1090,6 +1260,7 @@ async def _cleanup_stored_losers(
                 loser=loser_name,
                 canon=canon_name,
             )
+            await _rewrite_watch_vid(loser_name, canon_name)
         except Exception as exc:
             # Safe-by-inaction: leave the loser node INTACT (with its
             # edges) rather than deleting it without repointing.  Worst
@@ -1174,6 +1345,44 @@ async def _load_candidates_via_store(
                 source="stored", embedding=list(emb),
             )
     return list(seen.values())
+
+
+async def _load_person_namesakes(
+    new_items: list[_Item], known: set[str], *, graph_store: Any, limit: int,
+) -> list[_Item]:
+    """Stored Person entities sharing a surname stem with a new one, from
+    the Postgres `entity` mirror. No embeddings: they join the
+    deterministic person rule, not cosine candidates. Fail-open."""
+    stems = sorted({
+        parsed.surname_stem for it in new_items
+        if it.label == "Person" and (parsed := parse_person_name(it.name)) is not None
+    })
+    if not stems or limit <= 0:
+        return []
+    try:
+        from src.storage.entity_search import EntitySearchRepository
+
+        # The mirror lives in the same graph's PG schema as the store.
+        rows = await EntitySearchRepository(graph=graph_store.graph).persons_by_surname(
+            stems, limit=limit,
+        )
+    except Exception as exc:
+        logger.warning("ER namesake lookup skipped: {e}", e=exc)
+        return []
+    out: list[_Item] = []
+    for r in rows:
+        name = r.get("name") or ""
+        norm = _normalize_entity_name(name)
+        if not name or norm in known:
+            continue
+        known.add(norm)
+        out.append(_Item(
+            name=name, norm=norm, label=r.get("label") or "Person",
+            description=r.get("description") or "",
+            mention_count=int(r.get("mention_count") or 1),
+            source="stored",
+        ))
+    return out
 
 
 # ── public entry point ─────────────────────────────────────────────
@@ -1287,16 +1496,32 @@ async def resolve_entities(
             graph_store, limit=cfg.incremental_window,
         )
 
+    if cfg.person_name_rule and graph_store is not None:
+        known = {it.norm for it in new_items} | {it.norm for it in stored_items}
+        stored_items = stored_items + await _load_person_namesakes(
+            new_items, known, graph_store=graph_store, limit=cfg.person_namesake_limit,
+        )
+
     all_items = new_items + stored_items
     items_by_norm: dict[str, _Item] = {it.norm: it for it in all_items}
 
     # 4. Deterministic pre-pass.
     confirmed_pairs: set[tuple[str, str]] = set()
-    for a, b in _deterministic_pairs(all_items):
+    for a, b in _deterministic_pairs(all_items, person_rule=cfg.person_name_rule):
         confirmed_pairs.add(tuple(sorted((a, b))))
 
     # 5. Candidate generation.
     auto_pairs, borderline_pairs = _candidate_pairs(all_items, cfg)
+    if cfg.person_name_rule:
+        auto_pairs, vetoed_auto = _veto_different_persons(auto_pairs, items_by_norm)
+        borderline_pairs, vetoed_judge = _veto_different_persons(
+            borderline_pairs, items_by_norm,
+        )
+        if vetoed_auto or vetoed_judge:
+            logger.info(
+                "ER person-name veto: {a} auto-merge, {j} judge pairs",
+                a=vetoed_auto, j=vetoed_judge,
+            )
     for a, b, cos in auto_pairs:
         confirmed_pairs.add(tuple(sorted((a, b))))
         logger.debug(
@@ -1309,9 +1534,14 @@ async def resolve_entities(
     # spending an LLM call on an already-certain merge is waste and
     # risks the judge over-ruling a high-precision rule (e.g.
     # initialism match).
+    # Same for pairs already joined through other confirmed pairs: a
+    # DIFFERENT verdict could not split them (union-find only adds).
+    joined = _UnionFind()
+    for a, b in confirmed_pairs:
+        joined.union(a, b)
     borderline_pairs = [
         (a, b, c) for (a, b, c) in borderline_pairs
-        if tuple(sorted((a, b))) not in confirmed_pairs
+        if joined.find(a) != joined.find(b)
     ]
     if borderline_pairs:
         judge_input = [
@@ -1389,6 +1619,9 @@ async def resolve_entities(
             verified_clusters.append(cluster)
             continue
         cluster_items = [items_by_norm[n] for n in cluster if n in items_by_norm]
+        if cfg.person_name_rule and _person_cluster_certain(cluster_items):
+            verified_clusters.append(cluster)
+            continue
         groups = await _verify_cluster(cluster_items, llm)
         for group in groups:
             if len(group) >= 2:

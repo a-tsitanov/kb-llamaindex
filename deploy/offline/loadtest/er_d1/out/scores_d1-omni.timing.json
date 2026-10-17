@@ -1,0 +1,21 @@
+{
+  "model": "/home/sentinel/models/d1-omni-600M",
+  "dtype": "bf16",
+  "threads": 16,
+  "n_pairs": 3502,
+  "load_s": 0.7,
+  "single_latency_ms_median": 47.8,
+  "single_latency_ms_p90": 51.6,
+  "batched": {
+    "ru": {
+      "seconds": 143.7,
+      "pairs_per_s": 24.36,
+      "avg_tokens": 102.8
+    },
+    "en": {
+      "seconds": 132.4,
+      "pairs_per_s": 26.45,
+      "avg_tokens": 98.8
+    }
+  }
+}

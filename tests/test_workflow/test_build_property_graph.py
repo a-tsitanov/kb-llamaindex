@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -10,6 +10,17 @@ from src.workflow.activities.build_property_graph import (
     build_property_graph,
 )
 from src.workflow.contracts import Ctx, KGExtracted, Merged, Parsed
+
+
+@pytest.fixture(autouse=True)
+def _no_watch_journal_db():
+    """The entity-watch journal write would reach for a real Postgres pool;
+    tests that care about it patch it themselves."""
+    with patch(
+        "src.workflow.activities.build_property_graph.record_watch_journals",
+        new=AsyncMock(),
+    ):
+        yield
 
 
 def test_strip_graph_unsafe_removes_augment_key() -> None:
@@ -145,3 +156,54 @@ async def test_build_property_graph_upserts_entities_and_relations(monkeypatch):
     graph_store.upsert_relations.assert_called_once_with([rel])
     assert out.entities == 2
     assert out.relations == 1
+
+
+@pytest.mark.asyncio
+async def test_writes_watch_journals_with_the_pairs_the_graph_created(monkeypatch):
+    from src.config import settings
+
+    monkeypatch.setattr(settings.signals, "source_trust", {})
+    monkeypatch.setattr(settings.events, "first_seen_enabled", False)
+
+    n = MagicMock(node_id="a")
+    n.metadata = {}
+    entities = [MagicMock()]
+    relations = [MagicMock()]
+    staging = MagicMock()
+    staging.read_pickle.return_value = (entities, relations, [n])
+    graph_store = MagicMock()
+    graph_store.upsert_relations.return_value = [("va", "vb")]
+
+    ctx = Ctx(doc_id="d", local_path="/x", cleanup_dir=None, workflow_run_id="r",
+              doc_date_epoch=19794, backfill=True)
+    parsed = Parsed(ctx=ctx, nodes_uri="s3://kb-staging/r/parsed.pkl", chunk_count=1)
+    kg = KGExtracted(parsed=parsed, nodes_with_kg_uri="s3://kb-staging/r/kg.pkl")
+    merged = Merged(kg=kg, merged_entities_uri="s3://kb-staging/r/merged.pkl")
+
+    journal = AsyncMock()
+    with patch(
+        "src.workflow.activities.build_property_graph.build_staging_store",
+        return_value=staging,
+    ), patch(
+        "src.workflow.activities.build_property_graph.build_graph_store",
+        return_value=graph_store,
+    ), patch(
+        "src.workflow.activities.build_property_graph.record_watch_journals", new=journal,
+    ), patch(
+        "src.workflow.activities.build_property_graph.activity"
+    ):
+        await build_property_graph(merged)
+
+    journal.assert_awaited_once()
+    args, kwargs = journal.await_args
+    assert args[1] is entities and args[2] is relations
+    assert args[3] == [("va", "vb")]
+    assert kwargs == {"doc_id": "d", "doc_date_epoch": 19794, "backfill": True}
+
+
+def test_backfill_flag_flows_from_ingest_params_to_ctx():
+    from src.workflow.contracts import IngestParams
+
+    assert IngestParams(doc_id="d", path="p").backfill is False
+    assert IngestParams(doc_id="d", path="p", backfill=True).backfill is True
+    assert Ctx(doc_id="d", local_path="/x", cleanup_dir=None, workflow_run_id="r").backfill is False

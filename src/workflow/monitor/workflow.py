@@ -19,6 +19,7 @@ with workflow.unsafe.imports_passed_through():
         MonitorIn,
         MonitorResult,
         SweepResult,
+        WatchSweepResult,
     )
     from src.config import settings
 
@@ -31,10 +32,21 @@ _RETRY = RetryPolicy(
 
 @workflow.defn
 class MonitorSweepWorkflow:
-    """One-shot sweep: detect new-connection + risk-rise alerts for watched entities."""
+    """One-shot sweep: entity-watch events, then new-connection + risk-rise alerts."""
 
     @workflow.run
     async def run(self) -> SweepResult:
+        # Entity watch (Postgres journals -> watch_event). Runs first: it is
+        # the per-document feed; the Nebula-flag checks below are the legacy
+        # Arc-2 path (risk-rise / burst) and stay as they were.
+        watch = await workflow.execute_activity(
+            "sweep_watch",
+            result_type=WatchSweepResult,
+            start_to_close_timeout=timedelta(minutes=4),
+            schedule_to_close_timeout=timedelta(minutes=10),
+            heartbeat_timeout=timedelta(minutes=2),
+            retry_policy=_RETRY,
+        )
         monitor_in = MonitorIn(
             window_days=settings.monitor.new_window_days,
             risk_rise_delta=settings.monitor.risk_rise_delta,
@@ -60,10 +72,11 @@ class MonitorSweepWorkflow:
             retry_policy=_RETRY,
         )
         return SweepResult(
+            watch_events=watch.events,
             new_connection_alerts=result.new_connection_alerts,
             risk_rise_alerts=result.risk_rise_alerts,
             burst_alerts=result.burst_alerts,
             delivered=deliver.delivered,
             failed=deliver.failed,
-            error="; ".join(e for e in (result.error, deliver.error) if e),
+            error="; ".join(e for e in (watch.error, result.error, deliver.error) if e),
         )

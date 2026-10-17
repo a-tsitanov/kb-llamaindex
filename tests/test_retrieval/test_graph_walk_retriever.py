@@ -196,3 +196,19 @@ async def test_awalk_opt_out_disables_filtering():
     data = await r.awalk("A", hops=2)
     tgts = {rel["tgt_id"] for rel in data.relations}
     assert tgts == {"B", "C"}
+def test_walk_rows_keep_the_centres_own_edges_before_the_cap():
+    """Live 2026-10-01: Rosatom (221 neighbours) cut to 50 entities / 100 edges in store
+    order lost «Алексей Лихачёв» and his EMPLOYMENT edge."""
+    from src.graph.retriever import GraphRetriever
+    others = [{"name": f"E{i}", "label": "Other"} for i in range(300)]
+    noise = [{"src": f"E{i}", "tgt": f"E{i + 1}", "label": "X"} for i in range(299)]
+    rows = [{"entities": [*others, {"name": "Rosatom"}, {"name": "Алексей Лихачёв",
+                                                         "label": "Person"}],
+             "relations": [*noise, {"src": "Алексей Лихачёв", "tgt": "Rosatom",
+                                    "label": "EMPLOYMENT"}]}]
+    g = GraphRetriever.__new__(GraphRetriever)
+    g._filter_polarity_temporal = False
+    out = g._map_walk_rows(rows, node_cap=5, edge_cap=3, centre="Rosatom")
+    names = [e["entity_name"] for e in out.entities]
+    assert names[:2] == ["Rosatom", "Алексей Лихачёв"] and len(names) == 5
+    assert out.relations[0]["label"] == "EMPLOYMENT" and len(out.relations) == 3

@@ -17,6 +17,7 @@ class _FakeStore:
         self.graph = default_graph_context()
     def structured_query(self, query, param_map=None):
         self.last_query = query
+        self.queries = [*getattr(self, "queries", []), query]
         assert not param_map, "nebula path must not pass param_map"
         return self._rows
     def subgraph(self, vid, hops, *, edge="RELATED"):
@@ -64,7 +65,7 @@ async def test_find_by_name_nebula_lookup():
     assert '`Entity`.name STARTS WITH "Иванов"' in store.last_query
     assert "CONTAINS" not in store.last_query
     assert "MATCH" not in store.last_query
-    assert "LIMIT 5" in store.last_query
+    assert "LIMIT 50" in store.last_query  # over-fetch, ranked and cut to `limit` in Python
     assert out.entities == [{"entity_name": "Иванов Иван",
                              "entity_type": "PERSON", "description": "инженер"}]
     assert out.error == ""
@@ -74,8 +75,64 @@ async def test_find_by_name_nebula_lookup():
 async def test_find_by_name_nebula_ors_the_tokens():
     store = _FakeStore(rows=[])
     await GraphRetriever.for_store(store).afind_entities_by_name("Иванов Москва")
-    assert store.last_query.count("STARTS WITH") == 2
-    assert " OR " in store.last_query
+    # one single-term LOOKUP per term, whole phrase first: an OR in a nebula LOOKUP took
+    # 1–9 s on the live graph where the same terms looked up one by one took 0.04 s total
+    assert [q.split("STARTS WITH ")[1].split(" YIELD")[0] for q in store.queries] == [
+        '"Иванов Москва"', '"Иванов"', '"Москва"']
+    assert not any(" OR " in q for q in store.queries)
+
+
+@pytest.mark.asyncio
+async def test_find_by_name_nebula_is_case_tolerant(monkeypatch):
+    """The index is case-sensitive; a lower-case request also tries the capitalised form."""
+    monkeypatch.setattr(
+        "src.graph.retriever.settings.graph.backend", "nebula", raising=False,
+    )
+    store = _FakeStore(rows=[])
+    await GraphRetriever.for_store(store).afind_entities_by_name("лихачёв")
+    joined = "\n".join(store.queries)
+    assert '`Entity`.name STARTS WITH "лихачёв"' in joined
+    assert '`Entity`.name STARTS WITH "Лихачёв"' in joined
+
+
+@pytest.mark.asyncio
+async def test_find_by_name_nebula_ranks_the_full_name_first(monkeypatch):
+    """"Алексей Лихачёв" used to return ten other Алексей (the OR of prefixes filled the
+    LIMIT unranked); the entity matching every word must come first."""
+    monkeypatch.setattr(
+        "src.graph.retriever.settings.graph.backend", "nebula", raising=False,
+    )
+    rows = ([{"name": f"Алексей Кущ{i}", "label": "Person"} for i in range(12)]
+            + [{"name": "Алексей Лихачёв", "label": "Person", "description": "глава Росатома"},
+               {"name": "Алексей Лихачёв (однофамилец)", "label": "Person"}])
+    store = _FakeStore(rows=rows)
+    out = await GraphRetriever.for_store(store).afind_entities_by_name("Алексей Лихачёв",
+                                                                        limit=3)
+    assert [e["entity_name"] for e in out.entities][:2] == [
+        "Алексей Лихачёв", "Алексей Лихачёв (однофамилец)"]
+    assert len(out.entities) == 3
+
+
+@pytest.mark.asyncio
+async def test_find_by_name_nebula_phrase_hit_is_not_drowned_by_a_common_first_name(monkeypatch):
+    """Live graph: 200 entities start with "Алексей"; the phrase lookup must still surface
+    "Алексей Лихачёв" even though the token lookup's LIMIT never reaches it."""
+    monkeypatch.setattr(
+        "src.graph.retriever.settings.graph.backend", "nebula", raising=False,
+    )
+
+    class _ByTerm(_FakeStore):
+        def structured_query(self, query, param_map=None):
+            super().structured_query(query, param_map)
+            if '"Алексей Лихачёв"' in query:
+                return [{"name": "Алексей Лихачёв", "label": "Person"}]
+            if '"Алексей"' in query:
+                return [{"name": f"Алексей {i:03d}", "label": "Person"} for i in range(50)]
+            return []
+
+    out = await GraphRetriever.for_store(_ByTerm()).afind_entities_by_name("Алексей Лихачёв",
+                                                                          limit=5)
+    assert out.entities[0]["entity_name"] == "Алексей Лихачёв" and len(out.entities) == 5
 
 
 @pytest.mark.asyncio
@@ -288,3 +345,10 @@ async def test_awalk_nebula_fails_open():
     r = GraphRetriever.for_store(_BoomStore())
     out = await r.awalk("Иванов", hops=999)
     assert out == RoundGraphData()
+
+
+def test_rank_by_name_treats_yo_as_ye():
+    from src.graph.retriever import _rank_by_name
+    ents = [{"entity_name": "Алексей Лихач"}, {"entity_name": "Алексей Лихачёв"}]
+    ranked = _rank_by_name(ents, "Алексей Лихачев")
+    assert ranked[0]["entity_name"] == "Алексей Лихачёв"

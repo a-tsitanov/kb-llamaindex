@@ -7,10 +7,20 @@ import pytest
 from psycopg.rows import dict_row
 
 import src.storage.pg_scope as pg_scope_mod
-from src.storage.entity_search import EntitySearchRepository, build_entity_search_query
+from src.storage.entity_search import (
+    EntitySearchRepository,
+    build_entity_search_query,
+    build_persons_by_surname_query,
+)
 from src.tenancy.context import default_graph_context
 
 # ── query builders ──────────────────────────────────────────────────
+
+
+def test_persons_by_surname_matches_stem_anywhere_with_yo_variants():
+    sql, params = build_persons_by_surname_query(["поляков", "королев"], limit=50)
+    assert "label = 'Person'" in sql and "name ILIKE ANY(%s)" in sql
+    assert params == [["%поляков%", "%королев%", "%королёв%"], 50]
 
 
 def test_exact_matches_the_whole_name():

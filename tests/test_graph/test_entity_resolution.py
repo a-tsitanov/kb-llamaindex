@@ -129,6 +129,21 @@ class _GraphStoreStub:
         return self.rows
 
 
+@pytest.fixture(autouse=True)
+def _no_namesake_lookup(monkeypatch):
+    """The person rule's stored-namesake lookup reads Postgres; tests that
+    need it set rows through `namesakes`."""
+    rows: list[dict] = []
+
+    async def _lookup(self, stems, *, limit=200):
+        return list(rows)
+
+    from src.storage.entity_search import EntitySearchRepository
+
+    monkeypatch.setattr(EntitySearchRepository, "persons_by_surname", _lookup)
+    return rows
+
+
 def _ent(
     name: str, label: str = "Concept", desc: str = "",
     mention_count: int = 1,
@@ -796,3 +811,185 @@ async def test_resolve_entities_uses_vector_store_knn_and_upsert(monkeypatch):
     )
     assert vs.knn_calls == 1          # queried the store for the new entity
     assert len(vs.upserted) >= 1      # canonicals upserted to the vector store
+
+
+# ── entity-watch: the merge carries subscriptions/journals to the canonical ──
+
+
+@pytest.fixture(autouse=True)
+def _no_watch_rewrite_db(request, monkeypatch):
+    """_cleanup_stored_losers rewrites the entity-watch tables after each
+    merge; keep the rest of this file off a real Postgres."""
+    if "watch_rewrite" in request.node.name:
+        return
+    import src.graph.entity_resolution as er
+
+    async def _noop(loser, canon):
+        return None
+
+    monkeypatch.setattr(er, "_rewrite_watch_vid", _noop)
+
+
+@pytest.mark.asyncio
+async def test_watch_rewrite_follows_each_successful_merge_only(monkeypatch):
+    import src.graph.entity_resolution as er
+
+    class _FlakyOps:
+        def merge_loser_into_canonical(self, *, loser, canon):
+            if loser == "Loser A":
+                raise RuntimeError("nGQL re-insert failed")
+
+    rewrites: list[tuple[str, str]] = []
+
+    async def _rec(loser, canon):
+        rewrites.append((loser, canon))
+
+    monkeypatch.setattr(er, "build_er_graph_ops", lambda store: _FlakyOps())
+    monkeypatch.setattr(er, "_rewrite_watch_vid", _rec)
+
+    await er._cleanup_stored_losers(object(), [("Loser A", "Canon A"), ("Loser B", "Canon B")])
+
+    # the failed merge left the loser intact, so its watch rows stay too
+    assert rewrites == [("Loser B", "Canon B")]
+
+
+@pytest.mark.asyncio
+async def test_watch_rewrite_maps_names_to_vids_and_never_raises(monkeypatch):
+    import src.graph.entity_resolution as er
+    import src.storage.watch as watch_mod
+    from src.graph.nebula_store import entity_vid
+
+    calls: list[tuple] = []
+
+    class _Repo:
+        async def rewrite_vid(self, loser_vid, canon_vid, canon_name):
+            calls.append((loser_vid, canon_vid, canon_name))
+            raise RuntimeError("pg down")
+
+    monkeypatch.setattr(watch_mod, "WatchRepository", _Repo)
+    await er._rewrite_watch_vid("Исаев В.И.", "Исаев Валентин Игоревич")  # must not raise
+    assert calls == [(entity_vid("Исаев В.И."), entity_vid("Исаев Валентин Игоревич"),
+                      "Исаев Валентин Игоревич")]
+
+
+# ── person-name rule ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_person_forms_in_one_document_merge_to_the_full_name() -> None:
+    """Поляков / Поляков С.Н. / Полякова Сергея Николаевича / Поляков
+    Сергей Николаевич — one person, canonical is the full nominative FIO
+    even though the bare surname is mentioned most; no LLM at all (the
+    3-member cluster skips the verification call)."""
+    llm = _ScriptedJudgeLLM()
+    entities = [
+        _ent("Поляков", label="Person", mention_count=9),
+        _ent("Поляков С.Н.", label="Person", mention_count=3),
+        _ent("Полякова Сергея Николаевича", label="Person", mention_count=1),
+        _ent("Поляков Сергей Николаевич", label="Person", mention_count=1),
+    ]
+    out_ents, _, name_map = await resolve_entities(
+        entities, [], [], llm=llm, embed_model=_EmbeddingStub(),
+    )
+    assert [e.name for e in out_ents] == ["Поляков Сергей Николаевич"]
+    assert set(name_map.values()) == {"Поляков Сергей Николаевич"}
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_short_form_is_not_merged_by_the_rule() -> None:
+    """Соколов С.С. fits both namesakes — the rule leaves it alone."""
+    # Far-apart vectors: neither cosine auto-merge nor the judge pool.
+    embed = _EmbeddingStub(table={
+        "Соколов С.С.": [1.0, 0.0, 0.0, 0.0],
+        "Соколов Семён Степанович": [0.0, 1.0, 0.0, 0.0],
+        "Соколов Сергей Сергеевич": [0.0, 0.0, 1.0, 0.0],
+    })
+    llm = _ScriptedJudgeLLM()
+    entities = [
+        _ent("Соколов С.С.", label="Person"),
+        _ent("Соколов Семён Степанович", label="Person"),
+        _ent("Соколов Сергей Сергеевич", label="Person"),
+    ]
+    out_ents, _, name_map = await resolve_entities(
+        entities, [], [], llm=llm, embed_model=embed,
+    )
+    assert len(out_ents) == 3
+    assert name_map == {}
+
+
+@pytest.mark.asyncio
+async def test_different_initials_never_reach_auto_merge_or_judge() -> None:
+    """Identical vectors (cosine 1.0) would auto-merge — the name veto
+    stops it, and the judge is not asked."""
+    vec = [1.0, 0.0, 0.0, 0.0]
+    embed = _EmbeddingStub(table={"Елисеев С.Н.:": vec, "Елисеев А.Л.:": vec})
+    llm = _ScriptedJudgeLLM(verdicts={("Елисеев С.Н.", "Елисеев А.Л."): True})
+    out_ents, _, name_map = await resolve_entities(
+        [_ent("Елисеев С.Н.", label="Person"), _ent("Елисеев А.Л.", label="Person")],
+        [], [], llm=llm, embed_model=embed,
+    )
+    assert len(out_ents) == 2
+    assert name_map == {}
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_stored_full_name_from_entity_mirror_absorbs_new_short_form(
+    _no_namesake_lookup,
+) -> None:
+    """kNN found nothing; the surname lookup brings the stored full FIO and
+    the new short form merges into it. A new bare surname does not merge
+    across documents."""
+    _no_namesake_lookup.append({
+        "vid": "v1", "name": "Исаев Валентин Игоревич", "label": "Person",
+        "description": "", "mention_count": 7,
+    })
+    llm = _ScriptedJudgeLLM()
+    out_ents, _, name_map = await resolve_entities(
+        [_ent("Исаев В.И.", label="Person"), _ent("Медведев", label="Person")],
+        [], [], llm=llm, embed_model=_EmbeddingStub(),
+        graph_store=_GraphStoreStub(rows=[]),
+    )
+    names = sorted(e.name for e in out_ents)
+    assert names == ["Исаев Валентин Игоревич", "Медведев"]
+    assert name_map == {"Исаев В.И.": "Исаев Валентин Игоревич"}
+    canon = next(e for e in out_ents if e.name == "Исаев Валентин Игоревич")
+    # the mirror row has no vector — the new member's is carried over
+    assert json.loads(canon.properties["er_embedding"])
+
+
+@pytest.mark.asyncio
+async def test_bare_surname_does_not_merge_with_stored_namesake(_no_namesake_lookup) -> None:
+    _no_namesake_lookup.append({
+        "vid": "v1", "name": "Медведев Е.В.", "label": "Person",
+        "description": "", "mention_count": 3,
+    })
+    out_ents, _, name_map = await resolve_entities(
+        [_ent("Медведев", label="Person")], [], [],
+        llm=_ScriptedJudgeLLM(), embed_model=_EmbeddingStub(),
+        graph_store=_GraphStoreStub(rows=[]),
+    )
+    assert [e.name for e in out_ents] == ["Медведев"]
+    assert name_map == {}
+
+
+@pytest.mark.asyncio
+async def test_person_rule_off_restores_initials_signature() -> None:
+    """Flag off: the old one-initial signature merges Иванов И.И. with
+    Иван Иванов and ignores the bare surname."""
+    entities = [
+        _ent("Иванов И.И.", label="Person", mention_count=4),
+        _ent("Иван Иванов", label="Person", mention_count=2),
+        _ent("Иванов", label="Person", mention_count=9),
+    ]
+    embed = _EmbeddingStub(table={
+        "Иванов И.И.": [1.0, 0.0, 0.0, 0.0],
+        "Иван Иванов": [0.0, 1.0, 0.0, 0.0],
+        "Иванов": [0.0, 0.0, 1.0, 0.0],
+    })
+    out_ents, _, _ = await resolve_entities(
+        entities, [], [], llm=_ScriptedJudgeLLM(), embed_model=embed,
+        config=ERConfig(person_name_rule=False),
+    )
+    assert sorted(e.name for e in out_ents) == ["Иванов", "Иванов И.И."]

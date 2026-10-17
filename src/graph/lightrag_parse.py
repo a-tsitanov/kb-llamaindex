@@ -16,6 +16,7 @@ chunk's output.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from llama_index.core.graph_stores.types import EntityNode, Relation
@@ -34,9 +35,48 @@ _CYPHER_LABEL_RE = re.compile(r"[^A-Z0-9_]+")
 _LEADING_KIND_RE = re.compile(r'^[\s"]*"?(?P<kind>entity|relation|event)"?[\s"]*$', re.IGNORECASE)
 
 
+def _wraps_whole(name: str, opener: str, closer: str) -> bool:
+    """True when ``name`` is ONE quoted span: the first char opens it and the
+    matching close is the last char («Детский мир», «ООО «Ромашка»»), not
+    two spans that merely start and end with quotes («Ромашка» и «Лютик»)."""
+    if len(name) < 2 or name[0] != opener or name[-1] != closer:
+        return False
+    if opener == closer:  # plain quotes cannot nest
+        return opener not in name[1:-1]
+    depth = 0
+    for i, ch in enumerate(name):
+        if ch == opener:
+            depth += 1
+        elif ch == closer:
+            depth -= 1
+            if depth == 0 and i != len(name) - 1:
+                return False
+    return depth == 0
+
+
 def _clean_raw_name(raw: str) -> str:
-    """Strip surrounding whitespace and quote/guillemet wrappers."""
-    return (raw or "").strip().strip('"').strip("«»").strip()
+    """Strip surrounding whitespace and quote/guillemet WRAPPERS.
+
+    Only a pair enclosing the whole name is removed. A plain
+    ``strip("«»")`` used to eat the closing guillemet of an inner brand —
+    «ПАО «Детский мир»» became «ПАО «Детский мир» (2026-10-05). A lone
+    unbalanced edge guillemet (truncated LLM output, «Кондор+) is still
+    dropped.
+    """
+    name = (raw or "").strip()
+    changed = True
+    while changed and name:
+        changed = False
+        for opener, closer in (('"', '"'), ("«", "»")):
+            if _wraps_whole(name, opener, closer):
+                name, changed = name[1:-1].strip(), True
+        if name.startswith("«") and "»" not in name:
+            name, changed = name[1:].strip(), True
+        if name.endswith("»") and "«" not in name:
+            name, changed = name[:-1].strip(), True
+        if name.startswith('"') and name.count('"') == 1 or name.endswith('"') and name.count('"') == 1:
+            name, changed = name.strip('"').strip(), True
+    return name
 
 
 def _normalize_entity_name(raw: str) -> str:
@@ -226,6 +266,72 @@ def drop_unsupported_dates(relations: list[ParsedRelation], chunk_text: str) -> 
                 setattr(rel, attr, None)
                 dropped += 1
     return dropped
+
+
+def prompt_example_entity_names(texts: Iterable[str] | None = None) -> frozenset[str]:
+    """Entity names that appear in the extraction prompt's few-shot examples.
+
+    Collected from ``entity`` names, ``relation`` endpoints and ``event``
+    participants. Default: the shipped examples + the event instruction.
+    """
+    if texts is None:
+        from src.graph.lightrag_prompts import EVENT_INSTRUCTION, EXAMPLES_DEFAULT
+
+        texts = [*EXAMPLES_DEFAULT, EVENT_INSTRUCTION]
+    names: set[str] = set()
+    for text in texts:
+        for line in text.replace("{tuple_delimiter}", TUPLE_DELIM).splitlines():
+            fields = line.split(TUPLE_DELIM)
+            kind = fields[0].strip().strip('"').lower()
+            if kind == "entity" and len(fields) > 1:
+                raw = [fields[1]]
+            elif kind == "relation" and len(fields) > 2:
+                raw = [fields[1], fields[2]]
+            elif kind == "event" and len(fields) > 3:
+                raw = fields[3].split(";")
+            else:
+                continue
+            names.update(n for n in (_clean_raw_name(r) for r in raw) if n)
+    return frozenset(names)
+
+
+def drop_prompt_example_entities(
+    parsed: ParseResult, chunk_text: str, example_names: frozenset[str],
+) -> int:
+    """Drop entities copied from the prompt's few-shot examples; returns how
+    many entities were removed.
+
+    Anti-fabrication guard (sibling of ``drop_unsupported_dates``): a name
+    that exists in the examples but not in the chunk was not read from the
+    text — qwen3 emitted «ООО «Ромашка»» from the event example into a
+    criminal case (2026-10-05). Relations touching a dropped entity and its
+    event-participant mentions go with it. A name genuinely present in the
+    chunk is kept."""
+    haystack = (chunk_text or "").casefold()
+    example_keys = {_normalize_entity_name(n) for n in example_names}
+    leaked = {
+        _normalize_entity_name(e.name)
+        for e in parsed.entities
+        if _normalize_entity_name(e.name) in example_keys
+        and _clean_raw_name(e.name).casefold() not in haystack
+    }
+    for ev in parsed.events:
+        for p in ev.participants:
+            key = _normalize_entity_name(p)
+            if key in example_keys and _clean_raw_name(p).casefold() not in haystack:
+                leaked.add(key)
+    if not leaked:
+        return 0
+    before = len(parsed.entities)
+    parsed.entities = [e for e in parsed.entities if _normalize_entity_name(e.name) not in leaked]
+    parsed.relations = [
+        r for r in parsed.relations
+        if _normalize_entity_name(r.source_name) not in leaked
+        and _normalize_entity_name(r.target_name) not in leaked
+    ]
+    for ev in parsed.events:
+        ev.participants = [p for p in ev.participants if _normalize_entity_name(p) not in leaked]
+    return before - len(parsed.entities)
 
 
 # ── Event ts sanity gate ────────────────────────────────────────────

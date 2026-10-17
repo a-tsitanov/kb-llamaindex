@@ -61,7 +61,10 @@ x-app-env: &app-env
   ANALYTICS_ENV_NAME: ${ANALYTICS_ENV_NAME:-prod}
   # ── Optional feature toggles (off / conservative by default; flip to enable) ──
   CLASSIFIER_ENABLED: ${CLASSIFIER_ENABLED:-false}
-  AGENT_ER_USE_NATIVE_VECTOR_KNN: ${AGENT_ER_USE_NATIVE_VECTOR_KNN:-false}
+  # Cross-document ER: kNN over the ER vector index (Milvus entity_er_vec under
+  # nebula). `false` falls back to a Cypher window that nebula cannot run, so
+  # entities silently stop merging across documents.
+  AGENT_ER_USE_NATIVE_VECTOR_KNN: ${AGENT_ER_USE_NATIVE_VECTOR_KNN:-true}
   AGENT_COMMUNITY_MAX_LEVELS: ${AGENT_COMMUNITY_MAX_LEVELS:-1}
   AGENT_COMMUNITY_DYNAMIC_SELECTION: ${AGENT_COMMUNITY_DYNAMIC_SELECTION:-lexical}
   # Community-detection backend: "leidenalg" (in-worker leidenalg/igraph,
@@ -200,6 +203,14 @@ services:
 
   mcp-tools:
     <<: [*app-build]
+    # Graph / vector tools re-rank their results by relevance to the query with the BGE
+    # cross-encoder, so build WITH the `rerank` extra (CPU torch + baked model), like the
+    # worker. MCP_TOOLS_RERANK=false in the env turns ranking off.
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_EXTRAS: rerank
     command: ["python", "-m", "src.mcp.tools_server", "--transport", "http", "--port", "9002"]
     environment: *app-env
     ports:
@@ -225,6 +236,10 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
     restart: unless-stopped
+
+  # Lens (board, agent, web) moved to its own project ~/projects/lens (2026-10-08); it
+  # reaches this stack over MCP (kb-tools, kb-stats) and LiteLLM — see
+  # docs/mcp/kb-tools-contract.md.
 
   # ───────────────────────── backing services ────────────────────────
 

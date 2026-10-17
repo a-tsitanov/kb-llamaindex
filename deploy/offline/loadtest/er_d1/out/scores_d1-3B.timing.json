@@ -1,0 +1,26 @@
+{
+  "model": "/home/sentinel/models/d1-3B",
+  "dtype": "bf16",
+  "threads": 16,
+  "n_pairs": 3502,
+  "load_s": 0.5,
+  "single_latency_ms_median": 230.3,
+  "single_latency_ms_p90": 243.3,
+  "batched": {
+    "ru": {
+      "seconds": 636.6,
+      "pairs_per_s": 5.5,
+      "avg_tokens": 105.2
+    },
+    "en": {
+      "seconds": 607.6,
+      "pairs_per_s": 5.76,
+      "avg_tokens": 102.2
+    },
+    "ru_crit": {
+      "seconds": 1479.8,
+      "pairs_per_s": 2.37,
+      "avg_tokens": 225.2
+    }
+  }
+}

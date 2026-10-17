@@ -1,0 +1,102 @@
+# Home-level patch for the agent web UI (dsh web, offline cluster). Entries override shipped ones by id.
+
+# ── models: LiteLLM on srv02 → Qwen3.6-35B-A3B on vLLM 10.10.113.14 (131k ctx);
+#    fallback inside LiteLLM: CPU llama.cpp only (.15 retired 2026-10-14) ──
+- id: llm-pi-ai
+  name: '@deepseek-ai/dsh-llm-pi-ai'
+  config:
+    providers:
+      kb-litellm:
+        displayName: KB LiteLLM
+        apiKeyEnv: LITELLM_API_KEY
+        api: openai-completions
+        baseURL: http://10.10.113.12:4000/v1
+        models:
+          - id: large
+            name: Qwen3.6-35B-A3B (thinking)
+            contextWindow: 131072
+          - id: small
+            name: Qwen3.6-35B-A3B (fast)
+            contextWindow: 131072
+- id: agent-default-model
+  name: '@deepseek-ai/dsh-agent-default-model'
+  config:
+    provider: kb-litellm
+    model: large
+# DeepSeek cloud routes are unreachable offline — keep them out of the UI.
+- id: llm-deepseek
+  name: '@deepseek-ai/dsh-llm-deepseek-api-key'
+  disabled: true
+- id: llm-deepseek-account
+  name: '@deepseek-ai/dsh-llm-deepseek-account'
+  disabled: true
+
+# ── KB MCP servers on srv02 (Streamable HTTP, Bearer = one of API_KEYS) ──
+# New entries must go through `insert` (plain id-patches only modify shipped ones).
+- insert:
+    - id: mcp-kb-search
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: kb_search
+        transport: streamable-http
+        url: http://10.10.113.12:9001/mcp
+        headers:
+          Authorization: !!js '`Bearer ${process.env.KB_MCP_TOKEN}`'
+        toolCallTimeoutMs: 300000
+    - id: mcp-kb-tools
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: kb_tools
+        transport: streamable-http
+        url: http://10.10.113.12:9002/mcp
+        headers:
+          Authorization: !!js '`Bearer ${process.env.KB_MCP_TOKEN}`'
+        toolCallTimeoutMs: 300000
+    - id: mcp-kb-stats
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: kb_stats
+        transport: streamable-http
+        url: http://10.10.113.12:9003/mcp
+        headers:
+          Authorization: !!js '`Bearer ${process.env.KB_MCP_TOKEN}`'
+        toolCallTimeoutMs: 300000
+
+# ── KB upload: /kb-ingest, /kb-status, kb_ingest_file, kb_ingest_status ──
+- insert:
+    - id: kb-ingest
+      name: 'dsh-kb-ingest'
+      config:
+        webuiUrl: http://10.10.113.12:8090
+
+# ── browser login: one token visit per browser per year ──
+# The web UI cannot run without auth (no config switch; every RPC needs the
+# signed cookie). The signing secret lives in $DSH_HOME/.credentials.yaml on the
+# /data volume, so cookies survive restarts; only the cookie lifetime is raised.
+# A patch replaces the row's whole config, so trustedHosts is restated.
+- id: connection
+  name: '@deepseek-ai/dsh-client-connection'
+  config:
+    trustedHosts: !!js ctx.webRuntime.trustedHosts
+    cookieMaxAgeDays: 365
+
+# ── branding: KB brand occupants instead of the official DeepSeek ones ──
+# dsh-web-app ships `ui-brand-official` (sidebar mark + name); disable it and
+# insert the kb-brand plugin (deploy/offline/agent-web/plugin-brand, text set at
+# build time via BRAND_NAME/BRAND_SHORT). kb-brand also fills the empty-chat hero
+# mark (conversation.hero.brand.mark) that otherwise falls back to the whale.
+- id: ui-brand-official
+  disabled: true
+- insert:
+    - id: ui-brand-kb
+      name: 'kb-brand'
+# "powered by dsh" PR badge skill: already disabled in dsh-base, pinned here.
+- id: skill-badge
+  disabled: true
+
+# ── Russian UI: language pack kb-locale-ru (plugin-locale-ru/ru.json) ──
+# Adds "Русский" to Settings → General → Language and makes it the default
+# until a user picks another language.
+- insert:
+    - id: ui-locale-ru
+      name: 'kb-locale-ru'

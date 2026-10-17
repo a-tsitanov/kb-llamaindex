@@ -9,6 +9,7 @@ from loguru import logger
 from temporalio import activity
 
 from src.graph.store import build_graph_store
+from src.graph.watch_journal import record_watch_journals
 from src.tenancy.activity import resolve_graph_for_activity
 from src.workflow.contracts import GraphBuilt, Merged
 from src.workflow.heartbeat import heartbeat_every
@@ -134,9 +135,22 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
                 {"stage": "conflicts_resolved", "count": len(edge_conflicts)},
             )
 
+        created_pairs: list[tuple[str, str]] | None = None
         if relations:
-            await asyncio.to_thread(graph_store.upsert_relations, relations)
+            created_pairs = await asyncio.to_thread(
+                graph_store.upsert_relations, relations,
+            )
             activity.heartbeat({"stage": "relations_upserted", "count": len(relations)})
+
+        # Entity-watch journals: every entity of this document + the pairs
+        # the write just created. Fail-open inside — never fails the build.
+        ctx = merged.kg.parsed.ctx
+        from src.storage.watch import WatchRepository
+
+        await record_watch_journals(
+            WatchRepository(), entities, relations, created_pairs,
+            doc_id=ctx.doc_id, doc_date_epoch=ctx.doc_date_epoch, backfill=ctx.backfill,
+        )
 
         if edge_conflicts:
             # Audit trail for the beliefs this write retired / rejected. The
