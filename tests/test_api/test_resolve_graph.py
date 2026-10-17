@@ -6,24 +6,25 @@ from src.tenancy.api_keys import ApiKeyRecord
 from src.tenancy.context import new_graph_context
 from src.tenancy.registry import GraphNotFound, GraphNotReady
 
-ONE = ApiKeyRecord(owner="a", graph_ids=("acme",), is_admin=False)
-TWO = ApiKeyRecord(owner="a", graph_ids=("acme", "acme_hr"), is_admin=False)
-ADMIN = ApiKeyRecord(owner="ops", graph_ids=("default",), is_admin=True)
+ONE = ApiKeyRecord(owner="a")
 
 
+# Spec amendment 2026-10-17: the graph is chosen ONLY by X-Graph (absent ->
+# default); there is no per-key authorization at this layer.
 @pytest.mark.parametrize(
-    ("key", "hdr", "expected"),
-    [(ONE, None, "acme"), (ONE, "acme", "acme"), (TWO, "acme_hr", "acme_hr"), (ADMIN, None, "default"), (ADMIN, "acme", "acme")],
+    ("hdr", "expected"),
+    [(None, "default"), ("acme", "acme"), ("acme_hr", "acme_hr"), ("other", "other"), ("default", "default")],
 )
-def test_choose_graph_ok(key, hdr, expected):
-    assert graph_dep.choose_graph_id(key, hdr) == expected
+def test_choose_graph_ok(hdr, expected):
+    assert graph_dep.choose_graph_id(hdr) == expected
 
 
-@pytest.mark.parametrize(("key", "hdr", "code"), [(TWO, None, 400), (ONE, "other", 403), (ONE, "Bad;Id", 403)])
-def test_choose_graph_errors(key, hdr, code):
+@pytest.mark.parametrize("hdr", ["Bad;Id", "", "UPPER", "../x"])
+def test_choose_graph_invalid_slug_is_400(hdr):
     with pytest.raises(HTTPException) as ei:
-        graph_dep.choose_graph_id(key, hdr)
-    assert ei.value.status_code == code
+        graph_dep.choose_graph_id(hdr)
+    assert ei.value.status_code == 400
+    assert ei.value.detail == "invalid X-Graph"
 
 
 class _Reg:
@@ -39,14 +40,14 @@ class _Reg:
 async def test_resolve_graph_maps_registry_errors(monkeypatch):
     monkeypatch.setattr(graph_dep, "get_graph_registry", lambda: _Reg(GraphNotFound("acme")))
     with pytest.raises(HTTPException) as ei:
-        await graph_dep.resolve_graph(ONE, None)
+        await graph_dep.resolve_graph(ONE, "acme")
     assert ei.value.status_code == 404
     monkeypatch.setattr(graph_dep, "get_graph_registry", lambda: _Reg(GraphNotReady("acme", "deleting")))
     with pytest.raises(HTTPException) as ei:
-        await graph_dep.resolve_graph(ONE, None)
+        await graph_dep.resolve_graph(ONE, "acme")
     assert ei.value.status_code == 409
     monkeypatch.setattr(graph_dep, "get_graph_registry", lambda: _Reg(new_graph_context("acme")))
-    assert (await graph_dep.resolve_graph(ONE, None)).id == "acme"
+    assert (await graph_dep.resolve_graph(ONE, "acme")).id == "acme"
 
 
 async def test_require_api_key_statuses(monkeypatch):

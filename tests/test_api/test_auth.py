@@ -30,8 +30,8 @@ async def test_invalid_key_returns_403() -> None:
 
 @pytest.mark.asyncio
 async def test_valid_key_returns_key() -> None:
-    # Env API_KEYS resolve via the legacy fallback (R-A3) to an admin record
-    # bound to the default graph.
+    # Env API_KEYS resolve via the legacy fallback (R-A3); the record only
+    # authenticates (no graph binding / admin flag — amendment 2026-10-17).
     valid = settings.api.keys_list[0]
     out = await require_api_key(x_api_key=valid)
-    assert out == ApiKeyRecord(owner="legacy-env", graph_ids=("default",), is_admin=True)
+    assert out == ApiKeyRecord(owner="legacy-env")

@@ -315,14 +315,13 @@ CREATE TABLE IF NOT EXISTS public.graphs (
 );
 """
 
-# API keys, sha256-hashed at rest — never the raw key.  Also global (public),
-# since a key can span multiple graphs (`graph_ids`).
+# API keys, sha256-hashed at rest — never the raw key.  Global (public): a key
+# authenticates only and is not bound to any graph (graph = X-Graph header;
+# per-graph authorization is another layer — spec amendment 2026-10-17).
 _API_KEYS_DDL = """
 CREATE TABLE IF NOT EXISTS public.api_keys (
     key_hash    TEXT PRIMARY KEY,
     owner       TEXT NOT NULL,
-    graph_ids   TEXT[] NOT NULL DEFAULT '{}',
-    is_admin    BOOLEAN NOT NULL DEFAULT false,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 """
@@ -330,7 +329,7 @@ CREATE TABLE IF NOT EXISTS public.api_keys (
 
 def _bootstrap_registry(cur) -> None:
     """Idempotent: register `default` under its legacy names and the env
-    API_KEYS as admin keys for `default`."""
+    API_KEYS as `legacy-env` keys."""
     from src.tenancy.api_keys import hash_api_key
     from src.tenancy.context import default_graph_context
 
@@ -347,8 +346,8 @@ def _bootstrap_registry(cur) -> None:
     ]
     for key_hash in env_hashes:
         cur.execute(
-            "INSERT INTO public.api_keys (key_hash, owner, graph_ids, is_admin) "
-            "VALUES (%s, 'legacy-env', ARRAY['default'], true) ON CONFLICT (key_hash) DO NOTHING",
+            "INSERT INTO public.api_keys (key_hash, owner) "
+            "VALUES (%s, 'legacy-env') ON CONFLICT (key_hash) DO NOTHING",
             (key_hash,),
         )
     # R-P7: API_KEYS is the source of truth for legacy-env rows — a key

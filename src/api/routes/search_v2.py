@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 from temporalio.common import WorkflowIDReusePolicy
 
-from src.api.auth import require_admin
+from src.api.auth import require_api_key
 from src.api.graph_dep import resolve_graph
 from src.config import settings
 from src.models.search import DocumentRef, SearchRequest, SearchResponse, SourceCitation
@@ -290,7 +290,7 @@ async def search_auto(
 
 @router.post(
     "/admin/communities/rebuild",
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_api_key)],
     status_code=status.HTTP_202_ACCEPTED,
     summary="Trigger offline graph-community build (GDS Leiden + summaries)",
 )

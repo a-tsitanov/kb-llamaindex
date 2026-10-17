@@ -6,29 +6,29 @@ from fastapi import Depends, Header, HTTPException, status
 
 from src.api.auth import require_api_key
 from src.tenancy.api_keys import ApiKeyRecord
-from src.tenancy.context import GraphContext, InvalidGraphId, validate_graph_id
+from src.tenancy.context import DEFAULT_GRAPH_ID, GraphContext, InvalidGraphId, validate_graph_id
 from src.tenancy.registry import GraphNotFound, GraphNotReady, get_graph_registry
 
 
-def choose_graph_id(key: ApiKeyRecord, x_graph: str | None) -> str:
+def choose_graph_id(x_graph: str | None) -> str:
+    """Graph selection is by ``X-Graph`` only (absent -> ``default``).
+
+    No per-key authorization here: any valid key may use any graph
+    (spec amendment 2026-10-17)."""
     if x_graph is None:
-        if len(key.graph_ids) == 1:
-            return key.graph_ids[0]
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "X-Graph header required for this key")
+        return DEFAULT_GRAPH_ID
     try:
         validate_graph_id(x_graph)
     except InvalidGraphId:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "graph not allowed for this key") from None
-    if key.is_admin or x_graph in key.graph_ids:
-        return x_graph
-    raise HTTPException(status.HTTP_403_FORBIDDEN, "graph not allowed for this key")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid X-Graph") from None
+    return x_graph
 
 
 async def resolve_graph(
-    key: ApiKeyRecord = Depends(require_api_key),
+    _key: ApiKeyRecord = Depends(require_api_key),
     x_graph: str | None = Header(default=None, alias="X-Graph"),
 ) -> GraphContext:
-    gid = choose_graph_id(key, x_graph)
+    gid = choose_graph_id(x_graph)
     try:
         return await get_graph_registry().get(gid)
     except GraphNotFound:

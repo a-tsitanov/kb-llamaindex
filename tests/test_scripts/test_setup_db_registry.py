@@ -14,6 +14,12 @@ def test_global_ddl_creates_registry_tables_in_public():
     assert "CREATE TABLE IF NOT EXISTS public.api_keys" in setup_db._API_KEYS_DDL
 
 
+def test_api_keys_ddl_has_no_authorization_columns():
+    # Spec amendment 2026-10-17: keys authenticate only.
+    assert "graph_ids" not in setup_db._API_KEYS_DDL
+    assert "is_admin" not in setup_db._API_KEYS_DDL
+
+
 def test_bootstrap_inserts_default_row_idempotently(monkeypatch):
     cur = _Cur()
     monkeypatch.setattr(setup_db.settings.api, "keys", "k1,k2", raising=False)
@@ -23,6 +29,10 @@ def test_bootstrap_inserts_default_row_idempotently(monkeypatch):
     key_inserts = [p for s, p in cur.sql if "INSERT INTO public.api_keys" in s]
     assert len(key_inserts) == 2
     assert all("ON CONFLICT (key_hash) DO NOTHING" in s for s, _ in cur.sql if "public.api_keys" in s and "INSERT" in s)
+    for s, _ in cur.sql:
+        if "INSERT INTO public.api_keys" in s:
+            assert "graph_ids" not in s and "is_admin" not in s
+            assert "'legacy-env'" in s
 
 
 def _deletes(cur):

@@ -286,3 +286,29 @@ re-deploy.
 - Cross-graph search / client → graphs hierarchy.
 - Per-graph wiki / Wikibase.
 - Per-bot-user graph selection.
+
+## Amendment 2026-10-17 — keys authenticate only
+
+User decision, supersedes parts of D1 and the auth sections above:
+
+- **D1 "an API key grants a list of graphs" is withdrawn.** There is no
+  per-key graph authorization in this service. Any valid API key may read and
+  write **any** graph; per-graph access control belongs to a separate layer
+  (out of scope here).
+- **Admin gating is withdrawn.** No admin keys: `is_admin` and `graph_ids` are
+  dropped from `public.api_keys` (now `key_hash`, `owner`, `created_at`) and
+  from `ApiKeyRecord` (`owner` only). Admin endpoints (`/admin/graph/*`,
+  `/admin/wiki/*`, `/admin/monitor/*`, `POST /api/v1/admin/communities/rebuild`)
+  require just a valid key.
+- **Graph selection (HTTP):** only the `X-Graph` header; absent → `default`.
+  Missing key → 401, invalid key → 403, invalid slug → 400 `invalid X-Graph`,
+  unknown graph → 404, not `ready` → 409. The "key has several graphs → 400"
+  and "graph not in key's list → 403" rows of the table above no longer apply.
+- **Graph selection (MCP):** `X-Graph` header if present, else `KB_MCP_GRAPH`
+  (default `default`) — the same for HTTP with or without auth and for stdio.
+  The token verifier validates the key only (claims: `owner`). Invalid /
+  unknown / not-ready graph → `ToolError`.
+- Unchanged: env `API_KEYS` stay valid (legacy fallback, pruned by
+  `owner='legacy-env'` in `setup_db`); default-only feature limits (wiki,
+  monitor 409; Wikibase skip; entity-watch `ToolError`) — those are feature
+  limits, not authorization.

@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from temporalio.common import WorkflowIDReusePolicy
 
-from src.api.auth import require_admin
+from src.api.auth import require_api_key
 from src.api.graph_dep import resolve_graph
 from src.config import settings
 from src.graph.alerts import mark_watched
@@ -17,7 +17,7 @@ from src.workflow.monitor.workflow import MonitorSweepWorkflow
 from src.workflow.wiki.wiki_sweep import WikiSweepWorkflow
 
 router = APIRouter(
-    prefix="/admin/wiki", tags=["admin"], dependencies=[Depends(require_admin)],
+    prefix="/admin/wiki", tags=["admin"], dependencies=[Depends(require_api_key)],
 )
 
 
@@ -55,7 +55,7 @@ def _require_default_graph_for_monitor(graph: GraphContext) -> None:
 
 
 monitor_router = APIRouter(
-    prefix="/admin/monitor", tags=["admin"], dependencies=[Depends(require_admin)],
+    prefix="/admin/monitor", tags=["admin"], dependencies=[Depends(require_api_key)],
 )
 
 

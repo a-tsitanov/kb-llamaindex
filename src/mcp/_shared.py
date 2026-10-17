@@ -8,12 +8,12 @@ from typing import Any
 from fastapi import HTTPException
 from fastmcp.exceptions import ToolError
 from fastmcp.server.auth import AccessToken, TokenVerifier
-from fastmcp.server.dependencies import get_access_token, get_http_headers
+from fastmcp.server.dependencies import get_http_headers
 from loguru import logger
 
 from src.api.graph_dep import choose_graph_id
 from src.config import settings
-from src.tenancy.api_keys import ApiKeyRecord, get_api_key_store
+from src.tenancy.api_keys import get_api_key_store
 from src.tenancy.context import DEFAULT_GRAPH_ID, GraphContext
 from src.tenancy.registry import GraphNotFound, GraphNotReady, get_graph_registry
 
@@ -82,9 +82,10 @@ class RegistryTokenVerifier(TokenVerifier):
     """Bearer token = API key, looked up in the API-key registry
     (``public.api_keys`` with the legacy env ``API_KEYS`` fallback).
 
-    The resulting ``AccessToken.claims`` carry the key's graphs so every
-    tool call can bind itself to one graph via :func:`current_graph`
-    (R-A4)."""
+    Authentication only: the token is not bound to any graph.  The graph
+    is chosen per request by :func:`current_graph` (``X-Graph`` header);
+    per-graph authorization lives in another layer (spec amendment
+    2026-10-17)."""
 
     async def verify_token(self, token: str) -> AccessToken | None:
         rec = await get_api_key_store().lookup(token)
@@ -94,16 +95,13 @@ class RegistryTokenVerifier(TokenVerifier):
             token=token,
             client_id=rec.owner,
             scopes=[],
-            claims={
-                "owner": rec.owner,
-                "graph_ids": list(rec.graph_ids),
-                "is_admin": rec.is_admin,
-            },
+            claims={"owner": rec.owner},
         )
 
 
 def _configured_mcp_graph() -> str:
-    """Graph used when there is no access token (stdio / auth disabled).
+    """Graph used when the request carries no ``X-Graph`` header
+    (stdio, or an HTTP client that does not send one).
 
     Read from ``KB_MCP_GRAPH`` the same way ``KB_MCP_REQUIRE_AUTH`` is
     (plain env, not a settings field); default ``"default"``."""
@@ -113,28 +111,20 @@ def _configured_mcp_graph() -> str:
 async def current_graph() -> GraphContext:
     """Resolve the graph this tool call is bound to.
 
-    * HTTP with a verified token: same rules as the REST API
-      (``choose_graph_id`` over the token's claims + ``X-Graph`` header).
-    * No token (stdio, or auth disabled): the configured ``KB_MCP_GRAPH``.
+    Graph = ``X-Graph`` request header if present, else ``KB_MCP_GRAPH``
+    (default ``"default"``).  Same for HTTP with or without auth; stdio has
+    no HTTP request, hence no header, hence ``KB_MCP_GRAPH``.  The token
+    (if any) only authenticates — it never restricts the graph.
 
     The graph is always resolved through the registry.  Every refusal
-    raises ``ToolError`` — there is no silent fallback to the default
-    graph (R-A4)."""
-    tok = get_access_token()
-    if tok is None:
+    (invalid slug, unknown graph, not ready) raises ``ToolError`` — there
+    is no silent fallback to the default graph (R-A4)."""
+    x_graph = get_http_headers(include={"x-graph"}).get("x-graph")
+    if x_graph is None:
         gid = _configured_mcp_graph()
     else:
-        c = tok.claims or {}
-        if "graph_ids" not in c:
-            raise ToolError("access token carries no graph claims")
-        key = ApiKeyRecord(
-            owner=str(c.get("owner", "")),
-            graph_ids=tuple(c["graph_ids"]),
-            is_admin=bool(c.get("is_admin", False)),
-        )
-        headers = get_http_headers(include={"x-graph"})
         try:
-            gid = choose_graph_id(key, headers.get("x-graph"))
+            gid = choose_graph_id(x_graph)
         except HTTPException as exc:
             raise ToolError(str(exc.detail)) from None
     try:
@@ -152,7 +142,7 @@ def build_sse_auth() -> RegistryTokenVerifier | None:
     on and env API keys exist; otherwise ``None`` (auth disabled —
     stdio/desktop usage).  The verifier validates the incoming
     ``Authorization: Bearer <key>`` header against the API-key registry
-    (DB keys + legacy env keys) and carries the key's graphs as claims.
+    (DB keys + legacy env keys); it authenticates only (no graph claims).
     Enforced only on HTTP/SSE transports; stdio is unaffected.
 
     The result is computed once at import time (when the server module

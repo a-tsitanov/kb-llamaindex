@@ -1,4 +1,8 @@
-"""API key lookup (``public.api_keys``, sha256-hashed) with legacy env fallback (R-A3)."""
+"""API key lookup (``public.api_keys``, sha256-hashed) with legacy env fallback (R-A3).
+
+Authentication only: a valid key may use ANY graph (graph chosen by the
+``X-Graph`` header).  Per-graph authorization lives in another layer
+(spec amendment 2026-10-17)."""
 
 from __future__ import annotations
 
@@ -10,14 +14,11 @@ from dataclasses import dataclass
 from loguru import logger
 
 from src.config import settings
-from src.tenancy.context import DEFAULT_GRAPH_ID
 
 
 @dataclass(frozen=True)
 class ApiKeyRecord:
     owner: str
-    graph_ids: tuple[str, ...]
-    is_admin: bool
 
 
 def hash_api_key(raw: str) -> str:
@@ -34,7 +35,7 @@ async def _load_key_row(key_hash: str) -> dict | None:
     # blocking the request for the pool's default wait.
     async with pool.connection(timeout=1) as conn, conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(
-            "SELECT owner, graph_ids, is_admin FROM public.api_keys WHERE key_hash = %s",
+            "SELECT owner FROM public.api_keys WHERE key_hash = %s",
             (key_hash,),
         )
         return await cur.fetchone()
@@ -65,11 +66,9 @@ class ApiKeyStore:
             logger.warning("api key lookup failed; falling back to env API_KEYS: {e}", e=exc)
             row = None
         if row is not None:
-            rec: ApiKeyRecord | None = ApiKeyRecord(
-                owner=row["owner"], graph_ids=tuple(row["graph_ids"] or ()), is_admin=bool(row["is_admin"])
-            )
+            rec: ApiKeyRecord | None = ApiKeyRecord(owner=row["owner"])
         elif raw_key in settings.api.keys_list:
-            rec = ApiKeyRecord(owner="legacy-env", graph_ids=(DEFAULT_GRAPH_ID,), is_admin=True)
+            rec = ApiKeyRecord(owner="legacy-env")
         else:
             rec = None
         self._cache[h] = (now, rec)

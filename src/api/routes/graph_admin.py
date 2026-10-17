@@ -16,14 +16,14 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from src.api.auth import require_admin
+from src.api.auth import require_api_key
 from src.api.graph_dep import resolve_graph
 from src.config import settings
 from src.graph import analysis
 from src.tenancy.context import GraphContext, graph_scoped_id
 
 router = APIRouter(
-    prefix="/admin/graph", tags=["admin"], dependencies=[Depends(require_admin)],
+    prefix="/admin/graph", tags=["admin"], dependencies=[Depends(require_api_key)],
 )
 
 

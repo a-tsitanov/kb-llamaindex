@@ -38,8 +38,8 @@ def test_build_sse_auth_builds_verifier_with_keys(monkeypatch):
 
 
 async def test_registry_verifier_accepts_legacy_env_key(monkeypatch):
-    """An env API_KEYS key still authenticates (registry env fallback) and
-    is bound to the default graph as an admin key."""
+    """An env API_KEYS key still authenticates (registry env fallback).
+    Claims carry only the owner — no graph binding (amendment 2026-10-17)."""
     from src.tenancy import api_keys
 
     async def _no_row(_h):
@@ -54,7 +54,7 @@ async def test_registry_verifier_accepts_legacy_env_key(monkeypatch):
     tok = await _shared.RegistryTokenVerifier().verify_token("secret-key")
     assert tok is not None
     assert tok.client_id == "legacy-env"
-    assert tok.claims == {"owner": "legacy-env", "graph_ids": ["default"], "is_admin": True}
+    assert tok.claims == {"owner": "legacy-env"}
     assert await _shared.RegistryTokenVerifier().verify_token("wrong") is None
 
 

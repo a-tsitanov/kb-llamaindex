@@ -387,7 +387,7 @@ uv run python -m scripts.setup_db
 * Регистрирует граф `default` (статус `ready`, прежние физические имена: space
   `kb`, схема `public`, коллекции `MILVUS_COLLECTION` / `entity_er_vec` /
   `community_report_vec`) и заносит каждый ключ из env `API_KEYS` в
-  `public.api_keys` как admin-ключ графа `default`. Оба шага идемпотентны
+  `public.api_keys` (`owner = 'legacy-env'`). Оба шага идемпотентны
   (`ON CONFLICT DO NOTHING`) — существующие строки не перезаписываются.
   Затем удаляет из `public.api_keys` строки `owner = 'legacy-env'`, хэша
   которых больше нет в `API_KEYS`: ротация или удаление ключа в `API_KEYS`
@@ -428,18 +428,18 @@ SELECT nspname FROM pg_namespace WHERE nspname = current_user;
 
 | Что | Поведение |
 |---|---|
-| `X-Graph: <id>` (HTTP API и MCP по HTTP/SSE) | Выбирает граф запроса. Без заголовка — единственный граф ключа; ключу с несколькими графами заголовок обязателен (иначе 400). Граф не из `graph_ids` ключа → 403 (admin-ключ может выбрать любой); неизвестный → 404; не `ready` → 409. Env-ключи из `API_KEYS` привязаны к `default`, так что существующим клиентам заголовок не нужен. |
-| `/admin/wiki/*`, `/admin/monitor/*` | Теперь требуют **admin** `X-API-Key` (раньше были без аутентификации). Работают только для `default`, для другого графа — 409. |
-| `/admin/graph/*`, `POST /api/v1/admin/communities/rebuild` | Требуют **admin**-ключ (раньше хватало любого валидного). |
-| Env-ключи `API_KEYS` | По-прежнему работают: ключ, которого нет в `public.api_keys`, но есть в `API_KEYS`, = admin графа `default`. Отзыв/ротация ключа — убрать его из `API_KEYS` и перезапустить `setup_db` (строка `legacy-env` удаляется; кэш ≤30 с). |
+| `X-API-Key` / Bearer | **Только аутентификация**: любой валидный ключ может читать/писать **любой** граф. Привязки ключа к графам и admin-ключей нет; авторизация по графам — задача другого слоя (вне этого сервиса). |
+| `X-Graph: <id>` (HTTP API и MCP по HTTP/SSE) | Единственный способ выбрать граф. Без заголовка — `default` (MCP: `KB_MCP_GRAPH`, по умолчанию `default`), так что существующим клиентам заголовок не нужен. Невалидный id → 400 `invalid X-Graph` (MCP — `ToolError`); неизвестный → 404; не `ready` → 409. |
+| `/admin/wiki/*`, `/admin/monitor/*` | Теперь требуют валидный `X-API-Key` (раньше были без аутентификации; любой валидный ключ). Работают только для `default`, для другого графа — 409. |
+| `/admin/graph/*`, `POST /api/v1/admin/communities/rebuild` | Требуют любой валидный ключ (как и раньше). |
+| Env-ключи `API_KEYS` | По-прежнему работают: ключ, которого нет в `public.api_keys`, но есть в `API_KEYS`, валиден. Отзыв/ротация ключа — убрать его из `API_KEYS` и перезапустить `setup_db` (строка `legacy-env` удаляется; кэш ≤30 с). |
 
 **Новые env-переменные:**
 
 * `BOT_GRAPH` (по умолчанию `default`) — граф Telegram-бота; уходит заголовком
-  `X-Graph` в каждом запросе бота к API. Ключ бота должен иметь доступ к этому
-  графу.
-* `KB_MCP_GRAPH` (по умолчанию `default`) — граф MCP-сервера, когда токена нет
-  (stdio или `KB_MCP_REQUIRE_AUTH=false`). Читается напрямую из окружения
+  `X-Graph` в каждом запросе бота к API.
+* `KB_MCP_GRAPH` (по умолчанию `default`) — граф MCP-сервера, когда в запросе
+  нет заголовка `X-Graph` (stdio — всегда; HTTP с токеном или без). Читается напрямую из окружения
   процесса (как `KB_MCP_REQUIRE_AUTH`), не через settings — поэтому его нет в
   `.env.reference`. См. [`runbook/mcp.md` §6.1](runbook/mcp.md#61-граф-вызова-x-graph--kb_mcp_graph).
 

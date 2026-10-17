@@ -1,16 +1,16 @@
 # Graph Report - tenant  (2026-10-17)
 
 ## Corpus Check
-- 917 files · ~1,152,922 words
+- 917 files · ~1,153,610 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 11534 nodes · 22261 edges · 1089 communities (552 shown, 537 thin omitted)
+- 11546 nodes · 22279 edges · 1089 communities (553 shown, 536 thin omitted)
 - Extraction: 95% EXTRACTED · 5% INFERRED · 0% AMBIGUOUS · INFERRED: 1087 edges (avg confidence: 0.65)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `c5e30df5`
+- Built from commit: `bdafa754`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1061,7 +1061,7 @@
 ## God Nodes (most connected - your core abstractions)
 1. `GraphContext` - 182 edges
 2. `entity_vid()` - 161 edges
-3. `default_graph_context()` - 132 edges
+3. `default_graph_context()` - 134 edges
 4. `PrimitiveResult` - 123 edges
 5. `_q()` - 109 edges
 6. `AsyncPostgres` - 97 edges
@@ -1111,71 +1111,71 @@
 - **doc_group used in search filter, rerank, and synthesis** — docs_superpowers_specs_2026_07_21_channel_groups_design_group_search_filter, docs_superpowers_specs_2026_07_21_channel_groups_design_group_weights, docs_superpowers_specs_2026_07_21_channel_groups_design_synthesis_group_context [EXTRACTED 1.00]
 - **Shared AsyncPostgres aggregation consumed by HTTP route and CLI** — docs_superpowers_specs_2026_07_23_channel_message_stats_design_status_counts_by, docs_superpowers_specs_2026_07_23_channel_message_stats_design_stats_router, docs_superpowers_specs_2026_07_23_channel_message_stats_design_message_stats_cli [EXTRACTED 1.00]
 
-## Communities (1089 total, 537 thin omitted)
+## Communities (1089 total, 536 thin omitted)
 
 ### Community 0 - "test_workflow: test_search_community.py"
 Cohesion: 0.04
-Nodes (80): FastAPI, Bind each HTTP request to exactly one graph (spec §2)., resolve_graph(), lifespan(), FastAPI app entry point.  Wires routes, CORS, and the dishka DI container.  Inge, download_document(), `GET /api/v1/documents/{doc_id}` — download the original source file.  Streams a, find_entities() (+72 more)
+Nodes (91): Composed, main(), pass_aliases(), pass_liveness(), pass_names(), _pg(), plan_aliases(), Any (+83 more)
 
 ### Community 1 - "test_graph: entity_vid()"
-Cohesion: 0.07
-Nodes (45): entity_vid(), Stable 128-bit VID as a 32-char hex string from an entity name.      read/write, _FakeNode, _FakePath, _FakeRel, _FakeVal, _NebulaRaisingStore, _NebulaRecStore (+37 more)
+Cohesion: 0.06
+Nodes (55): entity_vid(), Stable 128-bit VID as a 32-char hex string from an entity name.      read/write, _FakeNode, _FakePath, _FakeRel, _FakeVal, _NebulaRaisingStore, _NebulaRecStore (+47 more)
 
 ### Community 2 - "test_graph: test_lightrag_parse.py"
 Cohesion: 0.04
-Nodes (100): _default_entity_types(), LightRAG-style KG extractor as a LlamaIndex `TransformComponent`.  One LLM call, Pull entity-type strings out of `src.graph.schema.EntityType`., _clean_raw_name(), _correct_entity_label(), _display_entity_name(), drop_prompt_example_entities(), drop_unsupported_dates() (+92 more)
+Nodes (85): _clean_raw_name(), _correct_entity_label(), _display_entity_name(), drop_prompt_example_entities(), drop_unsupported_dates(), ensure_orphan_entities(), _first_keyword(), _normalize_entity_name() (+77 more)
 
 ### Community 3 - "workflow: get_llm_pool()"
-Cohesion: 0.05
-Nodes (65): Input to the ``rerank_sources`` activity (Search R5).      The merged graph+vect, RerankParams, append_unranked_remainder(), prepare_rerank_pool(), ``rerank_sources`` activity — unified graph+vector rerank (R5).  The orchestrato, Map an unbounded logit to (0, 1). Clamped against ``math.exp``     overflow on p, Nothing-lost safety net for the cached cross-encoder's fixed     ``_RERANK_SCORE, Co-rank the merged graph+vector pool, return reranked top-N. (+57 more)
+Cohesion: 0.06
+Nodes (61): Input to the ``rerank_sources`` activity (Search R5).      The merged graph+vect, RerankParams, append_unranked_remainder(), prepare_rerank_pool(), ``rerank_sources`` activity — unified graph+vector rerank (R5).  The orchestrato, Map an unbounded logit to (0, 1). Clamped against ``math.exp``     overflow on p, Nothing-lost safety net for the cached cross-encoder's fixed     ``_RERANK_SCORE, Co-rank the merged graph+vector pool, return reranked top-N. (+53 more)
 
 ### Community 4 - "test_ingestion: test_translate_transform.py"
-Cohesion: 0.08
-Nodes (46): DocumentTranslateTransform, _drop_doc_translation_metadata(), _exclude_doc_translation_metadata(), _looks_russian(), Any, BaseNode, TransformComponent, Per-chunk translation step that normalises ingest input to Russian without losin (+38 more)
+Cohesion: 0.09
+Nodes (41): DocumentTranslateTransform, _looks_russian(), TransformComponent, Per-chunk translation step that normalises ingest input to Russian without losin, Pipeline step that fills `node.metadata["translated_text"]`     with a Russian r, Cut the translation span corresponding to one original chunk.      Strategy:, Slice `text` into ≤ `threshold`-char windows on paragraph     boundaries; recurs, Pre-splitter step that translates each input Document to     Russian in one (or (+33 more)
 
 ### Community 5 - "test_make_env.py"
 Cohesion: 0.07
 Nodes (70): Line, Blank, build_reference(), build_values(), Comment, EnvVar, gen_secret(), _int() (+62 more)
 
 ### Community 6 - "retrieval: BoundedLLM"
-Cohesion: 0.05
-Nodes (27): default_graph_context(), The pre-multi-graph deployment, under its existing physical names., Pytest-asyncio mode is set globally in pyproject.toml.  Project-wide fixtures la, CommunityReportVectorStore factory: always the Milvus impl (DB-free)., test_factory_returns_milvus(), EntityVectorStore factory: always the Milvus impl (DB-free)., test_factory_returns_milvus(), Every graph-ops factory returns the Nebula implementation; no Neo4j class remain (+19 more)
+Cohesion: 0.12
+Nodes (22): get_llm_pool(), Lane, LLMPool, Any, Per-process LLM concurrency pool - single home for LLM gating (K+N).  ONE ``asyn, Test hook - drop the singleton so the next get_llm_pool rebuilds., A named counting async gate: bounded concurrency + an in_use counter.      Usabl, Registry of role -> gated LLM, all sharing ONE global N semaphore. (+14 more)
 
 ### Community 7 - "test_workflow: graph_admin.py"
-Cohesion: 0.10
-Nodes (35): CentralityIn, LinkPredictionIn, MaterializeParams, MaterializeResult, RiskIn, StageResult, AnalyticsMaterializeWorkflow, AnalyticsMaterializeWorkflow — offline GDS materialization pipeline.  Sequence: (+27 more)
+Cohesion: 0.09
+Nodes (36): CentralityIn, LinkPredictionIn, MaterializeParams, MaterializeResult, RiskIn, StageResult, Activity input models whose activity touches per-graph storage.  Every model lis, AnalyticsMaterializeWorkflow (+28 more)
 
 ### Community 8 - "test_graph: test_communities.py"
-Cohesion: 0.08
-Nodes (46): _coarsest_from_rows(), detect_communities(), detect_hierarchy(), _group_by_levels(), members_hash(), Any, CommunityRef, Group the COARSEST dendrogram column (today's ``communityId``) into     ``Commun (+38 more)
+Cohesion: 0.09
+Nodes (42): _coarsest_from_rows(), detect_communities(), detect_hierarchy(), _graphscope_rows(), _group_by_levels(), members_hash(), Any, CommunityRef (+34 more)
 
 ### Community 9 - "workflow: orchestrator.py"
-Cohesion: 0.07
-Nodes (69): AgenticStepStatDict, OrchestratorParams, PlanParams, PlanResult, Output of ``synthesize_answer``., Input to the ``plan_subquestions`` activity.      Decomposes a compound question, Output of ``plan_subquestions`` — always ≥1 sub-question     (``[query]`` for at, Output of ``retrieve_subquestion`` — sources gathered for one     sub-question, (+61 more)
+Cohesion: 0.05
+Nodes (88): AgenticStepStatDict, CommunityBuildResult, ContextualizeParams, ContextualizeResult, CoverageParams, _Frozen, OrchestratorParams, PlanParams (+80 more)
 
 ### Community 10 - "test_workflow: IngestParams"
 Cohesion: 0.06
 Nodes (30): Any, AsyncConnection, Async wrapper over the entity-watch tables of one graph (its schema)., vid -> name of every entity anyone watches., Insert events (dedup on key) and advance the journal cursor, atomically., WatchRepository, _Conn, _Cur (+22 more)
 
 ### Community 11 - "test_api: search_v2.py"
-Cohesion: 0.12
-Nodes (33): _global_params(), _local_params(), Build the GraphRAG global map-reduce workflow input., Build the local plan-execute workflow input from the request.      ISO date boun, ConversationTurn, Search request shared by all ``/api/v1/search/*`` endpoints.      The mode is se, SearchRequest, test_search_request_accepts_history() (+25 more)
+Cohesion: 0.10
+Nodes (36): _global_params(), _local_params(), Build the GraphRAG global map-reduce workflow input., Log loudly when a client sends a reserved (unimplemented) filter, so a     silen, Build the local plan-execute workflow input from the request.      ISO date boun, _warn_reserved_filters(), ConversationTurn, Search request shared by all ``/api/v1/search/*`` endpoints.      The mode is se (+28 more)
 
 ### Community 12 - "test_ingestion: extract_identifiers()"
 Cohesion: 0.08
 Nodes (62): extract_identifiers(), Run every detector on ``text``; return matches sorted by span.      Multiple occ, _by_type(), Unit tests for ``src/ingestion/identifiers.py``.  Coverage goals:   * One happy-, Body-text 'no symptoms' / 'no warranties' must not match —     the regex earlier, `No. SYMPTOMS` should not match — captured token has no digit., Legit `No. 17-K` style references must still extract., test_amount() (+54 more)
 
 ### Community 13 - "test_workflow: contracts.py"
-Cohesion: 0.13
-Nodes (20): DeliverIn, DeliverResult, MonitorResult, Entity-watch sweep tally (events detected, by kind)., SweepResult, WatchSweepResult, MonitorSweepWorkflow, Arc 2 monitoring sweep — one-shot MonitorSweepWorkflow.  Builds MonitorIn from s (+12 more)
+Cohesion: 0.12
+Nodes (32): DeliverIn, DeliverResult, _Frozen, MonitorIn, MonitorResult, BaseModel, Frozen wire types for the analytical layer.  Mirrors the style of src/workflow/c, Entity-watch sweep tally (events detected, by kind). (+24 more)
 
 ### Community 14 - "workflow: contracts.py"
-Cohesion: 0.20
-Nodes (19): CoverageResult, Output of ``coverage_check``.      ``complete`` — is the gathered evidence suffi, build_evidence(), Pure coverage-gate helpers for the plan-execute flow (R4).  Extracted as plain f, Join merged source texts into one bounded evidence blob for the     coverage jud, Decide whether to issue ONE more sub-question after a coverage check.      Retur, should_run_coverage_round(), _n() (+11 more)
+Cohesion: 0.16
+Nodes (23): coverage_check(), _parse(), ``coverage_check`` activity — pre-synthesis completeness gate.  After the orches, Judge whether gathered evidence fully covers the query., CoverageResult, Output of ``coverage_check``.      ``complete`` — is the gathered evidence suffi, build_evidence(), Pure coverage-gate helpers for the plan-execute flow (R4).  Extracted as plain f (+15 more)
 
 ### Community 15 - "storage: push_entities()"
 Cohesion: 0.08
-Nodes (38): AsyncWikibase, _build_claim(), _Claim, _lookup_qid_for_entity(), _persist_property_pid(), _persist_qid_for_entity(), push_entities(), Any (+30 more)
+Nodes (36): AsyncWikibase, _build_claim(), _lookup_qid_for_entity(), _persist_property_pid(), _persist_qid_for_entity(), push_entities(), Any, Wikibase push orchestrator.  Projects merged ``EntityNode`` / ``Relation`` lists (+28 more)
 
 ### Community 16 - "eval: test_scale_bench_smoke.py"
 Cohesion: 0.15
@@ -1194,104 +1194,104 @@ Cohesion: 0.09
 Nodes (41): components(), _components_from_edges(), _components_nebula(), graph_stats(), _graph_stats_nebula(), _nebula_show_stats(), _nebula_stats_computed_at(), pagerank() (+33 more)
 
 ### Community 20 - "graph: _q()"
-Cohesion: 0.09
-Nodes (36): AbstractChannel, AbstractIncomingMessage, AbstractQueue, RabbitMQSettings, RabbitMQ ingest-queue connection (Track B).      Only consumed when ``INGEST_QUE, Allow a comma-separated env string (RABBITMQ_QUEUES=a,b) as well         as a JS, Queue used when /ingest doesn't name one (the first configured)., handle_message() (+28 more)
+Cohesion: 0.20
+Nodes (21): AbstractIncomingMessage, handle_message(), Process one ingest message: start + await the document workflow,     then ack/re, _attachable(), _FakeMessage, _good_body(), Consumer message-handling contract (Track B3).  No broker / no Temporal: a fake, Attaching must not swallow the verdict: if the run we attached to     failed, th (+13 more)
 
 ### Community 21 - "test_graph: test_wiki_graph_ops.py"
 Cohesion: 0.17
 Nodes (17): _NebulaRecStore, nebula UPDATE VERTEX raises on a missing vertex; mark_dirty must catch     per-n, Records nGQL statements (positional; nebula never binds param_map);     returns, test_nebula_clear_dirty_issues_update_vertex(), test_nebula_mark_all_dirty_issues_lookup_then_per_vid_update(), test_nebula_mark_dirty_issues_update_vertex_per_name(), test_nebula_mark_dirty_noop_on_empty(), test_nebula_mark_dirty_resilient_to_missing_vertex() (+9 more)
 
 ### Community 22 - "test_graph: NebulaGraphStore"
-Cohesion: 0.20
-Nodes (15): as_key(), _post(), End-to-end (ASGI) checks that routes bind to the request graph (Task 9)., _Reg, _Store, test_admin_routes_reject_non_admin_key(), test_admin_routes_require_key(), test_graph_admin_uses_request_graph() (+7 more)
+Cohesion: 0.23
+Nodes (18): as_key(), _graph_seen_by_ingest(), _post(), End-to-end (ASGI) checks that routes bind to the request graph (Task 9)., No admin gating: any valid key passes auth on admin endpoints., _Reg, test_admin_routes_accept_plain_valid_key(), test_admin_routes_reject_invalid_key() (+10 more)
 
 ### Community 23 - "test_graph: merge_kg_extraction()"
-Cohesion: 0.15
-Nodes (39): _cypher_safe_label(), Convert a free-text predicate/keyword to a Cypher-safe upper-case     relation l, merge_kg_extraction(), EntityNode, Relation, Merge per-chunk extraction into a deduplicated graph patch.      Returns:, _chunk(), _ent() (+31 more)
+Cohesion: 0.11
+Nodes (51): _cypher_safe_label(), Convert a free-text predicate/keyword to a Cypher-safe upper-case     relation l, _EntityAgg, _id_to_name(), _maybe_summarize_descriptions(), merge_kg_extraction(), Any, BaseNode (+43 more)
 
 ### Community 24 - "test_storage: ChunkRepository"
-Cohesion: 0.08
-Nodes (41): ChunkRepository, _escape(), _normalise_chunk_row(), Any, Path, Return on-disk path for the source file of `doc_id` or         None if the docum, Read the source file from disk, capped to `max_chars`.          Returns None if, Download an ``s3://`` object to the local cache and read it,         capped.  So (+33 more)
+Cohesion: 0.04
+Nodes (65): ChunkRepository, _escape(), _normalise_chunk_row(), Any, Path, Return on-disk path for the source file of `doc_id` or         None if the docum, Read the source file from disk, capped to `max_chars`.          Returns None if, Download an ``s3://`` object to the local cache and read it,         capped.  So (+57 more)
 
 ### Community 25 - "workflow: test_search_drift_roundtrip.py"
 Cohesion: 0.06
-Nodes (65): _initials_signature(), Extract `(surname_lower, first_initial_lower)` from either     "Surname F.M." (d, _EmbeddingStub, _ent(), _GraphStoreStub, _no_namesake_lookup(), _no_watch_rewrite_db(), Tests for `src/graph/entity_resolution.py`.  Stubs the LLM (verdict-by-pair dict (+57 more)
+Nodes (63): _is_cyrillic_name(), _EmbeddingStub, _ent(), _GraphStoreStub, _no_namesake_lookup(), _no_watch_rewrite_db(), Tests for `src/graph/entity_resolution.py`.  Stubs the LLM (verdict-by-pair dict, Returns canned canonical entities via structured_query. (+55 more)
 
 ### Community 26 - "test_graph: test_event_extract.py"
-Cohesion: 0.07
-Nodes (46): events_to_graph(), EntityNode, Relation, Convert `ParsedEvent` objects → graph nodes + edges.  Called from `LightRAGExtra, Convert a list of ``ParsedEvent`` objects to graph nodes + relations.      Param, ParsedEvent, Intermediate parsed event tuple., _ev_line() (+38 more)
+Cohesion: 0.06
+Nodes (54): events_to_graph(), EntityNode, Relation, Convert `ParsedEvent` objects → graph nodes + edges.  Called from `LightRAGExtra, Convert a list of ``ParsedEvent`` objects to graph nodes + relations.      Param, _parse_event(), parse_lightrag_output(), ParsedEvent (+46 more)
 
 ### Community 27 - "config.py: Settings"
-Cohesion: 0.09
-Nodes (16): BaseSettings, AnalyticsSettings, ClassifierSettings, IngestionSettings, MetricsSettings, MonitorSettings, PostgresSettings, Single import surface for the rest of the codebase.      All sub-settings are co (+8 more)
+Cohesion: 0.07
+Nodes (20): BaseSettings, AnalyticsSettings, ClassifierSettings, EventsSettings, IngestionSettings, MetricsSettings, MonitorSettings, NebulaSettings (+12 more)
 
 ### Community 28 - "test_graph: MilvusEntityVectorStore"
-Cohesion: 0.11
-Nodes (14): EntityCandidate, EntityVectorStore, _btrunc(), MilvusEntityVectorStore, Any, Truncate to fit a Milvus VARCHAR: max_length counts UTF-8 BYTES, not chars., Protocol, TypedDict (+6 more)
+Cohesion: 0.07
+Nodes (25): build_community_report_vector_store(), build_entity_vector_store(), EntityCandidate, EntityVectorStore, _btrunc(), MilvusEntityVectorStore, Any, Truncate to fit a Milvus VARCHAR: max_length counts UTF-8 BYTES, not chars. (+17 more)
 
 ### Community 29 - "graph: signals.py"
-Cohesion: 0.08
-Nodes (25): circular_ownership(), CircularOwnershipParams, investigate_next(), InvestigateNextParams, _Params, Any, BaseModel, P2 — composite, decision-ready signals & queues (read materialized scores + comp (+17 more)
+Cohesion: 0.13
+Nodes (6): _list_literal(), NebulaSignalsGraphOps, Any, Protocol, Analytics "signals" graph ops (P2 decision-ready queues, read-only, fail-soft)., SignalsGraphOps
 
 ### Community 30 - "test_graph: resolve_entities()"
-Cohesion: 0.06
-Nodes (48): _apply_name_map(), _cleanup_stored_losers(), _consolidate_cluster(), _embed_entities(), _format_cluster_prompt(), _format_pair_prompt(), _Item, _load_candidates_native() (+40 more)
+Cohesion: 0.05
+Nodes (79): _apply_name_map(), _candidate_pairs(), _cleanup_stored_losers(), _consolidate_cluster(), _cosine(), _deep_normalize(), _deterministic_pairs(), _embed_entities() (+71 more)
 
 ### Community 31 - "test_workflow: activities.py"
 Cohesion: 0.07
-Nodes (46): `extract_kg` — LightRAG-style KG extraction (heaviest stage).  One LLM call per, Pull out small JSON-serialisable samples of what the extractor     emitted.  The, _summarise_kg(), finalize(), mark_failed(), _rmtree(), _dirty_names(), _check_graph_id_agrees() (+38 more)
+Nodes (45): Minio, main(), Remove orphaned ``kb-staging/{workflow_run_id}/`` prefixes from MinIO.  Workflow, finalize(), mark_failed(), mark_skipped(), _persist_ingest_metrics(), `finalize` (success path) and `mark_failed` (workflow-level on-failure) — write (+37 more)
 
 ### Community 32 - "test_bot: Turn"
-Cohesion: 0.11
-Nodes (30): RewriteFn, is_empty_answer(), Shared answer helpers: detect an empty/no-result answer so neither the search-fa, True for a blank answer or a known empty-synthesis marker., Wire the pure ``rewrite_query`` to the app's LLM (litellm via build_llm).  Kept, answer_question(), SearchFn, The bot's answer pipeline: whitelist → session → follow-up rewrite → KB search → (+22 more)
+Cohesion: 0.10
+Nodes (37): RewriteFn, Wire the pure ``rewrite_query`` to the app's LLM (litellm via build_llm).  Kept, answer_question(), SearchFn, Produce the bot's reply for one incoming message.      Denied users get ``DENIED, build_rewrite_prompt(), Rewrite a follow-up message into a standalone search query.  "а что по нему?" af, Assemble the rewrite prompt from prior turns + the new question. (+29 more)
 
 ### Community 33 - "test_analytics: _FakeStore"
 Cohesion: 0.08
 Nodes (22): _FakeStore, Captures the last Cypher + params and returns canned rows., test_alerts_clamps_top_n(), test_alerts_filters_passed_as_params(), test_alerts_no_window_means_since_null(), test_alerts_reads_alert_nodes_newest_first(), test_alerts_window_days_sets_since(), test_run_rows_passes_cypher_and_params() (+14 more)
 
 ### Community 34 - "test_storage: test_ingest_metrics.py"
-Cohesion: 0.10
-Nodes (12): _nebula_fail_soft(), NebulaAnalyticsGraphOps, Any, Analytics "connections" graph ops (read-only, fail-soft neighbourhood reads).  E, FETCH name+label for a set of Entity vids -> {vid: (name, label)}., Extract ordered node names + edge rel-types from a         ``PathWrapper``-shape, ``run_rows``-style ``try/except -> []`` (same     warning log) at the method lev, nGQL connections graph ops: GO/FETCH for neighbourhood reads,     FIND SHORTEST (+4 more)
+Cohesion: 0.07
+Nodes (14): NebulaAnalyticsGraphOps, Any, FETCH name+label for a set of Entity vids -> {vid: (name, label)}., Extract ordered node names + edge rel-types from a         ``PathWrapper``-shape, nGQL connections graph ops: GO/FETCH for neighbourhood reads,     FIND SHORTEST, NebulaCommunityWriteback, nGQL community BUILD write-back. INSERT is upsert-by-VID; both call     sites pr, NebulaDynamicsGraphOps (+6 more)
 
 ### Community 35 - "graph: entity_resolution.py"
-Cohesion: 0.10
-Nodes (24): LogRecord, _main(), Live-update the ingest admission ceiling K (max_inflight) on the running ``inges, _load_cache_from_graph(), main(), Operator-side smoke for :mod:`src.storage.wikibase`.  Pushes a tiny fake corpus, Pull cached base-class QIDs + property PIDs from the graph store., Self-hosted Wikibase populator settings.      When ``enabled=True``, ``DocumentI (+16 more)
+Cohesion: 0.13
+Nodes (13): LogRecord, _InterceptHandler, Loguru bootstrap.  Call :func:`configure_logging` once at app/worker startup.  T, Forward stdlib ``logging`` records into loguru.      ``temporalio``'s ``activity, Guard: stdlib `logging` must be configured, and the worker must configure it.  `, An `activity.logger`-style stdlib record must reach the loguru sink., Root defaults to WARNING, which silently drops every activity INFO line., Each spawned pool is a fresh process — it must configure logging itself,     oth (+5 more)
 
 ### Community 36 - "graph: test_community_summarize.py"
-Cohesion: 0.22
-Nodes (11): _NebulaRaisingStore, _NebulaRecStore, test_nebula_event_actors_go_then_fetch_names(), test_nebula_event_core_empty_when_not_event(), test_nebula_event_core_fetches_event_fields(), test_nebula_event_timeline_orders_untimed_last_and_filters_window(), test_nebula_fail_soft(), test_nebula_trending_computes_burst_in_python() (+3 more)
+Cohesion: 0.15
+Nodes (27): index_vector(), _node_content_len(), `index_vector` — embed + Milvus insert.  Loads parsed nodes from staging, snapsh, Strip metadata so every node's ``_node_content`` fits the Milvus     VARCHAR cap, Truncate any chunk whose ``text`` field exceeds the Milvus cap     (a chunking p, Length of the ``_node_content`` VARCHAR Milvus will actually     store for this, _restore_metadata(), _restore_text() (+19 more)
 
 ### Community 37 - "graph: clamp_top_n()"
-Cohesion: 0.14
-Nodes (7): _list_literal(), NebulaQualityGraphOps, Any, Protocol, QualityGraphOps, Analytics "quality" graph ops (read-only, fail-soft knowledge-quality flags: con, nGQL quality graph ops — MATCH for contradictions/orphans, query+Python     for
+Cohesion: 0.12
+Nodes (13): contradictions(), incomplete_entities(), merge_candidates(), orphans(), Any, build_quality_graph_ops(), _list_literal(), NebulaQualityGraphOps (+5 more)
 
 ### Community 38 - "test_workflow: rerank.py"
-Cohesion: 0.05
-Nodes (48): AsyncConnectionPool, BotRepository, build_list_users_query(), build_recent_requests_query(), Any, AsyncConnection, Postgres access for the Telegram bot: who may use it, and what was asked.  Same, Requests this user started today, for the quota check.          Counts EVERY row (+40 more)
+Cohesion: 0.06
+Nodes (41): BotRepository, build_list_users_query(), build_recent_requests_query(), Any, AsyncConnection, Postgres access for the Telegram bot: who may use it, and what was asked.  Same, Requests this user started today, for the quota check.          Counts EVERY row, Record a request BEFORE the work starts; returns its id.          A crash mid-se (+33 more)
 
 ### Community 39 - "analytics: PrimitiveResult"
-Cohesion: 0.06
-Nodes (60): build_property_graph(), _is_graph_safe(), _strip_graph_unsafe_metadata(), parse_and_chunk(), Ctx, _scrub(), Activity input models whose activity touches per-graph storage.  Every model lis, Ctx (+52 more)
+Cohesion: 0.07
+Nodes (63): build_property_graph(), _is_graph_safe(), `build_property_graph` — Chunk + MENTIONS + entity/relation upsert., _strip_graph_unsafe_metadata(), _load_base_classes(), _load_properties(), push_wikibase(), Ctx (+55 more)
 
 ### Community 40 - "analytics: Claim"
-Cohesion: 0.05
-Nodes (78): main(), _parse_args(), prepare_txt(), Namespace, Path, Ingest the Medical benchmark corpus through `/api/v1/ingest`.  Converts `tests/e, Materialize medical.json → medical.txt in /tmp for upload., aggregate_by() (+70 more)
+Cohesion: 0.13
+Nodes (26): _entity_candidates(), _evidence_phrases(), load_medical_golden_cases(), load_medical_qas(), MedicalQA, Loader for the Medical benchmark corpus.  The corpus comes from `tests/eval/corp, Return parsed Q&A entries, optionally filtered & sampled.      `limit=None`: ret, Extract substring-matchable medical keywords from     `evidence_relations`. (+18 more)
 
 ### Community 41 - "test_graph: test_nebula_schema.py"
-Cohesion: 0.09
-Nodes (33): ensure_schema(), _execute_with_retry(), _migrate_related_validity_to_string(), _probe_edge_write_ready(), _probe_tag_write_ready(), Any, NebulaGraph schema for the KB graph (nGQL DDL).  Entities are tag `Entity` (type, # NOTE: `entity_wiki_dirty_idx` (on the ALTER-added `wiki_dirty` column) is (+25 more)
+Cohesion: 0.12
+Nodes (21): ensure_schema(), Execute ``space_ddl(graph)`` then SCHEMA_DDL (in that graph's space) on an     o, space_ddl(), _FakeSession, The live cache moved to Postgres, but the tag stays so     `AGENT_ER_VERDICT_CAC, `er_verdict_key_idx` had no reader on either path — the Nebula path     fetches, test_ensure_schema_alters_entity_to_add_er_canonical_name(), test_ensure_schema_alters_entity_to_add_first_doc_id() (+13 more)
 
 ### Community 42 - "test_workflow: test_search_global.py"
 Cohesion: 0.12
 Nodes (40): Resolved, _anchor_date(), _dateparser_day(), _day_bounds(), _month_bounds(), _nearest_month_day(), _nearest_year(), date (+32 more)
 
 ### Community 43 - "test_workflow: Ctx"
-Cohesion: 0.13
-Nodes (19): _acquire_session(), _chunks(), _is_session_dead(), NebulaGraphStore, _preserved_value(), Any, NebulaGraph implementation of the KbGraphStore seam (write path).  Schema-aware, nGQL literal for a read-back value; None/empty becomes the column default. (+11 more)
+Cohesion: 0.05
+Nodes (43): _acquire_session(), build_nebula_graph_store(), _chunks(), _is_session_dead(), NebulaGraphStore, _preserved_value(), Any, NebulaGraph implementation of the KbGraphStore seam (write path).  Schema-aware (+35 more)
 
 ### Community 44 - "test_workflow: test_search_orchestrator.py"
-Cohesion: 0.13
-Nodes (21): Input to the ``route_query`` activity — the raw user question., Output of ``route_query`` — the chosen search mode.      Fail-safe: any classifi, RouteParams, RouteResult, Temporal activities for the plan-execute search subsystem (R2).  ``SEARCH_V2_ACT, classify_route(), _get_route_llm(), ``route_query`` activity — classify a question's search mode (R7a).  Decision C (+13 more)
+Cohesion: 0.14
+Nodes (20): Input to the ``route_query`` activity — the raw user question., Output of ``route_query`` — the chosen search mode.      Fail-safe: any classifi, RouteParams, RouteResult, classify_route(), _get_route_llm(), ``route_query`` activity — classify a question's search mode (R7a).  Decision C, Map a router LLM reply to a ``RouteResult``.  Pure / unit-testable.      Toleran (+12 more)
 
 ### Community 45 - "test_graph: test_nebula_store_subgraph.py"
 Cohesion: 0.07
@@ -1299,11 +1299,11 @@ Nodes (12): _Cell, _Elem, _Node, NebulaGraphStore.subgraph maps GET SUBGRAPH res
 
 ### Community 46 - "test_graph: LightRAGExtractor"
 Cohesion: 0.06
-Nodes (45): BaseException, _extraction_text(), _is_transient_llm_error(), LightRAGExtractor, Any, BaseNode, ChatMessage, TransformComponent (+37 more)
+Nodes (50): BaseException, _default_entity_types(), _extraction_text(), _is_transient_llm_error(), LightRAGExtractor, Any, BaseNode, ChatMessage (+42 more)
 
 ### Community 47 - "test_ingestion: test_classifier.py"
-Cohesion: 0.09
-Nodes (38): apply_rules(), classify_with_llm(), _ext(), LLMVerdict, BaseModel, Path, Input document classifier — decides whether a freshly-fetched document is worth, Deterministic skip rules.  Returns ``skip=True`` + a human reason     for blocke (+30 more)
+Cohesion: 0.14
+Nodes (21): apply_rules(), classify_with_llm(), _ext(), Path, Input document classifier — decides whether a freshly-fetched document is worth, Deterministic skip rules.  Returns ``skip=True`` + a human reason     for blocke, Run the LLM gate over a document preview.  Fail-soft: any error or     unparseab, Read up to ``max_chars`` of a file for the LLM gate.  utf-8 with a     latin-1 f (+13 more)
 
 ### Community 48 - "MinioStorage"
 Cohesion: 0.26
@@ -1314,36 +1314,36 @@ Cohesion: 0.14
 Nodes (26): bounds_from_iso(), date_metadata_filters(), DateBounds, _field_in_range(), filter_nodes(), iso_to_epoch_days(), node_metadata_in_range(), overfetch_top_k() (+18 more)
 
 ### Community 50 - "workflow: SerializedNode"
-Cohesion: 0.06
-Nodes (39): LookupError, _load_key_row(), InvalidGraphId, Graph id is not a valid slug (it is interpolated into DDL)., validate_graph_id(), GraphNotFound, GraphNotReady, GraphRegistry (+31 more)
+Cohesion: 0.07
+Nodes (31): AsyncConnectionPool, get_pg_pool(), Process-global async Postgres connection pool.  The ``documents`` and ``ingest_m, Return the per-process pool, opening it lazily on first use.      With ``min_siz, Test hook — drop the singleton so the next get_pg_pool rebuilds., reset_for_tests(), reset_search_path(), _load_key_row() (+23 more)
 
 ### Community 51 - "test_graph: test_aggregations_graph_ops.py"
 Cohesion: 0.15
 Nodes (16): _NebulaRaisingStore, _NebulaRecStore, Records nGQL statements (nebula never binds param_map); returns canned     rows, test_nebula_count_entities_builds_label_filters(), test_nebula_count_entities_no_filters_when_none(), test_nebula_count_relationships_filtered_counts_client_side(), test_nebula_count_relationships_unfiltered_direct_count(), test_nebula_distribution_by_polarity_filtered_counts_client_side() (+8 more)
 
 ### Community 52 - "test_scripts: datetime"
-Cohesion: 0.09
-Nodes (25): build_entity_search_query(), build_persons_by_surname_query(), EntitySearchRepository, Any, One name-search query. `mode`: exact / prefix / substring., Person rows whose name contains one of the surname stems, any word     order ("П, Async wrapper over the `entity` table., Records every `timeout=` `.connection()` was called with. (+17 more)
+Cohesion: 0.08
+Nodes (29): make_search(), Build an async ``search(query) -> answer`` bound to one search mode.      Raises, build_entity_search_query(), build_persons_by_surname_query(), EntitySearchRepository, Any, AsyncConnection, Postgres access for the entity search mirror.  Pure query builders (asserted exa (+21 more)
 
 ### Community 53 - "graph: communities.py"
 Cohesion: 0.15
 Nodes (18): _leiden_rows(), Offline graph-community detection (Search R6, decision C1).  DECOUPLED / OFFLINE, leidenalg backend: stream edges + cluster in-worker.      Returns the canonical, build_graph(), hierarchy_rows(), Any, In-worker Leiden community detection (leidenalg/igraph).  Produces the ``rows``, Build an undirected weighted igraph; parallel edges summed. (+10 more)
 
 ### Community 54 - "test_graph: test_index.py"
-Cohesion: 0.10
-Nodes (17): ExtractorMode, KGExtractor, build_kg_extractor(), LLM, Build a KG path extractor.      Three modes:      - ``lightrag`` (default) — ``L, Pydantic-typed schema for `SchemaLLMPathExtractor`.  Universal entity / relation, Unit tests for `src/graph/index.py`.  Covers both extractor modes (`simple` and, Default mode is `lightrag` — single LLM call per chunk yields     entities + typ (+9 more)
+Cohesion: 0.09
+Nodes (20): ExtractorMode, KGExtractor, build_kg_extractor(), _parse_triplets_strip_thinking(), LLM, KG extractor wiring for the ingestion pipeline.    * **Extractor** — typed `Sche, Wrap the upstream parser with a `<think>...</think>` stripper.      Qwen3 emits, Build a KG path extractor.      Three modes:      - ``lightrag`` (default) — ``L (+12 more)
 
 ### Community 55 - "test_config: LiteLLMSettings"
-Cohesion: 0.09
-Nodes (24): LiteLLMSettings, Connection to a LiteLLM proxy (or any OpenAI-compatible endpoint).      ``llama-, Accept a JSON string (pydantic-settings env), a dict, or an         empty/None v, Merge any provided overrides onto the full default map so a         partial ``ro, Base model for the no-role legacy path: the deprecated         ``llm_model`` if, Per-role extra request-body params on ``LiteLLMSettings``.  Operators inject bac, Callers must not mutate the settings through the returned dict., test_empty_by_default() (+16 more)
+Cohesion: 0.07
+Nodes (30): LLMTier, LiteLLMSettings, Any, LLMRole, Connection to a LiteLLM proxy (or any OpenAI-compatible endpoint).      ``llama-, Accept a JSON string (pydantic-settings env), a dict, or an         empty/None v, Merge any provided overrides onto the full default map so a         partial ``ro, Base model for the no-role legacy path: the deprecated         ``llm_model`` if (+22 more)
 
 ### Community 56 - "test_graph: test_nebula_store_writes.py"
-Cohesion: 0.09
-Nodes (50): SimpleNamespace, _Cast, _fail_fetch(), _FakeSession, _no_entity_mirror(), _node(), _q_expect(), upsert_nodes/upsert_relations emit the expected nGQL (no live DB). (+42 more)
+Cohesion: 0.08
+Nodes (51): SimpleNamespace, _Cast, _fail_fetch(), _FakeSession, _no_entity_mirror(), _node(), _q_expect(), upsert_nodes/upsert_relations emit the expected nGQL (no live DB). (+43 more)
 
 ### Community 57 - "api: ingest.py"
-Cohesion: 0.09
-Nodes (33): AccessToken, X-API-Key auth dependency.  Keys are looked up in ``public.api_keys`` (sha256-ha, require_admin(), require_api_key(), choose_graph_id(), _auth_required(), build_sse_auth(), _configured_mcp_graph() (+25 more)
+Cohesion: 0.03
+Nodes (75): AccessToken, FastAPI, LookupError, X-API-Key auth dependency.  Keys are looked up in ``public.api_keys`` (sha256-ha, require_api_key(), choose_graph_id(), Bind each HTTP request to exactly one graph (spec §2)., Graph selection is by ``X-Graph`` only (absent -> ``default``).      No per-key (+67 more)
 
 ### Community 58 - "analytics: catalog.py"
 Cohesion: 0.06
@@ -1351,67 +1351,67 @@ Nodes (58): _clip(), format_answer(), format_channels(), format_entities(), form
 
 ### Community 59 - "test_config: test_settings.py"
 Cohesion: 0.06
-Nodes (28): AgentSettings, ApiSettings, IngestAdmissionSettings, LLMPoolSettings, Document-level admission control (always on).  /ingest hands every     document, External-statistics subsystem (MCP-3).      Defaults are read-side only — nothin, FastAPI surface — host, port, auth keys, CORS, log level., Knobs for the search endpoints (`/api/v1/search/*`). (+20 more)
+Nodes (27): AgentSettings, ApiSettings, IngestAdmissionSettings, LLMPoolSettings, PostgresSettings, Document-level admission control (always on).  /ingest hands every     document, External-statistics subsystem (MCP-3).      Defaults are read-side only — nothin, FastAPI surface — host, port, auth keys, CORS, log level. (+19 more)
 
 ### Community 61 - "test_analytics: test_planner.py"
-Cohesion: 0.18
-Nodes (16): coerce_entity_type(), Map a user/LLM-supplied entity type to its canonical casing, or None     if it i, parse_plan(), plan_query(), Any, NL → AnalysisPlan. Plain achat + tolerant parse + strict pydantic validation.  M, Deterministic fallback for trend/popularity questions the LLM couldn't plan., Call LLM and parse the result into an AnalysisPlan. Fail-open on LLM error. (+8 more)
+Cohesion: 0.11
+Nodes (24): coerce_entity_type(), epoch_days_to_period(), Constants + pure helpers for the analytical layer (no I/O, no LLM)., Bucket an epoch-day integer into a period label.      granularity: ``year`` → ``, Map a user/LLM-supplied entity type to its canonical casing, or None     if it i, parse_plan(), plan_query(), Any (+16 more)
 
 ### Community 62 - "analytics: dynamics.py"
-Cohesion: 0.32
+Cohesion: 0.38
 Nodes (4): pick_priority(), Canonical channel-group enum, imported by ingest/search/rerank/tg_ingest.  A doc, Return whichever group name ranks earlier in GROUP_PRIORITY.     Unknown names s, test_pick_priority_returns_earlier_in_order()
 
 ### Community 63 - "test_workflow: merge_and_resolve()"
-Cohesion: 0.14
-Nodes (36): merge_and_resolve(), Relation, First N entries of an alias->canonical map, truncated for     heartbeat sanity., Repoint a relation's name-endpoints through ``alias`` (folded entity     name ->, _rewrite_endpoints(), _sample_map(), _base_patches(), _ctx() (+28 more)
+Cohesion: 0.12
+Nodes (39): merge_and_resolve(), _premerge_groups(), Relation, `merge_and_resolve` — cross-chunk dedup + phone consolidation + ER.  Pulls the p, Group raw extracted entities by name across all chunks.      Names that appear m, First N entries of an alias->canonical map, truncated for     heartbeat sanity., Repoint a relation's name-endpoints through ``alias`` (folded entity     name ->, _rewrite_endpoints() (+31 more)
 
 ### Community 64 - "test_observability: test_ingest_metrics_extractor.py"
-Cohesion: 0.19
-Nodes (30): HistoryEvent, parse_activity_timings(), WorkflowHistory, Resolve the right oneof attributes block for a terminal event., Return one ``MetricRow`` per (activity, attempt) found in the     given workflow, _terminal_attrs(), _completed(), _failed() (+22 more)
+Cohesion: 0.16
+Nodes (32): HistoryEvent, parse_activity_timings(), WorkflowHistory, Pure-functional extractor that turns Temporal workflow history into ``MetricRow`, Resolve the right oneof attributes block for a terminal event., Return one ``MetricRow`` per (activity, attempt) found in the     given workflow, _terminal_attrs(), Static map activity_name → LLM role.  Used by ``ingest_metrics_extractor.parse_a (+24 more)
 
 ### Community 65 - "graph: events_llm.py"
 Cohesion: 0.07
-Nodes (46): _align_tool(), _indicators_search(), Three modes, deliberately behind one tool.      No query and no source is not an, _series(), Helper-level tests — FastMCP tool invocation internals are not exercised, same c, `jsonb` normalises key order, so two rows differing only in the     order they w, No query and no source means the caller does not yet know what     exists — answ, `== 100`, not `<= 100`: the old assertion held for any value the     cap might h (+38 more)
+Nodes (48): _align_tool(), _indicators_search(), _parse_date(), date, Three modes, deliberately behind one tool.      No query and no source is not an, _series(), Helper-level tests — FastMCP tool invocation internals are not exercised, same c, `jsonb` normalises key order, so two rows differing only in the     order they w (+40 more)
 
 ### Community 66 - "test_graph: test_entity_resolution.py"
-Cohesion: 0.12
-Nodes (24): backfill(), build_page_query(), escape_ngql(), Any, One page of entities, in name order, after `last_name`.      NebulaGraph shards, One page, retried on a transient store refusal.      `ORDER BY` makes graphd sor, Copy every entity into the sink. Returns (copied, last_name).      Without ``sin, _read_page() (+16 more)
+Cohesion: 0.11
+Nodes (26): backfill(), build_page_query(), escape_ngql(), main(), Any, One-off fill of the Postgres `entity` table from the graph.  Resumable, idempote, One page of entities, in name order, after `last_name`.      NebulaGraph shards, One page, retried on a transient store refusal.      `ORDER BY` makes graphd sor (+18 more)
 
 ### Community 67 - "retrieval: build_vector_index()"
-Cohesion: 0.17
-Nodes (14): Read an entity's 1-hop subgraph from the graph store and hash it for change dete, Distinct source-document ids that mention this entity, sorted.     Used both for, read_citations(), read_source_docs(), build_wiki_graph_ops(), Any, Wiki-editor graph ops (dirty-flag bookkeeping + article-context reads/writes)., ArticleOutcome (+6 more)
+Cohesion: 0.28
+Nodes (10): ArticleOutcome, WikiSweepWorkflow — select dirty entities, (re)write each article., select_dirty_entities(), _tally(), WikiSweepWorkflow, write_entity_article(), str, test_tally_counts_outcomes() (+2 more)
 
 ### Community 68 - "workflow: worker.py"
-Cohesion: 0.06
-Nodes (45): Runtime, close_pg_pool(), Close the pool on process shutdown (API lifespan / worker exit)., DocumentIngestWorkflow, `DocumentIngestWorkflow` — composes 8 activities + best-effort graph half and on, Entity names + relation endpoints to flag dirty for the wiki editor.     Reads t, _wiki_dirty_targets(), GraphBuildWorkflow (+37 more)
+Cohesion: 0.09
+Nodes (34): Runtime, _configured_models(), _list_available_models(), Startup validation: every model the operator put in ``LITELLM_*_MODEL`` env vars, Return the ``model_name`` list LiteLLM proxy currently     serves.  Empty list o, Return non-empty ``{label: model_name}`` requested by env.      Two-tier model:, Probe the LiteLLM proxy and warn (or raise) on missing models.      ``source`` i, _strict_mode() (+26 more)
 
 ### Community 69 - "setup_wikibase.py"
-Cohesion: 0.10
-Nodes (29): _api_url(), _bootstrap_credentials(), _configure_wbi(), _Counter, _ensure_item(), _ensure_property(), _find_entity_by_label(), _identifier_properties() (+21 more)
+Cohesion: 0.11
+Nodes (27): _api_url(), _bootstrap_credentials(), _configure_wbi(), _ensure_item(), _ensure_property(), _find_entity_by_label(), _identifier_properties(), _login() (+19 more)
 
 ### Community 70 - "test_workflow: test_search_retrieve.py"
 Cohesion: 0.13
 Nodes (31): Input to the ``retrieve_subquestion`` activity.      One deterministic retrieval, RetrieveParams, Run the deterministic retrieve pipeline for one sub-question., Pick the top entity_name from a ``graph_search`` observation.      PURE (no I/O), retrieve_subquestion(), top_entity_name(), _DispatchRecorder, _gs_obs() (+23 more)
 
 ### Community 71 - "test_retrieval: test_hf_offline.py"
-Cohesion: 0.18
+Cohesion: 0.20
 Nodes (19): HFSettings, Offline HuggingFace model loading for air-gapped deploys.      Two project model, _make_hf_stub(), MonkeyPatch, Tests for offline HuggingFace model loading.  Covers:   * ``HFSettings`` env bin, An explicit operator-set HF_HOME must NOT be overwritten., HuggingFace's own HF_HOME / HF_HUB_OFFLINE must NOT leak into     our settings f, test_build_reranker_explicit_model_overrides_config() (+11 more)
 
 ### Community 72 - "graph: events.py"
-Cohesion: 0.07
-Nodes (30): Human-readable catalog (name + description + params) for the planner prompt., register(), render_catalog_for_planner(), alerts(), AlertsParams, _Params, Any, BaseModel (+22 more)
+Cohesion: 0.09
+Nodes (22): is_meaningful_entity(), Whether an entity row is worth showing in a themes/events answer.      Always dr, entity_new_connections(), EntityNewConnectionsParams, new_events(), NewEventsParams, _Params, Any (+14 more)
 
 ### Community 73 - "IngestSchedulerWorkflow"
-Cohesion: 0.08
-Nodes (24): AdmissionState, Pure admission-control state machine (Track 5).  Bounds how many documents inges, FIFO admission with a hard ``max_inflight`` ceiling.      ``submit`` enqueues (d, Pop up to ``free_slots`` documents off the front of the queue         into fligh, IngestSchedulerWorkflow, Recycle (continue_as_new) once event history crosses the         threshold — reg, Still-queued documents handed to the next run on recycle.         In-flight docs, Enqueue a document for admission (dedup by (graph_id, doc_id)). (+16 more)
+Cohesion: 0.15
+Nodes (21): Primitive, Human-readable catalog (name + description + params) for the planner prompt., register(), render_catalog_for_planner(), AlertsParams, _Params, BaseModel, Arc 2 read side — query persisted :Alert nodes (monitor findings). (+13 more)
 
 ### Community 74 - "ingest_queue: ingest_submit.py"
-Cohesion: 0.07
-Nodes (39): IngestParams, Hand one document to the configured ingest backlog backend.      ``queue`` / ``p, Signal-with-start the admission singleton (the original path)., submit_document(), _submit_to_scheduler(), _Client, _Handle, Consumer workflow ids are graph-scoped: the default graph keeps the legacy ``ing (+31 more)
+Cohesion: 0.04
+Nodes (72): AbstractRobustConnection, Run this document to completion: start its workflow, or ATTACH to the     run th, _start_or_attach(), Ingest message priority levels (RabbitMQ backend).  A single work queue declared, close_publisher(), _get_connection(), publish_ingest(), RabbitMQ producer for the ingest queue (Track B).  ``/ingest`` → :func:`submit_d (+64 more)
 
 ### Community 75 - "test_graph: test_event_merge.py"
-Cohesion: 0.13
-Nodes (31): _cos(), dedup_cross_channel_events(), event_key(), merge_events(), EntityNode, Relation, E2 event de-duplication: deterministic (type, participants, ts-bucket) match-key, Fold entity-channel EventOrAction nodes into same-chunk event-channel     events (+23 more)
+Cohesion: 0.06
+Nodes (55): _cos(), dedup_cross_channel_events(), event_key(), merge_events(), EntityNode, Relation, E2 event de-duplication: deterministic (type, participants, ts-bucket) match-key, Fold entity-channel EventOrAction nodes into same-chunk event-channel     events (+47 more)
 
 ### Community 76 - "observability: trace_request()"
 Cohesion: 0.12
@@ -1422,28 +1422,28 @@ Cohesion: 0.15
 Nodes (29): decide(), EdgeConflict, _key(), _label(), load_stored_edges(), _load_stored_nebula(), Any, Trust-based fact-conflict resolution at graph-write time.  The problem this clos (+21 more)
 
 ### Community 78 - "events_eval.py"
-Cohesion: 0.10
-Nodes (28): DocumentsForCommunitiesParams, DocumentsForCommunitiesResult, MapCommunitiesResult, MapPartialResult, Output of ``map_communities`` — the community summaries to map     over.  Empty, Output of ``map_community_partial`` — the per-community partial     answer + a s, Input to ``documents_for_communities`` — community ids to resolve     back to th, Output — distinct source doc_ids behind the given communities. (+20 more)
+Cohesion: 0.08
+Nodes (40): DocumentsForCommunitiesParams, DocumentsForCommunitiesResult, GlobalSearchParams, MapCommunitiesResult, MapPartialResult, Output of ``synthesize_answer``., Output of ``map_communities`` — the community summaries to map     over.  Empty, Output of ``map_community_partial`` — the per-community partial     answer + a s (+32 more)
 
 ### Community 79 - "test_api: analyze.py"
-Cohesion: 0.15
-Nodes (10): _graphscope_rows(), graphscope backend: stream edges + distributed single-level Leiden.      Same ro, _all_names(), GraphScope community-detection backend (single-level Leiden, distributed).  Mirr, Dedup names across node_names + edge endpoints (mirrors     community_leiden.bui, Build a GraphScope graph from `edges` and run its modularity community     algor, Flat GraphScope partition -> rows [{name, communityId, ids:[cid]}]     (same sha, _run_graphscope_community() (+2 more)
+Cohesion: 0.12
+Nodes (12): _all_names(), GraphScope community-detection backend (single-level Leiden, distributed).  Mirr, Dedup names across node_names + edge endpoints (mirrors     community_leiden.bui, Build a GraphScope graph from `edges` and run its modularity community     algor, Flat GraphScope partition -> rows [{name, communityId, ids:[cid]}]     (same sha, _run_graphscope_community(), single_level_rows_graphscope(), test_graphscope_adapter_fail_open_does_not_write_mega_community() (+4 more)
 
 ### Community 80 - "storage: backfill_doc_id.py"
 Cohesion: 0.14
 Nodes (27): _iter_rows(), _load_path_index(), main(), MilvusClient, Backfill the `doc_id` metadata field on legacy Milvus chunks.  Chunks indexed be, Yield Milvus rows in batches via query_iterator (offset-paging has     a 16 384, BackfillStats, build_path_index() (+19 more)
 
 ### Community 81 - "reresolve_graph.py"
-Cohesion: 0.06
-Nodes (45): RouteLabel, ContextualizeParams, ContextualizeResult, GlobalSearchParams, Input to the ``contextualize_query`` activity., Standalone, self-contained rewrite of ``query`` (== original on no-op/failure)., Final workflow output — mapped onto SearchResponse by route handler., Workflow input for ``GlobalSearchWorkflow`` — what the     ``/search/global`` ro (+37 more)
+Cohesion: 0.07
+Nodes (31): RouteLabel, Shared retry policy for the R2 plan-execute search path.  Three retries, short b, AutoSearchWorkflow, dispatch_for_route(), _drift_local_fallback(), merge_doc_ids(), Routing + drift entry workflows (Search R7a).  Two thin coordinator workflows th, Auto mode — route the question, then dispatch to local/global/drift. (+23 more)
 
 ### Community 82 - "tg_ingest.py"
 Cohesion: 0.10
 Nodes (15): _FakeNebulaStore, Nebula backend for graph analysis (TDD). Under nebula there is no GDS: pagerank, The 2026-08-16 defect: the counting scans were refused for memory     and the ha, `SHOW STATS` serves Nebula's own job results: exact, milliseconds,     and no sc, No stats job has ever run — Nebula answers "please execute `submit     job stats, A count aggregate ALWAYS yields a row — verified on the live store,     `MATCH (, The other side of it: an empty graph that ANSWERS zero is zero,     with no erro, test_graph_stats_nebula_counts_degree_dup() (+7 more)
 
 ### Community 83 - "graph: communities.py"
-Cohesion: 0.09
-Nodes (24): entity_activity(), EntityActivityParams, _iso_to_epoch_days(), _Params, polarity_evolution(), PolarityEvolutionParams, Any, BaseModel (+16 more)
+Cohesion: 0.11
+Nodes (22): entity_activity(), EntityActivityParams, _iso_to_epoch_days(), _Params, polarity_evolution(), PolarityEvolutionParams, Any, BaseModel (+14 more)
 
 ### Community 84 - "test_graph: test_rollups_graph_ops.py"
 Cohesion: 0.05
@@ -1454,8 +1454,8 @@ Cohesion: 0.18
 Nodes (23): Context, _bounds_or_error(), _global_params(), kb_analyze(), kb_auto_search(), kb_drift_search(), kb_global_search(), kb_search() (+15 more)
 
 ### Community 86 - "eval: score_case()"
-Cohesion: 0.24
-Nodes (21): build_pg_stub(), _collapse_llm_queue(), _connect(), extract_kg_stub(), fetch_source_stub(), finalize_stub(), index_vector_stub(), inject_canonical_stub() (+13 more)
+Cohesion: 0.18
+Nodes (27): WikibasePushed, DocumentIngestWorkflow, GraphBuildWorkflow, build_pg_stub(), _collapse_llm_queue(), _connect(), extract_kg_stub(), fetch_source_stub() (+19 more)
 
 ### Community 87 - "eval: test_medical_fixture.py"
 Cohesion: 0.11
@@ -1474,12 +1474,12 @@ Cohesion: 0.18
 Nodes (19): _FakeOps, _patch_ops(), The most-mentioned-entities surface must not let degenerate names     (numerish,, Records (method, args) calls; returns canned rows per method name., test_count_entities_excludes_identifiers_by_default(), test_count_entities_failsoft(), test_count_entities_routes_through_seam(), test_count_relationships_filters_rel_type_and_polarity() (+11 more)
 
 ### Community 91 - "test_analytics: _FakeOps"
-Cohesion: 0.16
-Nodes (16): _FakeOps, _fetch_name_label(), _patch_ops(), Records (method, args) calls; returns canned rows per method name., test_common_connections_routes_through_seam(), test_connection_path_clamps_hops_inline(), test_connection_path_routes_through_seam_with_clamped_hops(), test_cooccurrence_routes_through_seam() (+8 more)
+Cohesion: 0.18
+Nodes (13): _FakeOps, _patch_ops(), Records (method, args) calls; returns canned rows per method name., test_common_connections_routes_through_seam(), test_connection_path_clamps_hops_inline(), test_connection_path_routes_through_seam_with_clamped_hops(), test_cooccurrence_routes_through_seam(), test_entity_dossier_empty_core_short_circuits() (+5 more)
 
 ### Community 92 - "bot: __main__.py"
-Cohesion: 0.27
-Nodes (9): make_analyze(), SearchFn, Return a search that tries ``primary`` first and only falls back to     ``fallba, Build an async ``analyze(query) -> answer`` over the analytical layer     (POST, with_fallback(), Search fallback combinator (TDD): primary mode, fall back to a second mode only, test_empty_primary_triggers_fallback(), test_non_empty_primary_wins_and_fallback_not_called() (+1 more)
+Cohesion: 0.18
+Nodes (13): is_empty_answer(), Shared answer helpers: detect an empty/no-result answer so neither the search-fa, True for a blank answer or a known empty-synthesis marker., make_analyze(), SearchFn, KB search adapter for the bot: POST /api/v1/search/{mode} and return the synthes, Return a search that tries ``primary`` first and only falls back to     ``fallba, Build an async ``analyze(query) -> answer`` over the analytical layer     (POST (+5 more)
 
 ### Community 93 - "graph: centrality.py"
 Cohesion: 0.13
@@ -1490,15 +1490,15 @@ Cohesion: 0.10
 Nodes (31): PropertyGraphStore, _description_for(), _exclude_augment_from_embed(), _ident_to_dict(), IdentifierCanonicalizationTransform, inject_canonical_entities(), Any, BaseNode (+23 more)
 
 ### Community 95 - "workflow: _search_deps.py"
-Cohesion: 0.12
-Nodes (25): pearson(), period_key(), Pearson correlation, or None when undefined (n < 2, or either     side constant), Start of the bucket containing ``d``.  Weeks start Monday., Down-aggregate ``points`` onto ``granularity``.      NEVER interpolates upward:, resample(), Tests for `src.stats.align` bucketing / resampling / normalisation.  Everything, `_MEAN_KINDS` and `_LAST_KINDS` must cover `VALUE_KINDS` exactly.      Before, t (+17 more)
+Cohesion: 0.14
+Nodes (21): period_key(), Start of the bucket containing ``d``.  Weeks start Monday., Down-aggregate ``points`` onto ``granularity``.      NEVER interpolates upward:, resample(), Tests for `src.stats.align` bucketing / resampling / normalisation.  Everything, `_MEAN_KINDS` and `_LAST_KINDS` must cover `VALUE_KINDS` exactly.      Before, t, Pins each member to mean-or-last, so a member silently moving     family shows u, Monthly points asked for at weekly granularity must NOT be     interpolated upwa (+13 more)
 
 ### Community 96 - "test_ingestion: index_vector.py"
-Cohesion: 0.07
-Nodes (56): BasePydanticVectorStore, MilvusSettings, main(), _parse_args(), Namespace, CLI: ingest a directory into Milvus.  Usage::      python -m src.ingestion.run ., build_vector_index(), build_vector_store() (+48 more)
+Cohesion: 0.11
+Nodes (29): BasePydanticVectorStore, MilvusSettings, main(), _parse_args(), Namespace, CLI: ingest a directory into Milvus.  Usage::      python -m src.ingestion.run ., build_vector_index(), build_vector_store() (+21 more)
 
 ### Community 97 - "test_graph: resolve()"
-Cohesion: 0.16
+Cohesion: 0.17
 Nodes (14): ERConfig, _llm_judge_pairs(), Tuning knobs for entity resolution., For each input pair, return True when LLM judges SAME, else     False (DIFFERENT, _mk_item(), EntityNode, The vectorised cosine path is an optimisation — it must yield the     EXACT same, When a vector_store is passed with native kNN on, ER pulls candidates     from s (+6 more)
 
 ### Community 98 - "test_analytics: test_events_llm.py"
@@ -1506,16 +1506,16 @@ Cohesion: 0.21
 Nodes (12): _FakeOps, _patch(), E2 event read primitives — event_dossier + event_timeline + trending., Records (method, args); returns canned rows per method name., test_event_dossier_assembles_core_and_actors(), test_event_dossier_empty_actors(), test_event_dossier_empty_core_short_circuits(), test_event_dossier_top_n_clamped_into_seam() (+4 more)
 
 ### Community 99 - "workflow: materialize_activities.py"
-Cohesion: 0.11
-Nodes (28): Output of ``summarize_community_activity`` — the summary text and     whether it, SummarizeCommunityResult, _build_child_context(), _build_member_context(), _embed_report(), _gather_context(), _get_embed_model(), _get_store() (+20 more)
+Cohesion: 0.10
+Nodes (29): resolve_graph_for_activity(), _build_child_context(), _build_member_context(), _embed_report(), _gather_context(), _get_embed_model(), _get_store(), _get_summary_llm() (+21 more)
 
 ### Community 100 - "aggregations_graph_ops.py"
 Cohesion: 0.10
 Nodes (12): AggregationsGraphOps, _canonical_label(), _list_literal(), _nebula_fail_soft(), NebulaAggregationsGraphOps, Any, Protocol, Analytics "aggregations" graph ops (read-only, fail-soft counts/histograms/top-N (+4 more)
 
 ### Community 101 - "test_graph: write_entity_article()"
-Cohesion: 0.21
-Nodes (16): Stable sha256 over the entity's facts AND its source-document set.     Order-ind, read_entity_subgraph(), subgraph_hash(), _ctx(), fake_ops(), Monkeypatch build_wiki_graph_ops in wiki_context's own namespace and     return, test_hash_changes_on_description_change(), test_hash_changes_when_a_relation_changes() (+8 more)
+Cohesion: 0.17
+Nodes (20): Read an entity's 1-hop subgraph from the graph store and hash it for change dete, Stable sha256 over the entity's facts AND its source-document set.     Order-ind, Distinct source-document ids that mention this entity, sorted.     Used both for, read_citations(), read_entity_subgraph(), read_source_docs(), subgraph_hash(), _ctx() (+12 more)
 
 ### Community 102 - "test_graph: test_er_graph_ops.py"
 Cohesion: 0.13
@@ -1523,23 +1523,23 @@ Nodes (17): _graph_half(), Records (cypher, param_map) calls; returns canned row
 
 ### Community 103 - "SEARCH.md — search subsystem deep reference"
 Cohesion: 0.05
-Nodes (37): ADR-0002: Claim-check staging через MinIO для тяжёлого состояния workflow, Контекст, Последствия, Рассмотренные альтернативы, Решение, Ссылки, ADR-0006: Milvus HNSW как индекс чанков по умолчанию, Контекст (+29 more)
+Nodes (38): ADR-0006: Milvus HNSW как индекс чанков по умолчанию, Контекст, Последствия, Рассмотренные альтернативы, Решение, Ссылки, ADR-0008: Опциональный native-vector kNN ER поверх окна в 5000 строк, Контекст (+30 more)
 
 ### Community 104 - "retrieval: build_llm()"
-Cohesion: 0.12
-Nodes (22): _parse_triplets_strip_thinking(), KG extractor wiring for the ingestion pipeline.    * **Extractor** — typed `Sche, Wrap the upstream parser with a `<think>...</think>` stripper.      Qwen3 emits, deduplicate_nodes(), node_to_citation(), NodeWithScore, Shared helpers used by both legacy `agentic_search` and the new ReAct / reflecti, Remove `<think>...</think>` / `<thinking>...</thinking>` blocks.      Qwen3 (and (+14 more)
+Cohesion: 0.14
+Nodes (19): deduplicate_nodes(), node_to_citation(), NodeWithScore, Shared helpers used by both legacy `agentic_search` and the new ReAct / reflecti, Remove `<think>...</think>` / `<thinking>...</thinking>` blocks.      Qwen3 (and, Keep first occurrence per `node.node_id`., strip_thinking(), Tests for `src/retrieval/_common.py`. (+11 more)
 
 ### Community 105 - "GraphRetriever"
 Cohesion: 0.09
 Nodes (36): build_page_query(), escape_ngql(), migrate(), Any, Copy every verdict into `cache`.  Returns `(copied, last_key)`.      `last_key`, Escape a string for inline use inside a double-quoted nGQL literal.      Verdict, One page of verdicts, ordered by key, after `last_key`.      `ORDER BY` is what, One page, retried on a transient store refusal.      Both ceilings seen on the l (+28 more)
 
 ### Community 106 - "mcp: _shared.py"
-Cohesion: 0.11
-Nodes (38): _centre_meta(), ChunkRepositoryProtocol, dispatch(), _edges_to_centre(), _entity_row(), filter_by_metadata(), find_entity_by_id(), find_neighbours() (+30 more)
+Cohesion: 0.13
+Nodes (27): build_tool_schema(), _centre_meta(), _edges_to_centre(), _entity_row(), find_entity_by_id(), find_neighbours(), graph_walk(), GraphRetrieverProtocol (+19 more)
 
 ### Community 107 - "workflow: KGExtracted"
-Cohesion: 0.17
-Nodes (22): combined_metadata_filters(), filter_nodes_by_group(), group_metadata_filters(), GroupFilter, node_group_ok(), MetadataFilter, MetadataFilters, Channel-group search filter — the doc_group analogue of date_filters.  `doc_grou (+14 more)
+Cohesion: 0.18
+Nodes (21): combined_metadata_filters(), filter_nodes_by_group(), group_metadata_filters(), GroupFilter, node_group_ok(), MetadataFilter, MetadataFilters, Channel-group search filter — the doc_group analogue of date_filters.  `doc_grou (+13 more)
 
 ### Community 108 - "workflow: test_search_route.py"
 Cohesion: 0.12
@@ -1550,24 +1550,28 @@ Cohesion: 0.08
 Nodes (36): addr_forms(), addr_mutate(), birth_desc(), build_gold(), build_llm(), _decl_name(), _decl_patr(), _decl_surname() (+28 more)
 
 ### Community 110 - "wipe_db.py"
-Cohesion: 0.10
-Nodes (30): confirm(), main(), _pages_to_delete(), _parse_args(), Namespace, DESTRUCTIVE — wipe all data stores.  Drops:   * Temporal   — terminate running +, Drop EVERY collection, not just one graph's chunks collection —     every graph, Wipe the Nebula graph store (mirrors     ``src.graph.store.build_graph_store``). (+22 more)
+Cohesion: 0.11
+Nodes (26): confirm(), main(), _parse_args(), Namespace, DESTRUCTIVE — wipe all data stores.  Drops:   * Temporal   — terminate running +, Drop EVERY collection, not just one graph's chunks collection —     every graph, Wipe the Nebula graph store (mirrors     ``src.graph.store.build_graph_store``)., DROP the whole Nebula space.  ``nebula_schema.ensure_schema``     re-creates the (+18 more)
 
 ### Community 111 - "test_analytics: test_claim_nli.py"
-Cohesion: 0.19
-Nodes (19): build_nli_prompt(), nli_verdict(), parse_nli_verdict(), LLM NLI verdict over a pair of claim values (hybrid method B, iteration 4).  Emb, Tolerant parse → CONTRADICT / AGREE / NEUTRAL. contradiction wins over     agree, Ask the LLM for the NLI relation. Fail-open to NEUTRAL on any error., Drop structurally-flagged contradictions that NLI judges to be mere     phrasing, refine_contradictions() (+11 more)
+Cohesion: 0.17
+Nodes (20): build_nli_prompt(), nli_verdict(), parse_nli_verdict(), LLM NLI verdict over a pair of claim values (hybrid method B, iteration 4).  Emb, Tolerant parse → CONTRADICT / AGREE / NEUTRAL. contradiction wins over     agree, Ask the LLM for the NLI relation. Fail-open to NEUTRAL on any error., Drop structurally-flagged contradictions that NLI judges to be mere     phrasing, refine_contradictions() (+12 more)
+
+### Community 112 - "graph: community_writeback.py"
+Cohesion: 0.13
+Nodes (24): aggregate_by(), CaseScore, check_thresholds(), _contains(), _content_words(), _norm(), Answer-quality eval primitives (R9).  Given a golden Q&A case and a `SearchRespo, Split on sentence terminators; cheap and good-enough for eval. (+16 more)
 
 ### Community 113 - "retrieval: GroupFilter"
-Cohesion: 0.12
-Nodes (23): DetectCommunitiesParams, DetectCommunitiesResult, DetectedCommunity, Input to ``detect_communities_activity`` — Leiden detection.      ``min_size`` d, Slim cross-activity handle the build workflow fans out over to     summarise.  D, Output of ``detect_communities_activity`` — the communities to     summarise.  E, detect_communities_activity(), Run GDS Leiden detection + materialise ``:Community`` nodes.      ``max_levels = (+15 more)
+Cohesion: 0.11
+Nodes (25): DetectCommunitiesParams, DetectCommunitiesResult, DetectedCommunity, Input to ``detect_communities_activity`` — Leiden detection.      ``min_size`` d, Slim cross-activity handle the build workflow fans out over to     summarise.  D, Output of ``detect_communities_activity`` — the communities to     summarise.  E, Output of ``summarize_community_activity`` — the summary text and     whether it, SummarizeCommunityResult (+17 more)
 
 ### Community 114 - "storage: AsyncMediaWiki"
 Cohesion: 0.14
 Nodes (14): AsyncMediaWiki, AsyncClient, Minimal async MediaWiki Action API client (login + read/edit page + sitelink). U, Link a Wikibase Item to its MediaWiki article page. Best-effort., _api_url(), get_mediawiki(), Process-singleton MediaWiki client for wiki activities., _client_returning() (+6 more)
 
 ### Community 115 - "test_analytics: config.py"
-Cohesion: 0.05
-Nodes (48): Minio, Provider, main(), Remove orphaned ``kb-staging/{workflow_run_id}/`` prefixes from MinIO.  Workflow, build_api_container(), build_worker_container(), CommonProvider, BaseEmbedding (+40 more)
+Cohesion: 0.15
+Nodes (15): Provider, build_api_container(), build_worker_container(), CommonProvider, BaseEmbedding, Dishka DI providers.  Two containers:   * **API** — long-lived: shared LLM/embed, Shared singletons available to both API and worker., Worker container — currently exposes only `CommonProvider`.      The Temporal wo (+7 more)
 
 ### Community 116 - "superpowers: DocumentIngestWorkflow"
 Cohesion: 0.08
@@ -1578,8 +1582,8 @@ Cohesion: 0.05
 Nodes (42): 0. Коротко, 10. Производительность (замеры), 11. Эксплуатация, 12. Известные проблемы и ограничения, 13. Ключевые решения и находки (хронология — в `PROGRESS.md`), 14. Что дальше, 1. Железо и ОС, 2. Сеть и доступ (+34 more)
 
 ### Community 118 - "test_scripts: test_tg_ingest_reingest.py"
-Cohesion: 0.15
-Nodes (19): datetime, main(), Reingest the newest ``limit`` messages of each requested channel at     ``priori, Choose the run mode from parsed args: reingest wins over the legacy     backfill, reingest_channels(), select_mode(), _FakeDialog, _FakeEntity (+11 more)
+Cohesion: 0.09
+Nodes (31): dialog_in_folders(), dialog_slug(), _filter_title(), main(), Any, TG → ingest harness: enqueue Telegram messages via POST /api/v1/ingest (which up, Reingest the newest ``limit`` messages of each requested channel at     ``priori, Stable human-ish id for filenames: @username when the dialog has     one, else t (+23 more)
 
 ### Community 119 - "analytics: materialize.py"
 Cohesion: 0.09
@@ -1590,20 +1594,20 @@ Cohesion: 0.27
 Nodes (9): alert_vid(), 32-hex VID for an :Alert, mirroring entity_vid/verdict_vid., _NebulaRecStore, test_nebula_mark_watched_updates_each_entity(), test_nebula_read_alerts_filters_and_sorts_in_python(), test_nebula_upsert_scored_inserts_when_absent(), test_nebula_upsert_scored_refreshes_when_present(), test_nebula_upsert_unscored_inserts_when_absent() (+1 more)
 
 ### Community 121 - "workflow: contextualize.py"
-Cohesion: 0.10
-Nodes (35): _person_forms(), norm -> (parsed name, birth year) for Person items with a parseable     Russian, Drop candidate pairs whose names prove two different persons., _veto_different_persons(), birth_year(), _build(), different_persons(), _is_patronymic() (+27 more)
+Cohesion: 0.11
+Nodes (33): Drop candidate pairs whose names prove two different persons., _veto_different_persons(), birth_year(), _build(), different_persons(), _is_patronymic(), _lower(), parse_person_name() (+25 more)
 
 ### Community 122 - "test_workflow: test_article.py"
 Cohesion: 0.16
 Nodes (22): EntityContext, _fmt_citations(), _fmt_relations(), _fmt_sources(), Bot-section splice + LLM render for entity wiki articles.  The bot owns ONLY the, Replace the marked bot section with `bot_md` (wrapped in markers).     If no mar, Deterministic '== Источники ==' section with download links to the     original, LLM-render the bot section grounded ONLY in `ctx` (graph facts) and     `citatio (+14 more)
 
 ### Community 123 - "test_graph: test_quality_graph_ops.py"
-Cohesion: 0.10
-Nodes (33): main(), Run one analytical query against the knowledge graph.  Usage::      python -m sc, AnalysisPlan, AnalyticsOutcome, AnalyzeParams, _Frozen, PlanInput, Provenance (+25 more)
+Cohesion: 0.09
+Nodes (31): main(), Run one analytical query against the knowledge graph.  Usage::      python -m sc, AnalysisPlan, AnalyzeParams, PlanInput, AnalyticalQueryWorkflow input (epoch-day bounds, like OrchestratorParams)., SynthResult, assemble_provenance() (+23 more)
 
 ### Community 124 - "test_graph: test_signals_graph_ops.py"
-Cohesion: 0.05
-Nodes (86): nebula_fetch(), ``Fetch`` over a NebulaGraphStore: FETCH PROP of the names' VIDs, in batches., current_graph(), Resolve the graph this tool call is bound to.      * HTTP with a verified token:, _ack(), build_feed_cards(), _c(), _candidate() (+78 more)
+Cohesion: 0.04
+Nodes (113): description, Field, nebula_fetch(), ``Fetch`` over a NebulaGraphStore: FETCH PROP of the names' VIDs, in batches., main(), assert_api_key_env_set(), current_graph(), log_banner() (+105 more)
 
 ### Community 125 - "test_graph: test_alerts.py"
 Cohesion: 0.15
@@ -1622,16 +1626,16 @@ Cohesion: 0.36
 Nodes (10): Return a list of actionable config problems (empty == OK).          Hard problem, Boot-time preflight: actionable problems instead of mid-request stack traces., _settings(), test_preflight_clean_prod_has_no_problems(), test_preflight_dev_allows_placeholders(), test_preflight_flags_placeholder_key_in_multikey_api_keys(), test_preflight_flags_placeholder_minio_secret_in_prod(), test_preflight_flags_placeholder_secret_in_prod() (+2 more)
 
 ### Community 129 - "workflow: StagingStore"
-Cohesion: 0.14
-Nodes (14): Any, Find and delete orphaned ``{run_id}/`` prefixes.  Returns         the list of ru, Thin wrapper around the MinIO client for stage blobs., Pickle `obj` and upload to ``{run_id}/{stage}.pkl``.          Returns the full `, Best-effort cleanup of every blob under ``{run_id}/``., Return ``run_id`` prefixes whose newest blob is older than         ``older_than_, StagingStore, Staging helper persists pickled objects to MinIO `kb-staging` and returns an s3: (+6 more)
+Cohesion: 0.18
+Nodes (12): Find and delete orphaned ``{run_id}/`` prefixes.  Returns         the list of ru, Thin wrapper around the MinIO client for stage blobs., Best-effort cleanup of every blob under ``{run_id}/``., Return ``run_id`` prefixes whose newest blob is older than         ``older_than_, StagingStore, Staging helper persists pickled objects to MinIO `kb-staging` and returns an s3:, test_cleanup_orphans_deletes_each_prefix(), test_delete_prefix_lists_then_removes() (+4 more)
 
 ### Community 130 - "eval: identifier_recall.py"
 Cohesion: 0.15
 Nodes (20): check_thresholds(), evaluate_case(), format_report(), _is_extra(), load_cases(), main(), _match(), _parse_args() (+12 more)
 
 ### Community 131 - "retrieval: test_answer_template.py"
-Cohesion: 0.22
-Nodes (13): build_query(), load_template(), Server-side answer templates (Track 6, variant a).  Lets a caller shape the SHAP, Russian-output instruction (the default when no template is set)., Resolve a template.  A bare safe name that matches a file under     ``prompts/an, Compose the synthesis instruction.  No template → the RU preamble;     otherwise, ru_query(), Unit tests for server-side answer templates (Track 6, variant a). (+5 more)
+Cohesion: 0.20
+Nodes (14): build_query(), load_template(), Server-side answer templates (Track 6, variant a).  Lets a caller shape the SHAP, Russian-output instruction (the default when no template is set)., Resolve a template.  A bare safe name that matches a file under     ``prompts/an, Compose the synthesis instruction.  No template → the RU preamble;     otherwise, ru_query(), Unit tests for server-side answer templates (Track 6, variant a). (+6 more)
 
 ### Community 132 - "test_retrieval: _StubGraphRetriever"
 Cohesion: 0.09
@@ -1642,8 +1646,8 @@ Cohesion: 0.12
 Nodes (27): The canonical name to act on, or None (not found / ambiguous)., edge_rows(), epoch_days_to_date(), _is_uuid(), mention_rows(), Any, date, Entity-watch journals written at ingest (``entity_mention``, ``edge_new``).  Pur (+19 more)
 
 ### Community 134 - "ner_eval.py"
-Cohesion: 0.15
-Nodes (18): _accumulate_lang(), Extractor, format_report(), _llm_only_extractor_factory(), main(), NERStats, _norm(), Path (+10 more)
+Cohesion: 0.10
+Nodes (25): _accumulate_lang(), Extractor, format_report(), _llm_only_extractor_factory(), main(), NERStats, _norm(), Path (+17 more)
 
 ### Community 135 - "test_api: test_ingest.py"
 Cohesion: 0.16
@@ -1658,23 +1662,23 @@ Cohesion: 0.07
 Nodes (27): Analytical Layer — Wave 1 Implementation Plan (v1b + P2 + Arc 1 rollups), Codebase-grounded facts (verified — build on these), Execution Handoff, File Structure, Global Constraints, Phase A — Config & contracts, Phase B — Pure composite scoring, Phase C — Offline materialization (v1b core) (+19 more)
 
 ### Community 138 - "test_scripts: test_reresolve_graph.py"
-Cohesion: 0.29
-Nodes (10): _ctx(), Minimal dict payloads for SkipIn / FinalizeIn / MarkFailedIn., _run_input_type(), test_every_workflow_input_carries_graph_id(), test_legacy_payload_without_graph_id_defaults(), test_wrapper_graph_id_mismatching_nested_ctx_is_rejected(), test_wrapper_graph_id_omitted_is_filled_from_nested(), test_wrapper_legacy_payload_without_any_graph_id_is_default() (+2 more)
+Cohesion: 0.23
+Nodes (12): _ctx(), Minimal dict payloads for SkipIn / FinalizeIn / MarkFailedIn., _run_input_type(), test_every_workflow_input_carries_graph_id(), test_legacy_payload_without_graph_id_defaults(), test_mark_failed_without_ctx_takes_graph_id_from_params(), test_mark_failed_wrapper_mismatching_params_is_rejected(), test_wrapper_graph_id_mismatching_nested_ctx_is_rejected() (+4 more)
 
 ### Community 139 - "diagrams: activity: retrieve_subquestion (hybrid)"
 Cohesion: 0.12
 Nodes (21): 3b · coverage gap? — coverage_check (small LLM) decision, extra SubQueryRetrievalWorkflow(gap) — budget max_coverage_rounds (1), dedup by chunk_id, find_entity_by_name — full-text entity lookup, graph_search — path_depth = graph_search_path_depth (1), matched entities + neighbours + chunks, graph_walk (seed) — start = top graph_search entity, hops = graph_walk_hops (2, ≤3), FAIL-OPEN, MCP-1 tool: kb_search(query, max_refinements=3) — @mcp.tool timeout=1800s, submits workflow, polls get_state, MCP client (Hermes / OpenWebUI) (+13 more)
 
 ### Community 141 - "test_graph: index.py"
-Cohesion: 0.08
-Nodes (34): _period_bounds(), _period_in_window(), _polarity_evolution(), date, First and last day covered by a bucket key from     ``epoch_days_to_period``., Keep a bucket that OVERLAPS the window.      Overlap rather than containment: a, No `period_start`/`value` here, deliberately — see the tool docstring.      Rows, How often a topic is mentioned across ingested documents, per period     — the c (+26 more)
+Cohesion: 0.09
+Nodes (31): _period_bounds(), _period_in_window(), date, First and last day covered by a bucket key from     ``epoch_days_to_period``., Keep a bucket that OVERLAPS the window.      Overlap rather than containment: a, How often a topic is mentioned across ingested documents, per period     — the c, _topic_trend(), Same two boundaries across every bucket shape, since each one     computes its b (+23 more)
 
 ### Community 142 - "test_retrieval: test_query_planner.py"
-Cohesion: 0.16
+Cohesion: 0.18
 Nodes (19): decompose(), _parse_subquestions(), LLM, Query decomposition for the plan-execute search flow (R2).  A compound question, Parse the planner's reply into a list of sub-questions.      Tolerant of three s, Split ``question`` into ≤``max_subqueries`` sub-questions.      Returns ``[quest, _strip_marker(), Unit tests for the query planner (R2 plan-execute flow).  Stubs the LLM so the s (+11 more)
 
 ### Community 143 - "test_workflow: MapCommunitiesParams"
-Cohesion: 0.19
+Cohesion: 0.17
 Nodes (10): Temporal worker / client connection settings., TemporalSettings, And the operator's value wins over that default., test_community_backend_default_is_leidenalg(), test_community_backend_is_constrained(), test_community_backend_reads_the_environment(), test_legacy_gds_value_maps_to_leidenalg(), Dedicated merge queue (decouples GraphBuildWorkflow's merge stage     from a bur (+2 more)
 
 ### Community 144 - "test_graph_edge_export.py"
@@ -1682,8 +1686,8 @@ Cohesion: 0.08
 Nodes (25): Analytical Layer — Wave 2 Implementation Plan (E2 + Arc 2 + P3), Codebase-grounded facts (verified — build on these), Execution Handoff, File Structure, Global Constraints, Phase A — Config, Phase B — E2 event extraction, Phase C — E2 read primitives (+17 more)
 
 ### Community 145 - "test_ingest_queue: RabbitMQSettings"
-Cohesion: 0.04
-Nodes (55): AbstractRobustConnection, Event, _main(), Idempotently create/update the Temporal Schedule that runs MonitorSweepWorkflow, _main(), Idempotently create/update the Temporal Schedule that runs WikiSweepWorkflow eve, monitor_sweep(), monitor_watch() (+47 more)
+Cohesion: 0.06
+Nodes (34): AbstractChannel, AbstractQueue, Event, check_milvus(), check_postgres(), main(), Diagnostic — show what landed in each backend after ingestion.  Pings every stor, RabbitMQSettings (+26 more)
 
 ### Community 146 - "test_retrieval: test_hybrid.py"
 Cohesion: 0.10
@@ -1702,7 +1706,7 @@ Cohesion: 0.14
 Nodes (14): 10. Testing, 11. Migration, 12. Open Questions / Follow-ups, 1. Motivation, 2. Scope, 3. Architecture, 4. Workflow Definition, 5. Activities (+6 more)
 
 ### Community 151 - "analytics: StepResult"
-Cohesion: 0.12
+Cohesion: 0.13
 Nodes (29): StepResult, build_synthesis_prompt(), extract_numbers(), faithfulness_score(), _norm(), numbers_in_rows(), ChatMessage, Synthesis prompt + numeric-faithfulness checker.  The LLM verbalizes; it must no (+21 more)
 
 ### Community 152 - "test_graph: test_alert_store.py"
@@ -1718,8 +1722,8 @@ Cohesion: 0.16
 Nodes (15): _default_entity_types(), gliner_ner_callable(), GLiNERExtractor, _load_gliner(), Any, BaseNode, TransformComponent, Optional GLiNER span-based entity extractor as a LlamaIndex ``TransformComponent (+7 more)
 
 ### Community 155 - "test_graph: test_communities_graph_ops.py"
-Cohesion: 0.08
-Nodes (30): MonitorIn, missing_graph(), _MissingRegistry, Task 8: storage activities resolve their GraphContext from the input's ``graph_i, Task 11 / D6: the wiki is default-graph-only in Plan A — a non-default     inges, test_deliver_alerts_unavailable_graph_is_not_swallowed(), test_detect_alerts_unavailable_graph_is_not_swallowed(), test_documents_for_communities_uses_input_graph() (+22 more)
+Cohesion: 0.12
+Nodes (19): _fetch_names(), _go(), _is_known_stmt(), _NebulaBurstStore, _NebulaStmtStore, MonkeyPatch, Tests for detect_alerts activity (Arc 2 monitoring sweep)., When both endpoints are watched, two new_connection alerts are emitted. (+11 more)
 
 ### Community 156 - "diagrams: Temporal Worker (activities + workflows"
 Cohesion: 0.16
@@ -1734,28 +1738,28 @@ Cohesion: 0.20
 Nodes (17): build_extract_prompt(), extract_claims(), _one(), parse_claims(), Claim, LLM extraction of atomic claims from a document (offline, hybrid method B).  Mir, Pure, tolerant parse of an LLM claims array. Never raises., Extract claims from one document. Fail-open ([]) on any LLM error. (+9 more)
 
 ### Community 159 - "test_graph: test_analysis_nebula.py"
-Cohesion: 0.11
-Nodes (15): build_community_summarize(), CommunitySummarize, NebulaCommunitySummarize, Any, Protocol, Community SUMMARIZE I/O (context reads + report write).  `NebulaCommunitySummari, nGQL community SUMMARIZE. UPDATE VERTEX is a partial update (preserves     BUILD, community_vid() (+7 more)
+Cohesion: 0.17
+Nodes (7): build_community_summarize(), CommunitySummarize, NebulaCommunitySummarize, Any, Protocol, Community SUMMARIZE I/O (context reads + report write).  `NebulaCommunitySummari, nGQL community SUMMARIZE. UPDATE VERTEX is a partial update (preserves     BUILD
 
 ### Community 160 - "graph: CanonicalLinker"
 Cohesion: 0.19
 Nodes (11): CanonicalCandidate, CanonicalLinker, Any, Canonical entity linker — resolve a mention to an existing Wikibase QID.  Turns, One linking candidate — an existing Wikibase item.      ``score`` is an alias-ma, Resolve a mention → existing Wikibase QID, else ``None``.      ``index`` exposes, Return the QID this mention links to, or ``None`` to mint new., _FakeIndex (+3 more)
 
 ### Community 161 - "graph_edge_export.py"
-Cohesion: 0.21
-Nodes (7): build_graph_edge_export(), GraphEdgeExport, NebulaGraphEdgeExport, Any, Protocol, Graph edge EXPORT (Leiden read-phase).  ``NebulaGraphEdgeExport`` implements the, nGQL graph edge EXPORT. Node names via keyset ``LOOKUP``; edges via a     batche
+Cohesion: 0.12
+Nodes (16): build_graph_edge_export(), GraphEdgeExport, NebulaGraphEdgeExport, Any, Protocol, Graph edge EXPORT (Leiden read-phase).  ``NebulaGraphEdgeExport`` implements the, nGQL graph edge EXPORT. Node names via keyset ``LOOKUP``; edges via a     batche, Fake nebula store: records nGQL (asserts inline, no param_map);     returns cann (+8 more)
 
 ### Community 162 - "graph: lightrag_extract.py"
 Cohesion: 0.05
 Nodes (43): 0. Весь слой на пальцах (прочитайте это, если у вас 10 минут), 10.1 Воронка (от макро к микро), 10.2 Чек-лист недоверия (вешать над монитором), 10. Методология: воронка аналитика и чек-лист недоверия, 11. Справочник: примитивы → теория, 1.1 От property graph к графу анализа, 1.2 Три измерения поверх топологии, 1.3 Двудольная природа и co-occurrence (+35 more)
 
 ### Community 163 - "test_graph: write_with_retry()"
-Cohesion: 0.08
-Nodes (25): 1. Registry and GraphContext, 2. Propagation of graph_id, 3. Graph lifecycle, 4. Background jobs and per-graph compute, 5. Errors, testing, rollout, API keys — `POST /admin/api-keys`, `DELETE /admin/api-keys/{hash}` (admin), Create — `POST /admin/graphs` (admin), Decisions (from brainstorming) (+17 more)
+Cohesion: 0.07
+Nodes (26): 1. Registry and GraphContext, 2. Propagation of graph_id, 3. Graph lifecycle, 4. Background jobs and per-graph compute, 5. Errors, testing, rollout, Amendment 2026-10-17 — keys authenticate only, API keys — `POST /admin/api-keys`, `DELETE /admin/api-keys/{hash}` (admin), Create — `POST /admin/graphs` (admin) (+18 more)
 
 ### Community 164 - "test_mcp: test_tools_server.py"
-Cohesion: 0.05
-Nodes (46): AbstractAsyncContextManager, Lane, LLMPool, Any, LLM, LLMRole, Test hook - drop the singleton so the next get_llm_pool rebuilds., A named counting async gate: bounded concurrency + an in_use counter.      Usabl (+38 more)
+Cohesion: 0.09
+Nodes (25): AbstractAsyncContextManager, BoundedLLM, Any, LLM, Bounded-concurrency wrapper for the project LLM.  The default LlamaIndex ``LLM``, Return an already-wrapped LLM untouched; wrap a raw one.      Lets DI bootstrap, Wraps an LLM with a process-wide asyncio.Semaphore, or through an     ordered li, wrap_if_needed() (+17 more)
 
 ### Community 165 - "run_answer_eval.py"
 Cohesion: 0.23
@@ -1790,8 +1794,8 @@ Cohesion: 0.14
 Nodes (26): _dedup(), detect_contradictions(), detect_edges(), detect_mentions(), Any, Entity-watch sweep: journals past a cursor -> events for watched entities.  Pure, One pass over every journal past its cursor. Returns detected events     by kind, run_watch_sweep() (+18 more)
 
 ### Community 173 - "er_graph_ops.py"
-Cohesion: 0.11
-Nodes (23): Scorer, entity_text(), GraphRanker, match_bucket(), Any, Relevance ranking of graph tool results against a question.  The graph tools ret, Like ``rank``, plus ``meta``: ``ranked`` (a scorer's order was applied),, _Data (+15 more)
+Cohesion: 0.10
+Nodes (24): Scorer, entity_text(), GraphRanker, match_bucket(), Any, Relevance ranking of graph tool results against a question.  The graph tools ret, Like ``rank``, plus ``meta``: ``ranked`` (a scorer's order was applied),, _Data (+16 more)
 
 ### Community 174 - "test_retrieval: RoundGraphData"
 Cohesion: 0.09
@@ -1802,8 +1806,8 @@ Cohesion: 0.08
 Nodes (23): `/agent` — ReAct loop, Cost / latency — реальные числа, Cost ownership — что стоит re-ingest, Cross-chunk merge, Entity Resolution — что vector сам не разрулит, ER: 12-step pipeline, ER: трейдоффы, Ingestion pipeline — 5 шагов (+15 more)
 
 ### Community 176 - "test_graph: test_community_read.py"
-Cohesion: 0.12
-Nodes (24): build_extraction_llm(), High-volume KG triple extraction + translation (small tier)., EventsExtractor, EventStats, format_report(), _keys_by_type(), _llm_events_extractor_factory(), main() (+16 more)
+Cohesion: 0.20
+Nodes (21): GoldenCase, load_golden_cases(), Path, Score one (case, response) pair.      `sources`: each dict must have `chunk_id`, One entry from `golden_qa/*.json`., score_case(), Unit tests for `tests/eval/answer_quality.py` — the scorer.  These tests run wit, If the answer simply doesn't mention the topic, we don't     penalize — honesty (+13 more)
 
 ### Community 177 - "ingest_scale_bottlenecks.svg: DocumentIngestWorkflow"
 Cohesion: 0.15
@@ -1818,12 +1822,12 @@ Cohesion: 0.13
 Nodes (9): The stats DDL is asserted as text, not by hitting a live Postgres — the point is, Not pinned as a literal string: the expected clause is built here     from the s, A nullable `dims` would silently break the UNIQUE constraint,     because NULL n, DROP CONSTRAINT IF EXISTS before ADD CONSTRAINT is what makes     re-running thi, `setup_db` must exit 0 both times it is run against an     already-created table, test_constraints_ddl_drops_before_it_adds_so_reruns_never_conflict(), test_dims_is_not_null_with_empty_default(), test_indicator_constrains_value_kind_and_granularity() (+1 more)
 
 ### Community 180 - "test_analytics: ids.py"
-Cohesion: 0.18
+Cohesion: 0.17
 Nodes (10): _base(), Case, female_surname(), main(), Org, Person, date, Build a synthetic "world" of criminal cases with known ground truth.  Every docu (+2 more)
 
 ### Community 181 - "bot: pipeline.py"
-Cohesion: 0.17
-Nodes (15): is_allowed(), parse_allowed_users(), Telegram user whitelist. An empty whitelist denies EVERYONE — a personal KB bot, True iff ``user_id`` is whitelisted. Empty whitelist → always False., Parse a comma-separated ``BOT_ALLOWED_USERS`` into a set of user ids.     Non-in, Seeding the first administrators.  Its own module rather than part of the entryp, Whitelist access control (TDD). Empty whitelist = deny-all (secure default)., test_allowed_user_passes() (+7 more)
+Cohesion: 0.15
+Nodes (16): is_allowed(), parse_allowed_users(), Telegram user whitelist. An empty whitelist denies EVERYONE — a personal KB bot, True iff ``user_id`` is whitelisted. Empty whitelist → always False., Parse a comma-separated ``BOT_ALLOWED_USERS`` into a set of user ids.     Non-in, The bot's answer pipeline: whitelist → session → follow-up rewrite → KB search →, Seeding the first administrators.  Its own module rather than part of the entryp, Whitelist access control (TDD). Empty whitelist = deny-all (secure default). (+8 more)
 
 ### Community 182 - "bot: with_fallback()"
 Cohesion: 0.26
@@ -1839,7 +1843,7 @@ Nodes (30): 0. Продакшен: контейнеризованный compose,
 
 ### Community 185 - "graph: community_read.py"
 Cohesion: 0.04
-Nodes (68): MilvusClient, AsyncPostgres, Any, AsyncConnection, UUID, Append resolved fact conflicts to the `fact_supersede` audit log.          `rows, Return `(doc_id, path)` for every registered document.          Used by the lega, Per-key (channel or group) count of each pipeline status.          `dimension` M (+60 more)
+Nodes (84): messages_stats(), MessagesStatsResponse, BaseModel, date, Processed-message statistics over the `documents` table.  Two read-only endpoint, StatRow, timeline_stats(), TimelineBucket (+76 more)
 
 ### Community 186 - "ingestion: identifier_transform.py"
 Cohesion: 0.17
@@ -1862,24 +1866,24 @@ Cohesion: 0.28
 Nodes (17): test_search_tool_refusal_starts_no_workflow(), test_search_tools_carry_bound_graph_into_workflow_params(), _fake_ctx(), _outcome(), Date-interval params on the MCP-1 search tools (mirrors the REST ``/search/local, No date params supplied → all four epoch fields stay None (prior     behaviour,, _stub_client(), test_kb_auto_search_invalid_date_returns_error_without_raising() (+9 more)
 
 ### Community 192 - "merge_identifier_duplicates.py"
-Cohesion: 0.18
-Nodes (9): _DeadSession, _LiveSession, NebulaGraphStore self-heals an expired session.  Regression: graphd kills idle s, execute() always reports an expired (server-killed) session., _Resp, test_run_does_not_reconnect_on_ordinary_failure(), test_run_reconnects_on_execute_exception(), test_run_reconnects_on_expired_session() (+1 more)
+Cohesion: 0.21
+Nodes (19): count_entities(), count_relationships(), CountEntitiesParams, CountRelationshipsParams, distribution_by_polarity(), distribution_by_relation_type(), distribution_by_type(), DistributionByPolarityParams (+11 more)
 
 ### Community 193 - "set_admission.py: get_temporal_client()"
-Cohesion: 0.12
-Nodes (29): ExecInput, PrimitiveCall, step_from_primitive(), execute_step(), Run a single primitive from CATALOG; fail-soft on unknown primitive or bad kwarg, test_step_from_primitive_counts_rows(), test_step_from_primitive_default_error_detail_is_empty(), test_step_from_primitive_default_error_is_empty() (+21 more)
+Cohesion: 0.15
+Nodes (24): ExecInput, PrimitiveCall, SynthInput, _MentionsStore, _NebulaLikeStore, Tests for src/workflow/analytics/activities.py (Task 12)., The per-request `error` field on StepResult answers "did this fire on my     req, StepResult.error feeds the synthesis prompt (and, from there, can reach     the (+16 more)
 
 ### Community 194 - "graph: alert_store.py"
-Cohesion: 0.04
-Nodes (60): Composed, mirror_entities(), Fail-soft mirror of graph entities into the Postgres `entity` table.  Called fro, Upsert entity rows into Postgres. Fail-soft, fail-FAST.      ``timeout=1`` decou, Entity-resolution GRAPH ops (verdict cache + edge-redirect merge).  ``NebulaERGr, # NOTE: do NOT catch exceptions here — `structured_query` raises on, Pure-functional extractor that turns Temporal workflow history into ``MetricRow`, Static map activity_name → LLM role.  Used by ``ingest_metrics_extractor.parse_a (+52 more)
+Cohesion: 0.08
+Nodes (29): AsyncIngestMetrics, build_ingest_metrics_store(), MetricRow, BaseModel, Factory consistent with the rest of ``src/storage/``.  Callers pass     the grap, One activity-execution attempt, schema-mirroring ingest_metrics.      Frozen — e, Bulk INSERT wrapper with ON CONFLICT DO NOTHING.      The conflict target ``(wor, Bulk-insert measurement rows, returning the count of         rows actually writt (+21 more)
 
 ### Community 195 - "graph: event_ts_resolver.py"
-Cohesion: 0.08
-Nodes (40): Prepend the channel group so the synthesis LLM sees each source's     type/trust, with_group_prefix(), Wire-friendly projection of LlamaIndex ``NodeWithScore``.      Only the bits the, Input to the ``synthesize_answer`` activity., SerializedNode, SynthesizeParams, apply_group_weights(), Bias rerank order by channel group. The cross-encoder emits unbounded     logits (+32 more)
+Cohesion: 0.07
+Nodes (47): ``synthesize_answer`` activity — final answer composition.  Plain ResponseSynthe, Prepend the channel group so the synthesis LLM sees each source's     type/trust, Compose the final answer over accumulated context., synthesize_answer(), with_group_prefix(), Wire-friendly projection of LlamaIndex ``NodeWithScore``.      Only the bits the, Input to the ``synthesize_answer`` activity., SerializedNode (+39 more)
 
 ### Community 196 - "test_api: test_search_v2_routes.py"
-Cohesion: 0.15
-Nodes (20): EntitiesFn, make_agent(), Ask the openclaw agent one question over its OpenAI-compatible endpoint.  opencl, Build `agent(question) -> answer`. Raises on non-2xx / transport     error so th, make_rewrite(), Build an async ``rewrite(history, question) -> standalone_query`` backed     by, _api_key(), build_ctx() (+12 more)
+Cohesion: 0.30
+Nodes (10): make_agent(), Ask the openclaw agent one question over its OpenAI-compatible endpoint.  opencl, Build `agent(question) -> answer`. Raises on non-2xx / transport     error so th, _patch(), The openclaw agent client — a plain OpenAI call, against a mock transport., openclaw maps OpenAI `user` to its sessionKey — this is what makes a     follow-, test_empty_choices_yield_empty_string(), test_posts_model_and_message() (+2 more)
 
 ### Community 197 - "test_analytics: _FakeOps"
 Cohesion: 0.32
@@ -1926,12 +1930,12 @@ Cohesion: 0.15
 Nodes (18): BaseRetriever, BM25Retriever, build_bm25_retriever(), build_hybrid_retriever(), BaseNode, LLM, VectorStoreIndex, Hybrid retrieval — BM25 + dense vector + RRF fusion.  NOT wired into the active (+10 more)
 
 ### Community 210 - "test_retrieval: test_atomic_tools.py"
-Cohesion: 0.22
-Nodes (14): Map AnalyzeRequest → AnalyzeParams., _to_params(), AnalyzeRequest, AnalyzeResponse, BaseModel, Request/response models for POST /api/v1/analyze., _api_key_header(), _post_analyze() (+6 more)
+Cohesion: 0.19
+Nodes (20): AnalyticsOutcome, Provenance, analyze(), `POST /api/v1/analyze` — plan → compute → synthesize analytical Q&A., Map AnalyzeRequest → AnalyzeParams., _to_params(), AnalyzeRequest, AnalyzeResponse (+12 more)
 
 ### Community 211 - "test_storage: test_minio_stream.py"
-Cohesion: 0.13
-Nodes (13): Fetch, _ambiguous(), Candidate, Lexicon, NameResolver, _none(), Any, Protocol (+5 more)
+Cohesion: 0.08
+Nodes (33): mirror_entities(), Fail-soft mirror of graph entities into the Postgres `entity` table.  Called fro, Upsert entity rows into Postgres. Fail-soft, fail-FAST.      ``timeout=1`` decou, _ambiguous(), Candidate, Lexicon, _none(), Any (+25 more)
 
 ### Community 212 - "superpowers: NebulaGraph cutover — neo4j decommissioned"
 Cohesion: 0.20
@@ -1942,24 +1946,24 @@ Cohesion: 0.12
 Nodes (15): Assumptions (confirmed), Batched execution, Component 1 — config.py as the single source of truth, Component 2 — fail-fast preflight at boot, Component 3 — auto-initialization (no manual host scripts), Component 4 — one command, Component 5 — platform + model prefetch, Component 6 — prod-correct defaults exposed (+7 more)
 
 ### Community 214 - "test_workflow: dispatch_for_route()"
-Cohesion: 0.11
-Nodes (55): Primitive, PrimitiveResult, clamp_top_n(), Clamp a requested row cap into ``[1, hard_max]``; ``None``/<=0 → default., count_entities(), count_relationships(), CountEntitiesParams, CountRelationshipsParams (+47 more)
+Cohesion: 0.12
+Nodes (43): PrimitiveResult, clamp_top_n(), Clamp a requested row cap into ``[1, hard_max]``; ``None``/<=0 → default., alerts(), Any, common_connections(), CommonConnectionsParams, connection_path() (+35 more)
 
 ### Community 216 - "Neo4jAggregationsGraphOps"
 Cohesion: 0.12
 Nodes (16): community_overview(), CommunityOverviewParams, entity_communities(), EntityCommunitiesParams, _Params, personalized_pagerank(), PersonalizedPagerankParams, Any (+8 more)
 
 ### Community 217 - "Neo4jAnalyticsGraphOps"
-Cohesion: 0.16
-Nodes (16): inflects(), _latin(), Entity-name normalization shared by the KB name resolver and the Lens board keys, Strip one case ending from each Cyrillic word of a ``norm_name`` string (stem ≥, Letter-for-letter romanization: no folds, doubled letters kept., A translit-key hit for a short name (≤ 4 letters) must also match letter for let, Is ``query`` ``name`` with case endings («Росатомом» / "Rosatom", «Алексея Лихач, _romanized() (+8 more)
+Cohesion: 0.18
+Nodes (16): ChunkRepositoryProtocol, dispatch(), filter_by_metadata(), get_chunks_by_doc_id(), graph_search(), NodeWithScore, Protocol, Knowledge-graph traversal: matched entities + their neighbours up     to ``depth (+8 more)
 
 ### Community 218 - "workflow: retrieve.py"
-Cohesion: 0.15
-Nodes (14): main(), bge-m3 dense cosine for each eval pair (same text ER embeds: "name: desc" or nam, text(), MapPartialParams, Input to ``map_community_partial`` — produce a partial answer for     ONE commun, is_relevant_partial(), map_community_partial(), Pure: did the MAP model return a usable partial (not the 'НЕТ'     refusal)?  To (+6 more)
+Cohesion: 0.18
+Nodes (16): parse_and_chunk(), Ctx, `parse_and_chunk` — read + split + identifier-canon + translate.  Runs the Llama, _scrub(), Path, `parse_and_chunk` runs the LlamaIndex IngestionPipeline + writes the resulting n, Date-filter feature: parse_and_chunk stamps doc_date_epoch /     inserted_at_epo, Channel-groups feature: parse_and_chunk stamps doc_group on every     chunk from (+8 more)
 
 ### Community 219 - "test_retrieval: test_graph_path_depth.py"
-Cohesion: 0.05
-Nodes (67): build_graph_store(), Graph store factory — NebulaGraph is the only backend., Return the process-global NebulaGraph store for ``graph``'s space., Resolve an activity's graph; unknown/non-ready graphs fail the activity for good, resolve_graph_for_activity(), `build_property_graph` — Chunk + MENTIONS + entity/relation upsert., fetch_source(), Ctx (+59 more)
+Cohesion: 0.08
+Nodes (26): heartbeat_every(), Any, Background heartbeater for long-running Temporal activities.  A long activity th, Emit ``activity.heartbeat(detail)`` every ``interval_s`` seconds     while the w, deliver_alerts(), detect_alerts(), _get_store(), Any (+18 more)
 
 ### Community 220 - "diagrams: GlobalSearchWorkflow (mode=global): GraphRAG map-reduce over"
 Cohesion: 0.29
@@ -1970,12 +1974,16 @@ Cohesion: 0.15
 Nodes (13): A. Hierarchy from one Leiden run (`#2`), Approach, B. Structured reports, bottom-up + incremental (`#2`), C. Dynamic selection for global/drift (`#1`), Components touched, Data flow, Hierarchical communities + dynamic selection design, Error handling / back-compat (+5 more)
 
 ### Community 223 - "message_stats.py"
-Cohesion: 0.09
-Nodes (20): event_dossier(), event_timeline(), EventDossierParams, EventTimelineParams, _Params, Any, BaseModel, E2 event read primitives — event_dossier + event_timeline. (+12 more)
+Cohesion: 0.15
+Nodes (6): EventsLlmGraphOps, NebulaEventsLlmGraphOps, Any, Protocol, Analytics "events_llm" graph ops (E2 event reads, read-only, fail-soft): event_c, FETCH the event columns for a set of VIDs, keyed by vid; only rows         whose
 
 ### Community 224 - "test_config: test_preflight.py"
-Cohesion: 0.16
-Nodes (21): Names in a free-text request that resolve to a KB entity at an exact level:, resolve_spans(), Name resolution cascade over a fake mirror + graph built from live facts (2026-0, resolver(), test_a_query_inside_a_long_name_scores_below_a_short_one(), test_a_typo_is_not_taken_for_another_name_plus_an_ending(), test_alias_beats_translit_and_is_reported(), test_casefold_and_other_script_spellings() (+13 more)
+Cohesion: 0.10
+Nodes (31): Fetch, NameResolver, Names in a free-text request that resolve to a KB entity at an exact level:, resolve_spans(), Name resolution cascade over a fake mirror + graph built from live facts (2026-0, resolver(), test_a_query_inside_a_long_name_scores_below_a_short_one(), test_a_typo_is_not_taken_for_another_name_plus_an_ending() (+23 more)
+
+### Community 225 - "AnalyticsGraphOps"
+Cohesion: 0.12
+Nodes (5): AnalyticsGraphOps, _nebula_fail_soft(), Protocol, Analytics "connections" graph ops (read-only, fail-soft neighbourhood reads).  E, ``run_rows``-style ``try/except -> []`` (same     warning log) at the method lev
 
 ### Community 226 - "test_graph: test_store.py"
 Cohesion: 0.27
@@ -2002,16 +2010,16 @@ Cohesion: 0.26
 Nodes (11): cluster_claims(), cosine(), Claim, EmbedFn, Greedy single-pass clustering of claims by slot-embedding similarity.     Each c, _slot_text(), _embed(), Semantic claim clustering (TDD): group claims about the same fact slot across di (+3 more)
 
 ### Community 232 - "test_graph: test_retriever_fulltext.py"
-Cohesion: 0.14
-Nodes (12): GraphRetriever, Async graph search over the NebulaGraph store (nGQL + Milvus kNN)., Similarity retrieval over the KG. ``path_depth`` overrides how         many hops, Bounded N-hop traversal from ``start_entity``.          ``node_cap`` / ``edge_ca, Lexical seeds from the Postgres entity mirror. Fail-soft: an         outage here, graph_search under nebula: union vector kNN (``er_vec`` in Milvus)         and l, Tests for the entity-name lookup helper (``afind_entities_by_name``).  Row mappi, _retriever() (+4 more)
+Cohesion: 0.07
+Nodes (28): _dedupe_entities(), _dedupe_relations(), _find_by_name_ngqls(), GraphRetriever, _name_fetch_cap(), _name_terms(), _rank_by_name(), Graph-search wrapper for the agent loop.  Returns a ``RoundGraphData`` with stru (+20 more)
 
 ### Community 234 - "eval: bench_flat_vs_hnsw()"
 Cohesion: 0.12
 Nodes (16): Analytical Layer — Wave 3 Implementation Plan (E3 trending/burst + alert push), File Structure, Global Constraints, Phase A — Config, Phase B — E3 burst engine + primitive, Phase C — E3 burst alerts in the sweep, Phase D — Push delivery, Phase E — Integration (+8 more)
 
 ### Community 235 - "CONCEPTS.md: LLMPool concurrency gating"
-Cohesion: 0.10
-Nodes (32): ChannelsFn, _headers(), make_search(), make_search_full(), KB search adapter for the bot: POST /api/v1/search/{mode} and return the synthes, Every KB call carries the key AND the graph it is bound to (BOT_GRAPH),     so a, Build an async ``search(query) -> answer`` bound to one search mode.      Raises, Like ``make_search`` but returns the WHOLE payload, not just the text.      ``ma (+24 more)
+Cohesion: 0.09
+Nodes (39): ChannelsFn, EntitiesFn, make_rewrite(), Build an async ``rewrite(history, question) -> standalone_query`` backed     by, _api_key(), build_ctx(), main(), Ctx (+31 more)
 
 ### Community 240 - "superpowers: WikiSweepWorkflow (dirty-entity sweep)"
 Cohesion: 0.13
@@ -2026,8 +2034,8 @@ Cohesion: 0.24
 Nodes (18): _get(), _get_variant(), _key(), ASGI tests for GET /api/v1/documents/{doc_id}., stat/stream keyed by URI so the test can see which object was served., _row(), _row2(), _storage() (+10 more)
 
 ### Community 243 - "test_graph: _FakeWriteback"
-Cohesion: 0.36
-Nodes (7): doc_id list → relative download links (preserves order)., to_document_refs(), _key(), The search response carries documents[] (links) built from outcome.documents., _stub_client(), test_local_response_has_documents(), test_to_document_refs_builds_urls()
+Cohesion: 0.47
+Nodes (5): _key(), The search response carries documents[] (links) built from outcome.documents., _stub_client(), test_local_response_has_documents(), test_to_document_refs_builds_urls()
 
 ### Community 244 - "superpowers: LLMPool (per-process role-keyed pool)"
 Cohesion: 0.09
@@ -2042,8 +2050,8 @@ Cohesion: 0.08
 Nodes (26): 10. Troubleshooting, 11. Cross-references, 1. Three-server overview, 2. Запуск, 3.1 Контракт, 3.2 Что происходит под капотом, 3.3 Cancellation, 3.4 Concurrency защита (+18 more)
 
 ### Community 247 - "retrieval: GraphRetrieverProtocol"
-Cohesion: 0.09
-Nodes (32): _cosine(), _deep_normalize(), _deterministic_pairs(), _is_ascii_name(), _is_cyrillic_name(), _load_verdict_cache(), _name_token_overlap(), _name_tokens() (+24 more)
+Cohesion: 0.39
+Nodes (7): _partition_cached(), Order-insensitive cache key for a candidate pair.      Keyed on `(norm, label)`, Split `pairs` into `(cached, uncached)`.      `cached` is a list of `(pair, verd, _verdict_key(), _Item, test_partition_cached_splits_known_from_unknown(), test_verdict_key_is_order_insensitive()
 
 ### Community 248 - "test_observability: test_litellm_models.py"
 Cohesion: 0.31
@@ -2053,9 +2061,13 @@ Nodes (8): _proxy_returns(), Unit tests for the LiteLLM model-validator that run
 Cohesion: 0.20
 Nodes (12): EntityLexicon, _like_prefix(), Any, q_alias(), q_norm(), q_prefix(), q_translit(), q_translit_word() (+4 more)
 
+### Community 250 - "test_workflow: _FakeNebulaStore"
+Cohesion: 0.18
+Nodes (4): build_community_writeback(), CommunityWriteback, Any, Protocol
+
 ### Community 251 - "nebula_bootstrap.py: _connect()"
 Cohesion: 0.07
-Nodes (51): _candidate_pairs(), Compute candidate pairs grouped by label.      Returns `(auto_merges, borderline, bench_cost_curve(), bench_dedup_recall(), _candidate_norm_pairs(), ER candidate-generation scaling + duplicate-recall benchmark.  Drives the REAL `, Run _candidate_pairs and return the surfaced pairs as norm-sets., Time ``_candidate_pairs`` at each entity count.  Returns one row     per size; ` (+43 more)
+Nodes (49): bench_cost_curve(), bench_dedup_recall(), _candidate_norm_pairs(), ER candidate-generation scaling + duplicate-recall benchmark.  Drives the REAL `, Run _candidate_pairs and return the surfaced pairs as norm-sets., Time ``_candidate_pairs`` at each entity count.  Returns one row     per size; `, For each ``knn_k``, fraction of planted duplicate pairs surfaced     as candidat, bench_flat_vs_hnsw() (+41 more)
 
 ### Community 253 - "superpowers: EntityVectorStore seam (knn/upsert)"
 Cohesion: 0.22
@@ -2071,19 +2083,19 @@ Nodes (11): build_er_graph_ops(), _CompositeERGraphOps, Verdict cache in Postgre
 
 ### Community 256 - "test_scripts: _pages_to_delete()"
 Cohesion: 0.07
-Nodes (30): BinaryIO, MinioSettings, S3-compatible upload storage.      User uploads land in `bucket` synchronously f, MinioStorage, Path, Yield the object's bytes in chunks, releasing the HTTP         connection in a f, Split an ``s3://bucket/key`` URI into ``(bucket, key)``.          Raises ``Value, Thin sync wrapper around the official MinIO client.      Keeps the bucket name + (+22 more)
+Nodes (32): BinaryIO, MinioSettings, S3-compatible upload storage.      User uploads land in `bucket` synchronously f, MilvusClient, MinioStorage, Path, MinIO storage wrapper for user-uploaded documents.  `/api/v1/ingest` writes each, Yield the object's bytes in chunks, releasing the HTTP         connection in a f (+24 more)
 
 ### Community 257 - "KbGraphStore"
 Cohesion: 0.32
 Nodes (4): KbGraphStore, Any, Protocol, The graph-store surface the app actually uses.  A narrow subset of LlamaIndex's
 
 ### Community 258 - "test_analytics: test_domain.py"
-Cohesion: 0.08
-Nodes (18): _NebulaStmtStore, _ngql_list(), nGQL fake keyed on the EXACT statements the nebula seam issues.      ``responses, Inline-quoted nGQL value list (vids or labels), in the given order     (mirrors, test_community_overview_reads_level(), test_entity_communities_by_name(), test_communication_stats_counts_pairs(), test_issue_resolution_stats_computes_rate() (+10 more)
+Cohesion: 0.10
+Nodes (18): _NebulaStmtStore, _ngql_list(), nGQL fake keyed on the EXACT statements the nebula seam issues.      ``responses, Inline-quoted nGQL value list (vids or labels), in the given order     (mirrors, test_community_overview_reads_level(), test_entity_communities_by_name(), _fetch_name_label(), test_entity_dossier_assembles_sections() (+10 more)
 
 ### Community 259 - "test_graph: test_community_vector_store.py"
-Cohesion: 0.18
-Nodes (17): main(), pass_aliases(), pass_liveness(), pass_names(), _pg(), plan_aliases(), Any, Backfill for KB name resolution (src/graph/name_resolution.py). Resumable, idemp (+9 more)
+Cohesion: 0.23
+Nodes (17): LLMVerdict, BaseModel, ClassifyIn, Input to the ``classify_document`` activity., _cfg(), _ctx(), Unit tests for the input document classifier (Track 2).  Deterministic rule laye, _rules() (+9 more)
 
 ### Community 261 - "presentation: 5-step ingestion pipeline"
 Cohesion: 0.09
@@ -2103,15 +2115,15 @@ Nodes (22): Global Constraints, Notes for the implementer, Task 1: The store, Ta
 
 ### Community 267 - "check_ingestion.py"
 Cohesion: 0.16
-Nodes (15): epoch_days_to_period(), is_meaningful_entity(), Constants + pure helpers for the analytical layer (no I/O, no LLM)., Bucket an epoch-day integer into a period label.      granularity: ``year`` → ``, Whether an entity row is worth showing in a themes/events answer.      Always dr, test_drops_degenerate_names(), test_drops_identifier_types(), test_drops_url_named_entities() (+7 more)
+Nodes (15): merge_and_resolve(), _premerge_groups(), Relation, `merge_and_resolve` — cross-chunk dedup + phone consolidation + ER.  Pulls the p, Group raw extracted entities by name across all chunks.      Names that appear m, First N entries of an alias->canonical map, truncated for     heartbeat sanity., Repoint a relation's name-endpoints through ``alias`` (folded entity     name ->, _rewrite_endpoints() (+7 more)
 
 ### Community 268 - "test_config: WikiSettings"
 Cohesion: 0.12
 Nodes (16): Baseline (measured 2026-09-24 on f2a2f19), Global Constraints, Phase A — tests off Neo4j, Phase B — delete Neo4j code, Remove Neo4j Implementation Plan, Review Focus, Task 1: Drop the Neo4j pin; fix config tests, Task 2: Port/delete graph-layer tests (+8 more)
 
 ### Community 269 - "test_graph: schema.py"
-Cohesion: 0.15
-Nodes (15): RoundGraphData, _NameRetriever, Stands in for GraphRetriever's name lookup., `GraphMemoryExceeded` reached callers as `{"entities": []}` — which     reads as, A genuine empty result carries no error key, so a caller can tell     "nothing m, test_find_entity_by_name_omits_error_when_it_ran(), test_find_entity_by_name_passes_the_failure_through(), _build() (+7 more)
+Cohesion: 0.29
+Nodes (8): _build(), _FakeStore, _hops(), Unit tests for GraphRetriever per-call ``path_depth`` (nebula backend).  Under n, test_default_depth_is_one(), test_depth_clamped_to_max(), test_depth_clamped_to_min(), test_per_call_depth_reaches_walk()
 
 ### Community 270 - "ingestion: _extract_addresses()"
 Cohesion: 0.10
@@ -2146,12 +2158,12 @@ Cohesion: 0.67
 Nodes (3): Hermes MCP servers config example (SSE, 30-min timeout), kbsearch MCP server (:9001/sse; kb_search/global/drift/auto), kbtools MCP server (:9002/sse; vector/graph_search/graph_walk/find_* tools)
 
 ### Community 278 - "tg_ingest.py: load_state()"
-Cohesion: 0.06
-Nodes (58): dialog_in_folders(), dialog_slug(), _filter_title(), load_state(), _message_to_doc(), post_ingest(), Any, Path (+50 more)
+Cohesion: 0.07
+Nodes (42): datetime, _Counter, Tally created vs already-existing entities for the summary line., _message_to_doc(), post_ingest(), Backfill: read last-`limit` messages per channel (oldest→newest) and enqueue., Keep channels and groups (incl. megagroups); DROP personal chats.      A megagro, One catch-up pass over ``dialogs``.      Per dialog: fetch messages NEWER than ` (+34 more)
 
 ### Community 280 - "test_api: test_admin_wiki.py"
-Cohesion: 0.25
-Nodes (16): align(), Put two series on a common grid and describe how far apart they run.      ``max_, date, Consecutive Monday-anchored weekly points starting at `start`., A percentage and a ruble amount moving together must normalise     to the same s, b repeats a one week later; searching lags must recover +1     rather than repor, The spec names this warning as the guard against a confidently     wrong diverge, test_align_different_units_still_comparable_after_normalisation() (+8 more)
+Cohesion: 0.22
+Nodes (18): align(), _project(), date, Put two series on a common grid and describe how far apart they run.      ``max_, date, Consecutive Monday-anchored weekly points starting at `start`., A percentage and a ruble amount moving together must normalise     to the same s, b repeats a one week later; searching lags must recover +1     rather than repor (+10 more)
 
 ### Community 281 - "test_api: test_monitor_route.py"
 Cohesion: 0.38
@@ -2174,7 +2186,7 @@ Cohesion: 0.15
 Nodes (15): AnswerFn, Classifier, classify_intent(), Route a question to the analytical layer (graph aggregation via /analyze) or the, ANALYTICAL for aggregation/statistics/contradiction questions, else SEARCH., make_router(), Route each query to the analytical layer or the retrieval layer by intent.  ``ma, Build ``answer(query)`` that dispatches to ``analyze`` for analytical     intent (+7 more)
 
 ### Community 288 - "graph: NoOpKGExtractor"
-Cohesion: 0.16
+Cohesion: 0.15
 Nodes (6): Minimal async chat LLM returning a canned reply (or raising)., _StubLLM, test_plan_query_failopen_on_llm_error(), test_plan_query_happy_path(), test_plan_query_trend_fallback_overrides_broken_picks(), test_plan_query_trend_fallback_when_llm_plans_nothing()
 
 ### Community 289 - "test_ingestion: build_custom_kg_payload()"
@@ -2182,24 +2194,24 @@ Cohesion: 0.12
 Nodes (15): #3 — Claims / covariates extraction (HIGH domain value) — L, #5 — DRIFT iterative follow-up questions — M–L, #6 — Relationship-centric global (cheap alternative) — M, #7 — Multimodal: tables/images into the graph — L (ingest track), Config hygiene, Documentation, From the ER / scaling deep-dive (not yet done), From the GraphRAG / LightRAG comparison (+7 more)
 
 ### Community 290 - "retrieval: _injected_params()"
-Cohesion: 0.13
-Nodes (15): Any, Sync execution; returns raw rows. Mirrors src/graph/analysis.py::_run_query., Run ``cypher`` off the event loop; ``[]`` on no-store or a transient error., _run_query(), run_rows(), Exception, _RaisingStore, Tests for src/analytics/store_query.py (fail-soft except NotImplementedError). (+7 more)
+Cohesion: 0.19
+Nodes (10): Exception, _RaisingStore, Tests for src/analytics/store_query.py (fail-soft except NotImplementedError)., Store whose structured_query always raises the given exception., A structural backend limitation must not be swallowed into []., The re-raised structural failure is the caller's job to report, not this     mod, test_run_rows_does_not_log_on_not_implemented_error(), test_run_rows_logs_warning_on_ordinary_exception() (+2 more)
 
 ### Community 292 - "test_analytics: test_rollups.py"
 Cohesion: 0.11
 Nodes (17): inject, platform, description, dsh, client, exports, ./client, ./package.json (+9 more)
 
 ### Community 293 - "test_graph: _Boom"
-Cohesion: 0.19
+Cohesion: 0.15
 Nodes (14): _first_non_finite_float(), IndicatorIn, load_statistics(), LoadRequest, LoadResponse, _non_finite_anywhere_is_not_a_value(), ObservationIn, Any (+6 more)
 
 ### Community 294 - "test_workflow: test_search_pooled_llm.py"
-Cohesion: 0.33
-Nodes (9): clear_dirty(), mark_dirty(), Dirty-flag bookkeeping for the wiki editor (Nebula ``Entity`` props).  Routes th, select_dirty(), test_clear_dirty_routes_through_seam(), test_mark_dirty_default_reaches_store(), test_mark_dirty_noop_on_empty(), test_mark_dirty_routes_through_seam() (+1 more)
+Cohesion: 0.26
+Nodes (11): clear_dirty(), mark_dirty(), Dirty-flag bookkeeping for the wiki editor (Nebula ``Entity`` props).  Routes th, select_dirty(), build_wiki_graph_ops(), Any, test_clear_dirty_routes_through_seam(), test_mark_dirty_default_reaches_store() (+3 more)
 
 ### Community 295 - "CAPACITY_TUNING.md: LLM_POOL_N throttle"
-Cohesion: 0.21
-Nodes (16): _outcome_to_response(), `POST /api/v1/search/local` — plan-execute-synthesize search (R2).  Submits ``Se, Map the workflow's ``SearchOutcome`` onto the shared response shape     (identic, Run ``GlobalSearchWorkflow`` — map-reduce over the R6 community     summaries fo, Run ``DriftSearchWorkflow`` — local plan-execute pass first, then     expand wit, Run ``AutoSearchWorkflow`` — ``route_query`` (small tier) classifies     the que, # NOTE: `created_after`/`created_before` are no longer reserved — they (and, search_auto() (+8 more)
+Cohesion: 0.16
+Nodes (22): _outcome_to_response(), `POST /api/v1/search/local` — plan-execute-synthesize search (R2).  Submits ``Se, doc_id list → relative download links (preserves order)., Map the workflow's ``SearchOutcome`` onto the shared response shape     (identic, Run ``GlobalSearchWorkflow`` — map-reduce over the R6 community     summaries fo, Run ``DriftSearchWorkflow`` — local plan-execute pass first, then     expand wit, Run ``AutoSearchWorkflow`` — ``route_query`` (small tier) classifies     the que, Start the OFFLINE ``CommunityBuildWorkflow`` on ``kb-graph-build``.      Fully d (+14 more)
 
 ### Community 297 - "superpowers: GraphScope community backend (distributed single-level"
 Cohesion: 0.25
@@ -2222,8 +2234,8 @@ Cohesion: 0.83
 Nodes (3): curl_ok(), section(), smoke.sh script
 
 ### Community 302 - "conftest.py"
-Cohesion: 0.08
-Nodes (28): new_graph_context(), _Sess, test_ensure_schema_uses_the_graph_space(), test_reconnect_reuses_the_graph_space(), test_space_ddl_uses_graph_names(), test_stores_are_cached_per_space_and_share_one_pool(), No key → X-Graph is NOT honoured: the tool call stays on the     configured KB_M, _Reg (+20 more)
+Cohesion: 0.06
+Nodes (29): InvalidGraphId, new_graph_context(), Graph id is not a valid slug (it is interpolated into DDL)., validate_graph_id(), Pytest-asyncio mode is set globally in pyproject.toml.  Project-wide fixtures la, _Sess, test_ensure_schema_uses_the_graph_space(), test_reconnect_reuses_the_graph_space() (+21 more)
 
 ### Community 304 - "test_graph: _is_exempt()"
 Cohesion: 0.28
@@ -2238,12 +2250,12 @@ Cohesion: 0.14
 Nodes (13): 1. RabbitMQ in dev compose (infra for the test), 2. `scripts/tg_ingest.py` (the reader → enqueuer), 3. Dependency, 4. Runbook (short, in the script docstring + a docs note), Components, Data flow, Decisions (locked via brainstorming), Error handling (+5 more)
 
 ### Community 310 - "graph: read_alerts()"
-Cohesion: 0.29
-Nodes (7): build_prompt(), _extract_json(), _flatten(), Any, NuExtract3 (numind) template-extraction backend for ``ner_eval``.  NuExtract3 is, Render the structured-mode prompt exactly as chat_template.jinja does., Pull the answer object out of the completion (tolerates fences/think).
+Cohesion: 0.22
+Nodes (10): _main(), Live-update the ingest admission ceiling K (max_inflight) on the running ``inges, _main(), Idempotently create/update the Temporal Schedule that runs MonitorSweepWorkflow, _main(), Idempotently create/update the Temporal Schedule that runs WikiSweepWorkflow eve, get_temporal_client(), Process-wide Temporal client singleton.  FastAPI handlers and CLI entry points c (+2 more)
 
 ### Community 326 - "test_workflow: _stub_activity_ctx()"
-Cohesion: 0.08
-Nodes (34): main(), _parse_args(), Namespace, Offline probe of the LightRAG-style extract + merge stack.  Runs the live projec, main(), main(), Probe KG extraction on real medical chunks.  Splits the medical corpus into chun, Deep diagnostic: try every layer of SchemaLLMPathExtractor.  Steps:   1. Plain ` (+26 more)
+Cohesion: 0.09
+Nodes (30): main(), _parse_args(), Namespace, Offline probe of the LightRAG-style extract + merge stack.  Runs the live projec, main(), main(), Probe KG extraction on real medical chunks.  Splits the medical corpus into chun, Deep diagnostic: try every layer of SchemaLLMPathExtractor.  Steps:   1. Plain ` (+22 more)
 
 ### Community 365 - "ERGraphOps seam (ensure_verdict_schema/load_verdicts/store_verdicts/merge_loser_into_canonical)"
 Cohesion: 0.14
@@ -2270,8 +2282,8 @@ Cohesion: 0.38
 Nodes (5): Continuous wiki-article editor (Project A). Generates per-entity     MediaWiki p, WikiSettings, test_wiki_settings_defaults(), test_wiki_settings_env_override(), test_wiki_settings_new_fields_defaults()
 
 ### Community 372 - "NebulaGraph migration plan (Phases 0-4; strangler-fig, backend-dispatched)"
-Cohesion: 0.12
-Nodes (26): description, Field, main(), assert_api_key_env_set(), log_banner(), parse_args(), Any, Tiny argparse — fastmcp's runtime takes `transport`, `host`,     `port` via kwar (+18 more)
+Cohesion: 0.21
+Nodes (14): event_dossier(), event_timeline(), EventDossierParams, EventTimelineParams, _Params, Any, BaseModel, E2 event read primitives — event_dossier + event_timeline. (+6 more)
 
 ### Community 373 - "Continuous Wiki Article Editor plan"
 Cohesion: 0.13
@@ -2286,12 +2298,12 @@ Cohesion: 0.05
 Nodes (37): 1. Инжест, 2. Поиск, 3. Якоря знаний, 4. Платформа, Backfill `doc_id` на legacy-чанки 🆕, Claim-check staging, Drift: мягкий fallback 🆕, Entity Resolution (ER) 🆕(native-vector) (+29 more)
 
 ### Community 376 - "alerts.py"
-Cohesion: 0.19
-Nodes (5): _AConn, _APool, test_graph_connection_commits_set_before_yield(), test_reset_callback_resets_search_path_and_commits(), test_search_path_sql_quotes_identifier()
+Cohesion: 0.23
+Nodes (8): community_vid(), Community BUILD write-back (the `:Community` + `IN_COMMUNITY`/`PARENT_OF` materi, Stable 128-bit VID (32-hex-char) for a community, scoped by level.      Mirrors, Fake nebula store: records nGQL; returns canned rows per substring., _RecNebula, test_nebula_read_child_reports_filters_blank_and_sorts_by_member_count(), test_nebula_read_member_context_intra_community_filter_and_cap(), test_nebula_write_report_uses_update_vertex_no_report_vec()
 
 ### Community 377 - "test_config_wave2.py"
-Cohesion: 0.19
-Nodes (18): _load_base_classes(), _load_properties(), push_wikibase(), _fake_merged(), _fake_merged_for_graph(), Tests for the push_wikibase activity.  Three behaviours:   * cache disabled -> s, If push_entities returns counters where created+updated == 0     yet we DID rece, An ingest with no entities to push (empty merged blob) IS a     valid no-op — st (+10 more)
+Cohesion: 0.21
+Nodes (11): _execute_with_retry(), _migrate_related_validity_to_string(), _probe_edge_write_ready(), _probe_tag_write_ready(), Any, NebulaGraph schema for the KB graph (nGQL DDL).  Entities are tag `Entity` (type, # NOTE: `entity_wiki_dirty_idx` (on the ALTER-added `wiki_dirty` column) is, Execute `stmt`, retrying up to `attempts` times on failure.      Returns True on (+3 more)
 
 ### Community 378 - "test_rollups.py"
 Cohesion: 0.13
@@ -2310,15 +2322,15 @@ Cohesion: 0.15
 Nodes (13): 1. Что это, 2. Включение, 3. Поток данных, 4. Конфигурация (`WIKI_*`), 5.1 `WIKI_SITE_GLOBAL_ID` должен совпадать с реальным site id, 5.2 `WIKIBASE_BOT_PASSWORD` должен быть ≥ 8 символов, 5.3 Без `wikibase_qid` sitelink не создаётся, но статья пишется, 5.4 Ссылки на скачивание исходников требуют аутентификации (+5 more)
 
 ### Community 383 - "test_search_deps_lock.py"
-Cohesion: 0.40
-Nodes (10): Claim, detect_contradictions(), Structural pass: group by EXACT ``(subject, attribute)`` and flag groups     whe, test_refine_keeps_polarity_split_without_calling_llm(), Pure contradiction detection over claims (TDD, no I/O)., test_agreement_yields_no_contradiction(), test_asserted_only_same_value_no_polarity_conflict(), test_polarity_conflict_on_same_value_is_a_contradiction() (+2 more)
+Cohesion: 0.44
+Nodes (9): Claim, detect_contradictions(), Structural pass: group by EXACT ``(subject, attribute)`` and flag groups     whe, Pure contradiction detection over claims (TDD, no I/O)., test_agreement_yields_no_contradiction(), test_asserted_only_same_value_no_polarity_conflict(), test_polarity_conflict_on_same_value_is_a_contradiction(), test_tie_has_no_single_consensus() (+1 more)
 
 ### Community 384 - "Capacity Tuning Under Load"
 Cohesion: 0.15
 Nodes (12): 1. The one mental model that matters, 2. The K + N model, 2a. The knobs, 2b. Temporal — isolation, not throttle (`TEMPORAL_*`, `src/config.py:207`), 2c. Proxy client (`LITELLM_*`, `src/config.py:137`), 3. Invariants you must not break, 4. Right-sizing `LLM_POOL_N` (the procedure), 5. Recommended load-side changes (deferred from the fix) (+4 more)
 
 ### Community 385 - "PostgresERVerdictCache"
-Cohesion: 0.18
+Cohesion: 0.16
 Nodes (12): _Cur, _deletes(), _Desc, R-P7: rotating/removing a key in API_KEYS must revoke the old     legacy-env row, _row(), _SelCur, test_bootstrap_inserts_default_row_idempotently(), test_bootstrap_prunes_legacy_env_keys_not_in_env() (+4 more)
 
 ### Community 386 - "Конвейер инжеста"
@@ -2334,8 +2346,8 @@ Cohesion: 0.13
 Nodes (14): Channel groups — design, Component 1 — source of truth: `scripts/tg_ingest.py`, Component 2 — ingest plumbing, Component 3 — search filter (Milvus push-down + graph post-filter), Component 4 — rerank weights, Component 5 — synthesis context, Config summary, Data flow (+6 more)
 
 ### Community 389 - "test_community_build_hardening.py"
-Cohesion: 0.15
-Nodes (12): _EntityAgg, _id_to_name(), _maybe_summarize_descriptions(), Any, BaseNode, Cross-chunk consolidation for LightRAG-style extraction.  Inputs: a list of chun, Return one consolidated description for `descriptions`.      Path A — concat: wh, Bucket of per-chunk extractions for one (normalised) entity name. (+4 more)
+Cohesion: 0.23
+Nodes (10): fetch_source(), Ctx, `fetch_source` — resolve doc path to a local file + mark processing.  Idempotent, fake_minio(), Path, `fetch_source` resolves an s3:// path to a local file, updates PG to `processing, Second activity attempt after worker crash: file already on     disk → no second, test_legacy_local_path_passes_through() (+2 more)
 
 ### Community 390 - "Архитектура"
 Cohesion: 0.18
@@ -2366,8 +2378,8 @@ Cohesion: 0.20
 Nodes (10): 1. Обзор, 2. Поверхности, 3. Контракт запроса/ответа, 4. Каталог примитивов (42), 5. Материализация (Wave 1), 6. Мониторинг Arc-2 (opt-in, выключен по умолчанию), 7. Смоук + плейбук проверки качества, 8. Диагностика (+2 more)
 
 ### Community 397 - "Runbook: пакетная консолидация графа (`reresolve_graph`)"
-Cohesion: 0.21
-Nodes (11): coverage_check(), _parse(), ``coverage_check`` activity — pre-synthesis completeness gate.  After the orches, Judge whether gathered evidence fully covers the query., CoverageParams, Input to the ``coverage_check`` activity.      Asks whether the evidence gathere, get_search_llm(), get_synthesis_llm() (+3 more)
+Cohesion: 0.12
+Nodes (27): ``retrieve_subquestion`` activity — deterministic retrieval (R2).  For ONE sub-q, _build_chunk_repo_once(), _build_retriever_once(), _build_synthesizer_once(), get_chunk_repository(), _get_embed_model(), get_graph_retriever(), get_retriever() (+19 more)
 
 ### Community 398 - "bench_graph_write"
 Cohesion: 0.14
@@ -2438,8 +2450,8 @@ Cohesion: 0.18
 Nodes (11): Врезка во вход графа, Где сущности живут сейчас, Задача, Запись при ингесте, Побочные выгоды, Поиск, Проверка, Разовая заливка существующих (+3 more)
 
 ### Community 416 - "DetectCommunitiesParams"
-Cohesion: 0.25
-Nodes (14): fetch_from(), FakeGraph, obs(), kb-tools with name resolution: resolve first, act on that one entity, report it;, awalk = the real neighbourhood of one vertex; aretrieve = the old seed-everythin, resolver(), test_a_people_question_filters_to_persons_and_a_timeout_orders_by_edges(), test_find_entity_by_id_is_strict_and_offers_candidates() (+6 more)
+Cohesion: 0.15
+Nodes (21): RoundGraphData, fetch_from(), _NameRetriever, Stands in for GraphRetriever's name lookup., `GraphMemoryExceeded` reached callers as `{"entities": []}` — which     reads as, A genuine empty result carries no error key, so a caller can tell     "nothing m, test_find_entity_by_name_omits_error_when_it_ran(), test_find_entity_by_name_passes_the_failure_through() (+13 more)
 
 ### Community 417 - "test_search_v2_routes.py"
 Cohesion: 0.14
@@ -2451,7 +2463,7 @@ Nodes (9): The `er_verdict` DDL, asserted as text like the other setup_db tests.
 
 ### Community 419 - "_gather_context"
 Cohesion: 0.05
-Nodes (77): CommunitySummaryRef, MapCommunitiesParams, One community's stored summary — the unit the global MAP step     produces a par, Input to the ``map_communities`` activity — fetch community     summaries to map, _cosine(), map_communities(), kNN over the community report vectors → ``CommunitySummaryRef``s for     ``level, Cosine similarity of two vectors as a plain float.      Pure / deterministic.  E (+69 more)
+Nodes (71): MapCommunitiesParams, Input to the ``map_communities`` activity — fetch community     summaries to map, _cosine(), map_communities(), kNN over the community report vectors → ``CommunitySummaryRef``s for     ``level, Cosine similarity of two vectors as a plain float.      Pure / deterministic.  E, v2 hierarchy descent: start at the coarsest level (0), keep the most     query-r, Select the community summaries to map over.      Strategy switch on ``params.sel (+63 more)
 
 ### Community 420 - "Optional Synthesis Implementation Plan"
 Cohesion: 0.20
@@ -2482,8 +2494,8 @@ Cohesion: 0.33
 Nodes (9): handle_entity(), Entity lookup by name prefix. Cheap — no concurrency slot, no     quota: it is a, _ctx_with_entities(), It is an index read, not a search. Rationing it would ration the     only fast c, test_entity_costs_no_quota_and_no_slot(), test_entity_empty_query_asks_for_one(), test_entity_fails_soft(), test_entity_needs_admission() (+1 more)
 
 ### Community 427 - "build_search_query"
-Cohesion: 0.14
-Nodes (18): main(), One-off fill of the Postgres `entity` table from the graph.  Resumable, idempote, format_status_rows(), format_timeline(), main(), Namespace, CLI for processed-message statistics — a thin wrapper over the same AsyncPostgre, Render status_counts_by output as an aligned text table. (+10 more)
+Cohesion: 0.24
+Nodes (12): format_status_rows(), format_timeline(), main(), Namespace, CLI for processed-message statistics — a thin wrapper over the same AsyncPostgre, Render status_counts_by output as an aligned text table., _run(), CLI wiring: `channels` calls status_counts_by('source_channel', ...) and its row (+4 more)
 
 ### Community 428 - "Rerank Orders the Output Implementation Plan"
 Cohesion: 0.25
@@ -2518,24 +2530,24 @@ Cohesion: 0.14
 Nodes (13): 1. Schema change (`scripts/setup_db.py`), 2. Populating the columns, 3. Shared aggregation SQL (`src/storage/postgres.py`), 4. HTTP endpoints (`src/api/routes/stats.py`), 5. CLI (`scripts/message_stats.py`), 6. Testing, Background (current state), Channel message-processing statistics (+5 more)
 
 ### Community 436 - "Технический долг, найденный по ходу"
-Cohesion: 0.20
-Nodes (8): extract_kg(), extract_kg must obtain its LLM from the shared pool, not a raw     ungated build, test_extract_kg_wired_to_pool(), test_runs_extractor_and_writes_kg_blob(), Structural tests for the dedicated kb-ingest-merge queue split.  These are pure, ``import src.workflow.worker`` succeeds and the per-pool wiring     references `, test_extract_activities_only_extract(), test_worker_module_wires_merge_queue()
+Cohesion: 0.15
+Nodes (14): extract_kg(), `extract_kg` — LightRAG-style KG extraction (heaviest stage).  One LLM call per, Pull out small JSON-serialisable samples of what the extractor     emitted.  The, _summarise_kg(), EntitySample, Compact entity representation suitable for inclusion in     activity results (ke, RelationSample, extract_kg must obtain its LLM from the shared pool, not a raw     ungated build (+6 more)
 
 ### Community 437 - "Close the Statistics Subsystem Gaps Implementation Plan"
 Cohesion: 0.33
 Nodes (5): Close the Statistics Subsystem Gaps Implementation Plan, Global Constraints, Task 1: Make the documented settings real, and cover the untested fallback, Task 2: One source for the enums, and a stub that cannot lie, Verification
 
 ### Community 438 - "load_state"
-Cohesion: 0.13
-Nodes (15): _dedupe_entities(), _dedupe_relations(), _find_by_name_ngqls(), _name_fetch_cap(), _name_terms(), _rank_by_name(), Graph-search wrapper for the agent loop.  Returns a ``RoundGraphData`` with stru, Over-fetch: the OR of prefixes is unranked, so the entity matching every word ca (+7 more)
+Cohesion: 0.35
+Nodes (5): _drop_doc_translation_metadata(), _exclude_doc_translation_metadata(), Any, BaseNode, Mark the doc-level translation fields as excluded from     LLM / embed metadata
 
 ### Community 439 - "Пред-существующие дефекты репозитория"
 Cohesion: 0.15
 Nodes (12): 2.3 ⚠ About `think=false` on gemma, 3.1 Starting knob values, 3.2 Deploy the split, 3.3 Caveats, Common: keep the role mapping, Decision rule — stay on Ollama or move to vLLM?, Order from here, Path A (PRIMARY) — Ollama, replicated + parallel slots (+4 more)
 
 ### Community 440 - "_FakeResp"
-Cohesion: 0.10
-Nodes (9): RuntimeError, _connect(), main(), ConnectionPool, One-time NebulaGraph bootstrap: register the storaged host.  Run ONCE after the, Init a pool, retrying while graphd is still coming up.      graphd's compose hea, Any, ChatMessage (+1 more)
+Cohesion: 0.12
+Nodes (4): RuntimeError, Any, ChatMessage, _StubCursor
 
 ### Community 441 - "_FakeEntity"
 Cohesion: 0.23
@@ -2546,8 +2558,8 @@ Cohesion: 0.15
 Nodes (12): Execution handoff, Root-cause analysis (no code changes here — just findings), Self-review, Speed up `merge_and_resolve` on single-document ingest, Stage 1 — Profile the actual cost before changing anything, Stage 2 — Parallelise summary calls + log call counts, Stage 3 — Skip summary entirely on single-doc merges (optional), Task 0: Capture a baseline (+4 more)
 
 ### Community 446 - "DynamicsGraphOps"
-Cohesion: 0.05
-Nodes (25): _bootstrap_registry(), main(), migrate_graph_schema(), Idempotent DB initialisation.  Stage 1 scope:   * Postgres — create ``documents`, `'a', 'b', 'c'` for a SQL `IN (...)` clause — sorted so the     generated DDL te, Idempotent: register `default` under its legacy names and the env     API_KEYS a, Register the three custom Search Attributes used by the     analytics layer (Sta, Enforce the configured closed-workflow retention on the namespace.      Bounds P (+17 more)
+Cohesion: 0.15
+Nodes (19): _bootstrap_registry(), main(), migrate_graph_schema(), Idempotent DB initialisation.  Stage 1 scope:   * Postgres — create ``documents`, `'a', 'b', 'c'` for a SQL `IN (...)` clause — sorted so the     generated DDL te, Idempotent: register `default` under its legacy names and the env     API_KEYS a, Register the three custom Search Attributes used by the     analytics layer (Sta, Enforce the configured closed-workflow retention on the namespace.      Bounds P (+11 more)
 
 ### Community 447 - "CommunityBuildWorkflow"
 Cohesion: 0.15
@@ -2558,12 +2570,12 @@ Cohesion: 0.15
 Nodes (12): Agentic Search Implementation Plan (Plan #2), Cross-cutting, File Structure (target), Phase R0: Scaffold the `search/` package (no behavior change), Phase R1: Two-tier model configuration, Phase R2: Orchestrator + SubQueryRetrievalWorkflow (replace ReAct) + `/search/local`, Phase R3: Multi-hop `graph_walk` tool, Phase R4: Coverage gate on the orchestrator (+4 more)
 
 ### Community 450 - ".achat"
-Cohesion: 0.16
-Nodes (18): addr_key(), date_keys(), digits(), main(), male_base(), norm(), PersonIndex, phone_key() (+10 more)
+Cohesion: 0.29
+Nodes (10): addr_key(), date_keys(), digits(), main(), male_base(), norm(), PersonIndex, phone_key() (+2 more)
 
 ### Community 451 - "test_community_vector_store.py"
-Cohesion: 0.27
-Nodes (11): build_rewrite_prompt(), Assemble the rewrite prompt from prior turns + the new question., Return a standalone query. No history → the question verbatim (no LLM     call)., rewrite_query(), LLM, Follow-up query rewriting (TDD). LLM is injected as an async `complete`., test_build_prompt_includes_history_and_question(), test_empty_llm_output_falls_back_to_original_question() (+3 more)
+Cohesion: 0.36
+Nodes (8): _dirty_names(), mark_entities_dirty(), mark_entities_dirty — flag an ingest's entities (and relation endpoints) for wik, MarkDirtyIn, Input to the mark_entities_dirty activity.      Contains the entity names and re, Task 11 / D6: the wiki is default-graph-only in Plan A — a non-default     inges, test_mark_entities_dirty_skips_non_default_graph(), test_dirty_names_includes_entities_and_relation_endpoints()
 
 ### Community 452 - "0. Продакшен: контейнеризованный compose"
 Cohesion: 0.15
@@ -2572,10 +2584,6 @@ Nodes (12): File Structure, Final verification, PART A — Download endpoint, PA
 ### Community 453 - "Move the ER verdict cache out of the graph"
 Cohesion: 0.15
 Nodes (12): Analytics Layer — Activation / Rollout Runbook (Waves 0–3), Decision points (need your input), Dependency graph, Load-bearing lesson (from the community_backend incident), Phase 0 — Read side (zero risk, do first), Phase 1 — E1 first_seen stamping, Phase 2 — Materialize tier (risk/centrality/link-prediction), Phase 3 — Arc-2 monitoring (alerts as :Alert nodes) (+4 more)
-
-### Community 454 - "test_completion_no_walltime_cap.py"
-Cohesion: 0.27
-Nodes (9): Fake nebula store: records nGQL (asserts inline, no param_map);     returns cann, _RecNebula, test_nebula_stream_edges_chunks_go_calls_by_batch_size(), test_nebula_stream_edges_names_none_falls_back_to_internal_stream_names(), test_nebula_stream_edges_with_names_skips_internal_name_scan(), test_nebula_stream_names_keyset_lookup_advances_after_and_stops(), test_nebula_stream_names_no_param_map(), test_nebula_stream_names_stops_on_empty_page() (+1 more)
 
 ### Community 455 - "_walk_seeds"
 Cohesion: 0.15
@@ -2598,8 +2606,8 @@ Cohesion: 0.18
 Nodes (10): 1. Problem (verified on live data), 2.1 One resolver, one normalization, 2.2 Data, 2.3 Tool contract (every name-taking kb-tools tool), 2.4 Ingest (so aliases stop being lost), 2. Design, 3. Migration (no re-ingest for most of it), 4. Staged plan (each stage shippable and tested) (+2 more)
 
 ### Community 461 - ".get"
-Cohesion: 0.40
-Nodes (4): NebulaSettings, Connection to the NebulaGraph cluster — the only graph backend     (graphd port, NebulaGraph connection settings., test_nebula_settings_default_port()
+Cohesion: 0.33
+Nodes (7): _pages_to_delete(), Titles to delete: every listed (main-namespace) page except keep-list., Unit tests for the pure helpers in scripts/wipe_db.py.  The I/O wipe functions (, test_pages_to_delete_custom_keep(), test_pages_to_delete_empty(), test_pages_to_delete_excludes_keep_list(), test_pages_to_delete_keeps_main_page_by_default()
 
 ### Community 462 - "Search date filters — design"
 Cohesion: 0.15
@@ -2622,7 +2630,7 @@ Cohesion: 0.15
 Nodes (12): 1. `RELATED` weight (schema + write), 2. Seam: `GraphEdgeExport` (`src/graph/graph_edge_export.py`, new), 3. `extract_entity_edges` rewire (`community_leiden.py`), 4. Tests (DB-free), 5. Manual gate (live-verify, controller-run), Background (grounded), Design, Global Constraints (+4 more)
 
 ### Community 467 - "ADR-0012: Wikibase как канонический якорь + непрерывный wiki-редактор с anti-drift bot-секциями"
-Cohesion: 0.27
+Cohesion: 0.25
 Nodes (5): PostgresERVerdictCache, The verdict cache, in the database built for unique-keyed lookups.      Historic, A pooled connection scoped to this cache's graph schema.          Same shape as, Cached verdicts for `keys`, as `{key: same}`.          A key that is NOT in the, Upsert freshly-judged verdicts.  Idempotent; a re-judged pair         overwrites
 
 ### Community 468 - "Дорожная карта — аналитический слой и его развитие"
@@ -2682,7 +2690,7 @@ Cohesion: 0.17
 Nodes (11): Behavior summary, Context (current state), Design, Files touched, Manual channel reingest command + low-priority ingest lane, Out of scope, Part 1 — Priority lane, Part 2 — Reingest CLI mode (`scripts/tg_ingest.py`) (+3 more)
 
 ### Community 482 - "ADR-0015: Бэкенд детекции сообществ — in-worker leidenalg (вынос из Neo4j GDS)"
-Cohesion: 0.25
+Cohesion: 0.29
 Nodes (7): find_entity_by_name(), Find entities whose NAME matches the query via the full-text index.      Partial, _Data, find_entity_by_name atomic tool., _Retriever, test_find_entity_by_name_none_retriever(), test_find_entity_by_name_returns_entities()
 
 ### Community 483 - "test_signals_graph_ops.py"
@@ -2690,8 +2698,8 @@ Cohesion: 0.12
 Nodes (21): _ent(), Entity-watch MCP tool helpers (tools_server) over stub repositories., repos(), _row(), _Search, test_ack_all(), test_ack_ids(), test_ack_needs_ids_or_all() (+13 more)
 
 ### Community 484 - "test_pg_pool.py"
-Cohesion: 0.28
-Nodes (7): plan_subquestions(), ``plan_subquestions`` activity — decompose a question (R2).  Wraps ``src.retriev, Split the query into atomic sub-questions (≥1)., get_plan_llm(), LLM, Process-level cache for the plan-execute search dependencies (R2).  Separate fro, Small-tier planner LLM (role ``plan``) from the shared pool.
+Cohesion: 0.22
+Nodes (7): Self-hosted Wikibase populator settings.      When ``enabled=True``, ``DocumentI, WikibaseSettings, _Claim, Internal claim shape carried into ``create_item`` / ``update_item``.      ``data, Configure the SDK + log in, then return a ready instance.          Login uses th, Build a fresh `WikibaseSettings` under a monkey-patched env.     Avoids `reload(, test_wikibase_enabled_via_env()
 
 ### Community 485 - "Extraction Quality & Canonical Linking Implementation Plan"
 Cohesion: 0.18
@@ -2722,8 +2730,8 @@ Cohesion: 0.18
 Nodes (10): Build order, Spec — Seven Tracks (2026-06-15), Track 1 — Production docker-compose, everything in compose (LAST / parallelizable), Track 2 — Input document classifier (skip) with force-override, Track 3 — Source-document-by-id is broken (FIRST, quick, independent), Track 4 — Leiden at 50k: instrumentation + weighted + knobs, Track 5 — Document-level admission control (variant A), Track 6 — Templated answers (variant a: text template) (+2 more)
 
 ### Community 492 - "load_state"
-Cohesion: 0.20
-Nodes (4): Reject a malformed date bound → 422 (FastAPI maps ValueError)., _parse_uri(), Reverse of `write_pickle`., ValueError
+Cohesion: 0.25
+Nodes (6): Reject a malformed date bound → 422 (FastAPI maps ValueError)., _parse_uri(), Any, Pickle `obj` and upload to ``{run_id}/{stage}.pkl``.          Returns the full `, Reverse of `write_pickle`., ValueError
 
 ### Community 493 - "Очереди задач Temporal"
 Cohesion: 0.20
@@ -2801,10 +2809,6 @@ Nodes (7): File Structure, Global Constraints, Self-Review, Task 1: RabbitMQ dev
 Cohesion: 0.25
 Nodes (8): Nebula community-SUMMARIZE (nGQL) implementation plan, File Structure, Global Constraints, Nebula community-SUMMARIZE (nGQL) Implementation Plan, Notes for the manual gate (post-merge, controller-run), Task 1: `CommunitySummarize` seam + Neo4j impl + dispatch (additive), Task 2: `NebulaCommunitySummarize` — nGQL implementation, Task 3: Route `community.py` SUMMARIZE through the seam
 
-### Community 513 - "test_config_wave2.py"
-Cohesion: 0.36
-Nodes (4): norm_name(), casefold, ё→е, quotes dropped, whitespace collapsed and stripped., FakeLexicon, row()
-
 ### Community 514 - "test_schema.py"
 Cohesion: 0.20
 Nodes (9): 0. Facts this plan rests on (checked 2026-10-08), 1. Step 1 — land the backend work in kb-llamaindex (local only, no push), 2.1 Shape of the new repo (proposed name: `lens`), 2.2 Phases, 2.3 The contract between the projects, 2. Step 2 — new project, 3. Risks, 4. Decisions (2026-10-08) (+1 more)
@@ -2834,8 +2838,8 @@ Cohesion: 0.29
 Nodes (6): ADR-0007: Entity Resolution = генерация кандидатов + LLM-судья + кэш вердиктов + union-find, Контекст, Последствия, Рассмотренные альтернативы, Решение, Ссылки
 
 ### Community 521 - "parse_args"
-Cohesion: 0.20
-Nodes (10): AlignedResult, _normalise(), _project(), date, Deterministic series alignment for cross-source comparison.  Pure functions only, Z-score ``values`` (population sd).      Zero variance returns zeros rather than, zscore(), test_zscore_centres_and_scales() (+2 more)
+Cohesion: 0.17
+Nodes (12): AlignedResult, _normalise(), pearson(), Deterministic series alignment for cross-source comparison.  Pure functions only, Pearson correlation, or None when undefined (n < 2, or either     side constant), Z-score ``values`` (population sd).      Zero variance returns zeros rather than, zscore(), test_pearson_constant_series_is_none() (+4 more)
 
 ### Community 522 - "ADR-0009: Иерархические сообщества Leiden + структурированные отчёты (GraphRAG-style global)"
 Cohesion: 0.29
@@ -2850,8 +2854,8 @@ Cohesion: 0.29
 Nodes (6): ADR-0011: Plan-execute SearchOrchestratorWorkflow (Self-RAG/ReAct удалён) + ограниченный цикл покрытия, Контекст, Последствия, Рассмотренные альтернативы, Решение, Ссылки
 
 ### Community 525 - "WikibaseSettings"
-Cohesion: 0.22
-Nodes (5): _ConcurrencyDetectingSession, _FakeResp, NebulaGraphStore serializes access to its single (non-thread-safe) session.  Reg, execute() flags an in-flight window; if another thread enters while one     is i, test_exec_is_serialized_across_threads()
+Cohesion: 0.32
+Nodes (7): main(), _parse_args(), prepare_txt(), Namespace, Path, Ingest the Medical benchmark corpus through `/api/v1/ingest`.  Converts `tests/e, Materialize medical.json → medical.txt in /tmp for upload.
 
 ### Community 526 - "ERGraphOps"
 Cohesion: 0.22
@@ -2878,16 +2882,16 @@ Cohesion: 0.29
 Nodes (6): Approach, Goal, Remove Neo4j — design, Risks, Scope, Verification
 
 ### Community 532 - "test_community_read.py"
-Cohesion: 0.06
-Nodes (37): build_community_read(), CommunityRead, NebulaCommunityRead, Any, Protocol, Community READ (map-phase summary fetch).  `NebulaCommunityRead` implements the, nGQL community READ (map-phase). Reads the ``id`` PROPERTY (written     by BUILD, build_community_report_vector_store() (+29 more)
+Cohesion: 0.05
+Nodes (55): main(), bge-m3 dense cosine for each eval pair (same text ER embeds: "name: desc" or nam, text(), build_community_read(), CommunityRead, NebulaCommunityRead, Any, Protocol (+47 more)
 
 ### Community 533 - "test_tools_resolution.py"
-Cohesion: 0.36
-Nodes (8): _fn(), MCP-level name resolution for the multi-name graph tools., test_depth_and_hops_are_clamped_with_a_note(), test_ppr_keeps_resolved_seeds_and_lists_the_rest(), test_relations_between_resolves_strictly_and_returns_live_edges(), test_shortest_path_runs_between_canonical_names(), test_shortest_path_with_an_unknown_end_says_which(), wired()
+Cohesion: 0.29
+Nodes (7): reset_search_path_sync(), close_pg_sync_pool(), get_pg_sync_pool(), ConnectionPool, Process-global SYNCHRONOUS Postgres connection pool.  The async twin of this mod, Return the per-process sync pool, opening it lazily on first use., Close the pool on process shutdown.
 
 ### Community 534 - "test_retriever_fulltext.py"
-Cohesion: 0.40
-Nodes (8): compute_risk(), normalize(), Pure composite risk scoring (no I/O). Components arrive already normalized to 0., RiskResult, test_bands_low_and_high(), test_compute_risk_weighted_and_banded(), test_normalize(), test_unknown_component_ignored()
+Cohesion: 0.14
+Nodes (23): compute_risk(), normalize(), Pure composite risk scoring (no I/O). Components arrive already normalized to 0., RiskResult, _gather_risk_nebula(), _get_store(), materialize_centrality(), materialize_link_prediction() (+15 more)
 
 ### Community 535 - "Hermes Agent integration runbook"
 Cohesion: 0.33
@@ -2959,7 +2963,7 @@ Nodes (4): Added, Decision: directory tree, Notes, [Stage 0] — 2026-05-09 — 
 
 ### Community 552 - "ADR-0014: Скачивание исходных документов через стабильный API-endpoint (не presigned URL)"
 Cohesion: 0.25
-Nodes (7): ADR-0014: Скачивание исходных документов через стабильный API-endpoint (не presigned URL), Дополнение (2026-10-14): оригинал рядом с текстом, Контекст, Последствия, Рассмотренные альтернативы, Решение, Ссылки
+Nodes (3): test_communication_stats_counts_pairs(), test_issue_resolution_stats_computes_rate(), test_issue_resolution_stats_empty_no_div_by_zero()
 
 ### Community 553 - "test_no_neo4j.py"
 Cohesion: 0.67
@@ -3053,13 +3057,9 @@ Nodes (6): done_files(), main(), AsyncClient, Path, Load-test loader: docx -> do
 Cohesion: 0.20
 Nodes (5): _FakeEmbed, Milvus report-vec store fake: records ``upsert``s (the nebula home of     ``repo, Returns a fixed-length vector; records the embedded text., _RecReportStore, _stub_activity_ctx()
 
-### Community 1050 - "ADR-0008: Опциональный native-vector kNN ER поверх окна в 5000 строк"
-Cohesion: 0.29
-Nodes (6): ADR-0008: Опциональный native-vector kNN ER поверх окна в 5000 строк, Контекст, Последствия, Рассмотренные альтернативы, Решение, Ссылки
-
 ### Community 1051 - "ADR-0010: Динамический выбор сообществ (лексический / семантический / спуск, fail-open)"
-Cohesion: 0.25
-Nodes (6): LLMTier, Any, LLMRole, Resolve ``role`` to a physical tier.  Unknown roles → small., Resolve ``role`` → tier → one of the two physical models., Effective extra request-body params for ``role``: the global         ``extra_bod
+Cohesion: 0.29
+Nodes (6): ADR-0002: Claim-check staging через MinIO для тяжёлого состояния workflow, Контекст, Последствия, Рассмотренные альтернативы, Решение, Ссылки
 
 ### Community 1052 - "lan-proxy.mjs"
 Cohesion: 0.40
@@ -3074,20 +3074,20 @@ Cohesion: 0.33
 Nodes (5): Board-key normalization, Helper tools (hidden from the model, called by Lens itself), kb-tools MCP — the surface Lens relies on, Meta fields on graph tools, Row shapes
 
 ### Community 1055 - "NebulaCommunityRead"
-Cohesion: 0.31
-Nodes (8): _configured_models(), _list_available_models(), Startup validation: every model the operator put in ``LITELLM_*_MODEL`` env vars, Return the ``model_name`` list LiteLLM proxy currently     serves.  Empty list o, Return non-empty ``{label: model_name}`` requested by env.      Two-tier model:, Probe the LiteLLM proxy and warn (or raise) on missing models.      ``source`` i, _strict_mode(), validate_litellm_models()
+Cohesion: 0.29
+Nodes (6): ADR-0015: Бэкенд детекции сообществ — in-worker leidenalg (вынос из Neo4j GDS), Контекст, Последствия, Рассмотренные альтернативы, Решение, Ссылки
 
 ### Community 1056 - "build_tool_schema"
-Cohesion: 0.40
-Nodes (5): build_tool_schema(), _injected_params(), BaseModel, Names of the DI-injected dependency args.      Every tool function takes its dep, Pydantic schema of the LLM-facing kwargs for ``name``.      Derived from the rea
+Cohesion: 0.48
+Nodes (6): _load_chunk(), main(), Benchmark: LLM extraction latency with thinking ON vs OFF.  Phase-0 cheap win fo, _run_variant(), _summary(), _timed_call()
 
 ### Community 1058 - "_Cast"
-Cohesion: 0.39
-Nodes (3): _inherit_graph_id(), Any, ``graph_id`` not given explicitly → take it from the first nested     parent mod
+Cohesion: 0.38
+Nodes (6): _activity_block(), Guard: LLM-bound ingest activities are bounded by ATTEMPT COUNT, not wall-clock., Permanently-failing docs must give up and free their slot (incident #2)., test_extract_kg_has_no_walltime_cap(), test_merge_and_resolve_has_no_walltime_cap(), test_retry_policies_bounded_to_max_attempts()
 
 ### Community 1059 - "test_search_pooled_llm.py"
-Cohesion: 0.44
-Nodes (8): _api_key_header(), _post(), ASGI tests for the optional `original` multipart field on POST /ingest.  The con, _stub_storage(), _stub_temporal_client(), test_ingest_original_filename_is_sanitised(), test_ingest_with_original_stores_both_objects(), test_ingest_without_original_saves_no_original_path()
+Cohesion: 0.40
+Nodes (5): _connect(), main(), ConnectionPool, One-time NebulaGraph bootstrap: register the storaged host.  Run ONCE after the, Init a pool, retrying while graphd is still coming up.      graphd's compose hea
 
 ### Community 1060 - "client.js"
 Cohesion: 0.83
@@ -3102,12 +3102,12 @@ Cohesion: 0.67
 Nodes (3): main(), Score ER eval pairs with a Liquid d1 decision model (zero-shot, CPU).  Writes on, state_of()
 
 ### Community 1063 - "_warn_reserved_filters"
-Cohesion: 0.50
-Nodes (4): Log loudly when a client sends a reserved (unimplemented) filter, so a     silen, _warn_reserved_filters(), A reserved filter (department) is accepted but logged as NOT applied —     no si, test_reserved_filter_warns_not_applied()
+Cohesion: 0.40
+Nodes (6): load_state(), Path, Read the sync-state JSON ({dialog_id: {last_id, title}}); {} if absent., Atomic-ish write (tmp + replace) so a Ctrl-C can't truncate the state., save_state(), test_state_roundtrip()
 
 ### Community 1066 - "test_upsert_relations_readback_failure_reports_no_new_pairs"
-Cohesion: 0.29
-Nodes (4): NebulaERGraphOps, Deterministic Nebula VID for an ``ERVerdict`` vertex.      Mirrors ``nebula_stor, nGQL ER graph ops: verdict cache (VID-addressed ``ERVerdict``     vertices) + th, verdict_vid()
+Cohesion: 0.22
+Nodes (6): NebulaERGraphOps, Entity-resolution GRAPH ops (verdict cache + edge-redirect merge).  ``NebulaERGr, Deterministic Nebula VID for an ``ERVerdict`` vertex.      Mirrors ``nebula_stor, nGQL ER graph ops: verdict cache (VID-addressed ``ERVerdict``     vertices) + th, # NOTE: do NOT catch exceptions here — `structured_query` raises on, verdict_vid()
 
 ### Community 1076 - "_no_entity_mirror"
 Cohesion: 0.25
@@ -3117,17 +3117,21 @@ Nodes (8): build_search_query(), Trigram search over the registry — the only s
 Cohesion: 0.29
 Nodes (6): ADR-0012: Wikibase как канонический якорь + непрерывный wiki-редактор с anti-drift bot-секциями, Контекст, Последствия, Рассмотренные альтернативы, Решение, Ссылки
 
+### Community 1081 - "EventsSettings"
+Cohesion: 0.47
+Nodes (5): Any, Sync execution; returns raw rows. Mirrors src/graph/analysis.py::_run_query., Run ``cypher`` off the event loop; ``[]`` on no-store or a transient error., _run_query(), run_rows()
+
 ### Community 1083 - "test_heartbeat.py"
-Cohesion: 0.29
-Nodes (6): A long-running awaitable wrapped in heartbeat_every emits     multiple heartbeat, The background heartbeater is cancelled on exit — no pulses keep     firing once, An error inside the wrapped block surfaces (heartbeater must not     swallow it), test_propagates_work_exceptions(), test_pulses_periodically_during_long_work(), test_stops_pulsing_after_block_exits()
+Cohesion: 0.33
+Nodes (3): _bounded_pg_sessions(), Integration test for the documents source_channel/source_group columns, the 'ski, Live-PG test: a running stack may hold locks on these tables. libpq     applies
 
 ### Community 1084 - "_walk_seeds"
 Cohesion: 0.53
 Nodes (5): Seed entity name(s) for graph_walk.      Legacy (dual=False): graph_search's top, _walk_seeds(), test_walk_seeds_dedupes_when_same(), test_walk_seeds_single_when_dual_off_matches_legacy(), test_walk_seeds_unions_distinct_graph_and_fulltext_seeds()
 
 ### Community 1085 - "check_ingestion.py"
-Cohesion: 0.60
-Nodes (4): check_milvus(), check_postgres(), main(), Diagnostic — show what landed in each backend after ingestion.  Pings every stor
+Cohesion: 0.50
+Nodes (3): _fake_llm(), _pool(), Regression: every search-side LLM accessor goes through the LLM pool, so the glo
 
 ### Community 1087 - "test_search_deps_lock.py"
 Cohesion: 0.60
@@ -3138,24 +3142,24 @@ Nodes (4): _fake_synth(), Regression: the lazy-singleton getters in ``_search_de
   docker-compose.prod.yml · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **2385 isolated node(s):** `NM`, `DIST`, `edited`, `targets`, `entrypoint.sh script` (+2380 more)
+- **2386 isolated node(s):** `NM`, `DIST`, `edited`, `targets`, `entrypoint.sh script` (+2381 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **537 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **536 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **What is the exact relationship between `Neo4j property graph store` and `Production docker-compose`?**
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
-- **Why does `GraphContext` connect `test_workflow: test_search_community.py` to `test_scripts: _pages_to_delete()`, `test_graph: test_community_vector_store.py`, `retrieval: BoundedLLM`, `test_workflow: IngestParams`, `ERGraphOps`, `test_ingest_queue: RabbitMQSettings`, `test_community_read.py`, `test_storage: ChunkRepository`, `workflow: test_search_drift_roundtrip.py`, `test_graph: MilvusEntityVectorStore`, `graph: entity_resolution.py`, `test_graph: _Boom`, `CAPACITY_TUNING.md: LLM_POOL_N throttle`, `test_upsert_relations_readback_failure_reports_no_new_pairs`, `test_workflow: Ctx`, `build_search_query`, `conftest.py`, `workflow: SerializedNode`, `test_scripts: datetime`, `api: ingest.py`, `graph: community_read.py`, `DynamicsGraphOps`, `graph: alert_store.py`, `.achat`, `setup_wikibase.py`, `storage: backfill_doc_id.py`, `ADR-0012: Wikibase как канонический якорь + непрерывный wiki-редактор с anti-drift bot-секциями`, `graph: MilvusCommunityReportVectorStore`, `test_retrieval: test_graph_path_depth.py`, `test_ingestion: index_vector.py`, `workflow: materialize_activities.py`, `test_retrieval: find_entity_by_name()`, `test_analytics: config.py`, `NebulaGraph migration plan (Phases 0-4; strangler-fig, backend-dispatched)`, `test_scripts: test_merge_identifier_duplicates.py`, `test_graph: test_signals_graph_ops.py`, `ingest_medical.py`?**
-  _High betweenness centrality (0.046) - this node is a cross-community bridge._
-- **Why does `_q()` connect `test_storage: test_ingest_metrics.py` to `test_analytics: test_domain.py`, `test_graph: test_community_vector_store.py`, `test_retrieval: test_hybrid.py`, `test_api: AsyncPostgres`, `test_community_read.py`, `test_graph: test_communities_graph_ops.py`, `graph: signals.py`, `test_graph: test_analysis_nebula.py`, `graph_edge_export.py`, `_gather_context`, `graph: clamp_top_n()`, `test_upsert_relations_readback_failure_reports_no_new_pairs`, `test_workflow: Ctx`, `load_state`, `graph: alert_store.py`, `retrieval: build_vector_index()`, `graph: events.py`, `workflow: wiki_sweep.py`, `retrieval: DateBounds`, `graph: communities.py`, `test_storage: test_minio_stream.py`, `Neo4jAggregationsGraphOps`, `graph: domain.py`, `test_retrieval: test_graph_path_depth.py`, `graph: centrality.py`, `message_stats.py`, `aggregations_graph_ops.py`, `test_graph: test_er_graph_ops.py`, `graph: community_writeback.py`, `test_graph: test_signals_graph_ops.py`, `test_graph: stamp_first_seen()`?**
+- **Why does `GraphContext` connect `test_workflow: test_search_community.py` to `test_scripts: _pages_to_delete()`, `test_workflow: IngestParams`, `Runbook: пакетная консолидация графа (`reresolve_graph`)`, `ERGraphOps`, `test_community_read.py`, `tg_ingest.py: load_state()`, `test_retriever_fulltext.py`, `test_storage: ChunkRepository`, `workflow: test_search_drift_roundtrip.py`, `test_graph: MilvusEntityVectorStore`, `test_workflow: activities.py`, `test_graph: _Boom`, `CAPACITY_TUNING.md: LLM_POOL_N throttle`, `test_upsert_relations_readback_failure_reports_no_new_pairs`, `test_workflow: Ctx`, `conftest.py`, `workflow: SerializedNode`, `test_scripts: datetime`, `graph: community_read.py`, `api: ingest.py`, `DynamicsGraphOps`, `graph: alert_store.py`, `setup_wikibase.py`, `storage: backfill_doc_id.py`, `test_retrieval: test_atomic_tools.py`, `test_storage: test_minio_stream.py`, `ADR-0012: Wikibase как канонический якорь + непрерывный wiki-редактор с anti-drift bot-секциями`, `graph: MilvusCommunityReportVectorStore`, `test_retrieval: test_graph_path_depth.py`, `test_ingestion: index_vector.py`, `workflow: materialize_activities.py`, `test_retrieval: find_entity_by_name()`, `test_scripts: test_merge_identifier_duplicates.py`, `test_graph: test_signals_graph_ops.py`, `ingest_medical.py`?**
+  _High betweenness centrality (0.041) - this node is a cross-community bridge._
+- **Why does `_q()` connect `test_storage: test_ingest_metrics.py` to `test_workflow: test_search_community.py`, `test_analytics: test_domain.py`, `test_retrieval: test_hybrid.py`, `test_api: AsyncPostgres`, `test_community_read.py`, `test_retriever_fulltext.py`, `test_graph: test_communities_graph_ops.py`, `graph: signals.py`, `test_graph: test_analysis_nebula.py`, `graph_edge_export.py`, `_gather_context`, `graph: clamp_top_n()`, `test_upsert_relations_readback_failure_reports_no_new_pairs`, `test_workflow: Ctx`, `graph: events.py`, `workflow: wiki_sweep.py`, `retrieval: DateBounds`, `graph: communities.py`, `test_storage: test_minio_stream.py`, `Neo4jAggregationsGraphOps`, `graph: domain.py`, `test_retrieval: test_graph_path_depth.py`, `graph: centrality.py`, `message_stats.py`, `AnalyticsGraphOps`, `aggregations_graph_ops.py`, `test_graph: test_er_graph_ops.py`, `test_graph: test_retriever_fulltext.py`, `alerts.py`, `test_graph: test_signals_graph_ops.py`, `test_graph: stamp_first_seen()`?**
   _High betweenness centrality (0.035) - this node is a cross-community bridge._
-- **Why does `entity_vid()` connect `test_graph: entity_vid()` to `test_analytics: test_domain.py`, `test_graph: test_community_vector_store.py`, `test_workflow: CoverageResult`, `test_workflow: graph_admin.py`, `test_graph: schema.py`, `eval: test_scale_bench_smoke.py`, `test_graph: test_wiki_graph_ops.py`, `test_tools_resolution.py`, `workflow: test_search_drift_roundtrip.py`, `test_graph: test_communities_graph_ops.py`, `test_graph: resolve_entities()`, `test_graph: test_analysis_nebula.py`, `graph_edge_export.py`, `test_storage: test_ingest_metrics.py`, `graph: test_community_summarize.py`, `run_answer_eval.py`, `test_workflow: test_search_pooled_llm.py`, `test_upsert_relations_readback_failure_reports_no_new_pairs`, `test_workflow: Ctx`, `graph: admin.py`, `test_retrieval: RoundGraphData`, `load_state`, `test_graph: test_nebula_store_writes.py`, `retrieval: atomic_tools.py`, `test_graph: _FakeClient`, `get_pg_sync_pool`, `graph: alert_store.py`, `retrieval: build_vector_index()`, `test_completion_no_walltime_cap.py`, `workflow: wiki_sweep.py`, `retrieval: DateBounds`, `test_storage: test_minio_stream.py`, `Neo4jAggregationsGraphOps`, `test_retrieval: test_graph_path_depth.py`, `test_analytics: _FakeOps`, `message_stats.py`, `test_signals_graph_ops.py`, `test_graph: test_er_graph_ops.py`, `test_graph: test_retriever_fulltext.py`, `graph: community_writeback.py`, `retrieval: GraphRetrieverProtocol`, `test_graph: extract_entity_edges()`, `test_graph: test_signals_graph_ops.py`, `test_graph: stamp_first_seen()`, `test_retrieval: test_graph_walk_retriever.py`?**
-  _High betweenness centrality (0.026) - this node is a cross-community bridge._
+- **Why does `entity_vid()` connect `test_graph: entity_vid()` to `test_workflow: test_search_community.py`, `test_analytics: test_domain.py`, `test_workflow: CoverageResult`, `test_workflow: graph_admin.py`, `test_graph: schema.py`, `eval: test_scale_bench_smoke.py`, `test_graph: test_wiki_graph_ops.py`, `test_retriever_fulltext.py`, `workflow: test_search_drift_roundtrip.py`, `test_graph: test_communities_graph_ops.py`, `test_graph: resolve_entities()`, `graph_edge_export.py`, `test_storage: test_ingest_metrics.py`, `run_answer_eval.py`, `test_workflow: test_search_pooled_llm.py`, `test_upsert_relations_readback_failure_reports_no_new_pairs`, `test_workflow: Ctx`, `graph: admin.py`, `test_retrieval: RoundGraphData`, `test_graph: test_nebula_store_writes.py`, `retrieval: atomic_tools.py`, `test_graph: _FakeClient`, `get_pg_sync_pool`, `workflow: wiki_sweep.py`, `retrieval: DateBounds`, `test_storage: test_minio_stream.py`, `Neo4jAggregationsGraphOps`, `test_analytics: _FakeOps`, `test_graph: extract_entity_edges()`, `message_stats.py`, `test_config: test_preflight.py`, `AnalyticsGraphOps`, `test_signals_graph_ops.py`, `test_graph: test_er_graph_ops.py`, `test_graph: test_retriever_fulltext.py`, `alerts.py`, `test_graph: test_signals_graph_ops.py`, `test_graph: stamp_first_seen()`, `test_retrieval: test_graph_walk_retriever.py`?**
+  _High betweenness centrality (0.025) - this node is a cross-community bridge._
 - **Are the 38 inferred relationships involving `GraphContext` (e.g. with `_Counter` and `IngestEnqueuedResponse`) actually correct?**
   _`GraphContext` has 38 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 54 inferred relationships involving `PrimitiveResult` (e.g. with `CountEntitiesParams` and `CountRelationshipsParams`) actually correct?**
   _`PrimitiveResult` has 54 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `NM`, `DIST`, `edited` to the rest of the system?**
-  _2385 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _2386 weakly-connected nodes found - possible documentation gaps or missing edges._
