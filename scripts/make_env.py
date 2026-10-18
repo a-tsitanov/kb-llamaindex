@@ -380,6 +380,8 @@ _ENV_DESCRIPTIONS: dict[str, str] = {
     "TEMPORAL_COMMUNITY_SUMMARY_PARALLELISM": "Bounded-параллелизм fan-out суммаризации сообществ внутри CommunityBuildWorkflow (независимо от worker-капа активити).",
     "TEMPORAL_GRAPH_BUILD_ACTIVITY_CONCURRENCY": "Слотов на выделенной очереди kb-graph-build (offline build сообществ). Намеренно низкий, чтобы не флудить LLM-прокси.",
     "TEMPORAL_GRAPH_BUILD_TASK_QUEUE": "Имя очереди для offline graph-community build (Leiden в воркере + per-community summary); не трогает query hot-path.",
+    "TEMPORAL_GRAPH_LIFECYCLE_ACTIVITY_CONCURRENCY": "Слотов на очереди kb-graph-lifecycle (создание/удаление графов: DDL Nebula/Milvus/PG, purge MinIO). Отдельно от graph_build, чтобы lifecycle не ждал сборку сообществ.",
+    "TEMPORAL_GRAPH_LIFECYCLE_TASK_QUEUE": "Имя очереди для шагов ProvisionGraphWorkflow/DeleteGraphWorkflow (lifecycle графов, /admin/graphs); обслуживается side-worker'ом пула graph_build.",
     "TEMPORAL_HOST": "Хост Temporal.",
     "TEMPORAL_LARGE_ACTIVITY_CONCURRENCY": "Слотов на очереди kb-search-large; намеренно НИЗКИЙ — тяжёлая large-модель не должна обслуживать много параллельных сессий.",
     "TEMPORAL_LARGE_TASK_QUEUE": "Имя очереди для large-tier финального synthesis (synthesize_answer пинится сюда).",

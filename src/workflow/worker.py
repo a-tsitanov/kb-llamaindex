@@ -17,7 +17,8 @@ Pools (one process each):
 * **merge** — ``merge_task_queue``: GraphBuildWorkflow + merge activities.
 * **search** — ``search_task_queue``: plan-execute + GraphRAG search WFs.
 * **large** — ``large_task_queue``: large-tier ``synthesize_answer`` only.
-* **graph_build** — ``graph_build_task_queue``: offline community build.
+* **graph_build** — ``graph_build_task_queue``: offline community build
+  + graph provision/delete workflows.
 * **wiki** — ``wiki.task_queue``: WikiSweepWorkflow.
 
 Process layout:
@@ -60,6 +61,8 @@ from src.workflow.analytics.materialize_workflow import AnalyticsMaterializeWork
 from src.workflow.analytics.workflow import AnalyticalQueryWorkflow
 from src.workflow.document_ingest import DocumentIngestWorkflow
 from src.workflow.graph_build import GraphBuildWorkflow
+from src.workflow.graph_lifecycle.activities import LIFECYCLE_ACTIVITIES
+from src.workflow.graph_lifecycle.workflows import DeleteGraphWorkflow, ProvisionGraphWorkflow
 from src.workflow.ingest_scheduler import IngestSchedulerWorkflow
 from src.workflow.monitor.activities import MONITOR_ACTIVITIES
 from src.workflow.monitor.workflow import MonitorSweepWorkflow
@@ -102,6 +105,11 @@ SEARCH_WORKFLOWS = [
     AutoSearchWorkflow,
     AnalyticalQueryWorkflow,
 ]
+
+# graph_build pool: offline community/analytics builds + graph lifecycle.
+# Lifecycle steps are scheduled on graph_lifecycle_task_queue (served by
+# _side_workers); they stay registered here for steps scheduled before that.
+GRAPH_BUILD_POOL_ACTIVITIES = [*GRAPH_BUILD_ACTIVITIES, *LIFECYCLE_ACTIVITIES]
 
 
 def select_groups(spec: str | None) -> list[str]:
@@ -177,7 +185,12 @@ def workflows_for_group(group: str) -> list[type]:
         "scheduler": [IngestSchedulerWorkflow],
         "merge": [GraphBuildWorkflow],
         "search": list(SEARCH_WORKFLOWS),
-        "graph_build": [CommunityBuildWorkflow, AnalyticsMaterializeWorkflow],
+        "graph_build": [
+            CommunityBuildWorkflow,
+            AnalyticsMaterializeWorkflow,
+            ProvisionGraphWorkflow,
+            DeleteGraphWorkflow,
+        ],
         "wiki": [WikiSweepWorkflow],
         "monitor": [MonitorSweepWorkflow],
     }.get(group, [])
@@ -242,7 +255,7 @@ def _build_worker(client: Client, group: str) -> Worker:
             client,
             task_queue=t.graph_build_task_queue,
             workflows=workflows_for_group(group),
-            activities=GRAPH_BUILD_ACTIVITIES,
+            activities=GRAPH_BUILD_POOL_ACTIVITIES,
             max_concurrent_activities=t.graph_build_activity_concurrency,
         )
     if group == "wiki":
@@ -262,6 +275,23 @@ def _build_worker(client: Client, group: str) -> Worker:
             max_concurrent_activities=settings.monitor.activity_concurrency,
         )
     raise ValueError(f"unknown group: {group!r}")
+
+
+def _side_workers(client: Client, group: str) -> list[Worker]:
+    """Extra Workers run in ``group``'s process next to its main pool."""
+    t = settings.temporal
+    if group == "graph_build":
+        # Own queue + slots: provision/delete never wait for a free
+        # kb-graph-build slot held by an hours-long community build.
+        return [
+            Worker(
+                client,
+                task_queue=t.graph_lifecycle_task_queue,
+                activities=LIFECYCLE_ACTIVITIES,
+                max_concurrent_activities=t.graph_lifecycle_activity_concurrency,
+            )
+        ]
+    return []
 
 
 async def _run_one(group: str) -> None:
@@ -289,15 +319,16 @@ async def _run_one(group: str) -> None:
         data_converter=pydantic_data_converter,
         runtime=runtime,
     )
-    worker = _build_worker(client, group)
+    workers = [_build_worker(client, group), *_side_workers(client, group)]
     logger.info(
-        "worker[{g}]  started  target={t}  pid={p}",
+        "worker[{g}]  started  target={t}  pid={p}  queues={q}",
         g=group,
         t=settings.temporal.target,
         p=os.getpid(),
+        q=[w.task_queue for w in workers],
     )
     try:
-        await worker.run()
+        await asyncio.gather(*(w.run() for w in workers))
     finally:
         from src.storage.pg_pool import close_pg_pool
 

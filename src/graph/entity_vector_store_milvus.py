@@ -39,30 +39,35 @@ class MilvusEntityVectorStore:
         self._collection = collection
         self._ensured = False
 
-    def _ensure(self) -> None:
+    def ensure_collection(self) -> None:
+        """Create the collection if missing.  Raises on any Milvus error
+        (provisioning needs a hard signal); request paths use ``_ensure``."""
         if self._ensured:
             return
-        try:
-            if not self._client.has_collection(self._collection):
-                from pymilvus import DataType
+        if not self._client.has_collection(self._collection):
+            from pymilvus import DataType
 
-                schema = self._client.create_schema(auto_id=False, enable_dynamic_field=False)
-                schema.add_field("name", DataType.VARCHAR, is_primary=True, max_length=_NAME_MAX)
-                schema.add_field("er_vec", DataType.FLOAT_VECTOR, dim=settings.milvus.dim)
-                schema.add_field("label", DataType.VARCHAR, max_length=_LABEL_MAX)
-                schema.add_field("mention_count", DataType.INT64)
-                schema.add_field("description", DataType.VARCHAR, max_length=_DESC_MAX)
-                index = self._client.prepare_index_params()
-                index.add_index(
-                    field_name="er_vec", index_type=settings.milvus.index_type,
-                    metric_type="COSINE",
-                    params={"M": settings.milvus.hnsw_m,
-                            "efConstruction": settings.milvus.hnsw_ef_construction},
-                )
-                self._client.create_collection(
-                    collection_name=self._collection, schema=schema, index_params=index,
-                )
-            self._ensured = True
+            schema = self._client.create_schema(auto_id=False, enable_dynamic_field=False)
+            schema.add_field("name", DataType.VARCHAR, is_primary=True, max_length=_NAME_MAX)
+            schema.add_field("er_vec", DataType.FLOAT_VECTOR, dim=settings.milvus.dim)
+            schema.add_field("label", DataType.VARCHAR, max_length=_LABEL_MAX)
+            schema.add_field("mention_count", DataType.INT64)
+            schema.add_field("description", DataType.VARCHAR, max_length=_DESC_MAX)
+            index = self._client.prepare_index_params()
+            index.add_index(
+                field_name="er_vec", index_type=settings.milvus.index_type,
+                metric_type="COSINE",
+                params={"M": settings.milvus.hnsw_m,
+                        "efConstruction": settings.milvus.hnsw_ef_construction},
+            )
+            self._client.create_collection(
+                collection_name=self._collection, schema=schema, index_params=index,
+            )
+        self._ensured = True
+
+    def _ensure(self) -> None:
+        try:
+            self.ensure_collection()
         except Exception as exc:
             logger.warning("ensure entity_er_vec collection failed: {e}", e=exc)
 

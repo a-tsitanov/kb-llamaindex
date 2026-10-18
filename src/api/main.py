@@ -19,6 +19,7 @@ from src.api.routes import (
     documents,
     entities,
     graph_admin,
+    graphs_admin,
     health,
     ingest,
     search_v2,
@@ -96,3 +97,4 @@ app.include_router(stats_data.router, prefix="/api/v1")
 app.include_router(admin.router)
 app.include_router(admin.monitor_router)
 app.include_router(graph_admin.router)
+app.include_router(graphs_admin.router)

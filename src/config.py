@@ -370,6 +370,10 @@ class TemporalSettings(BaseSettings):
     # to flood the LLM proxy with a burst from a single rebuild.
     graph_build_task_queue: str = "kb-graph-build"
     graph_build_activity_concurrency: int = 2
+    # Graph provision/delete activities: served by the graph_build process on
+    # their OWN queue + slots, so they never queue behind hours-long builds.
+    graph_lifecycle_task_queue: str = "kb-graph-lifecycle"
+    graph_lifecycle_activity_concurrency: int = 2
     # Offline analytics materialisation (Wave 1): centrality + link-prediction
     # runs on the same kb-graph-build queue so it shares its low concurrency cap
     # and never touches the query hot path.  Raise to process more nodes in

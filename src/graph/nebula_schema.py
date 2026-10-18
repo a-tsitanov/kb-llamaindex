@@ -14,6 +14,7 @@ across the propagation window. `ensure_schema` below handles both.
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -458,3 +459,45 @@ def ensure_schema(
         [f'DELETE VERTEX "{probe}" WITH EDGE;', f'DELETE VERTEX "{probe_b}" WITH EDGE;'],
         attempts=use_attempts, delay_s=use_delay_s,
     )
+
+
+# ── provision / teardown primitives (graph lifecycle) ──────────────
+
+_TAG_RE = re.compile(r"CREATE TAG IF NOT EXISTS `(\w+)`")
+_EDGE_RE = re.compile(r"CREATE EDGE IF NOT EXISTS `(\w+)`")
+
+
+def expected_tags() -> list[str]:
+    return [m for s in SCHEMA_DDL for m in _TAG_RE.findall(s)]
+
+
+def expected_edges() -> list[str]:
+    return [m for s in SCHEMA_DDL for m in _EDGE_RE.findall(s)]
+
+
+def _names(resp: Any) -> set[str]:
+    cols = resp.keys()
+    idx = cols.index("Name")
+    return {resp.row_values(i)[idx].cast() for i in range(resp.row_size())}
+
+
+def verify_space_schema(session: Any, graph: Any) -> list[str]:
+    """Strict post-provision check (``ensure_schema`` is fail-open): the
+    missing tag/edge names, or ``["<space unusable>"]`` if ``USE`` fails."""
+    if not session.execute(f"USE `{graph.nebula_space}`;").is_succeeded():
+        return ["<space unusable>"]
+    tags = session.execute("SHOW TAGS;")
+    edges = session.execute("SHOW EDGES;")
+    if not (tags.is_succeeded() and edges.is_succeeded()):
+        return ["<space unusable>"]
+    have = _names(tags) | _names(edges)
+    return [n for n in [*expected_tags(), *expected_edges()] if n not in have]
+
+
+def drop_space(session: Any, graph: Any) -> None:
+    """``DROP SPACE`` for a non-default graph; raises on failure."""
+    if graph.is_default or graph.nebula_space != f"g_{graph.id}":
+        raise ValueError(f"refusing to drop space {graph.nebula_space!r} of graph {graph.id!r}")
+    resp = session.execute(f"DROP SPACE IF EXISTS `{graph.nebula_space}`;")
+    if not resp.is_succeeded():
+        raise RuntimeError(f"DROP SPACE {graph.nebula_space} failed: {resp.error_msg()}")

@@ -31,7 +31,7 @@ def _run_input_type(cls):
 
 def test_every_workflow_input_carries_graph_id():
     classes = _workflow_classes()
-    assert len(classes) == 13
+    assert len(classes) == 15  # + ProvisionGraphWorkflow, DeleteGraphWorkflow
     missing = []
     for cls in classes:
         t = _run_input_type(cls)

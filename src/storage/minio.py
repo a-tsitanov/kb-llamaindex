@@ -12,12 +12,14 @@ wrapper and let callers handle async via ``asyncio.to_thread``.
 from __future__ import annotations
 
 import functools
+import itertools
 from collections.abc import Iterator
 from pathlib import Path
 from typing import BinaryIO
 
 from loguru import logger
 from minio import Minio
+from minio.deleteobjects import DeleteObject
 from minio.error import S3Error
 
 from src.config import MinioSettings, settings
@@ -116,6 +118,24 @@ class MinioStorage:
         finally:
             resp.close()
             resp.release_conn()
+
+    def delete_prefix(self, prefix: str, *, limit: int | None = None) -> int:
+        """Remove objects under ``prefix`` (a graph's ``<id>/``) with bulk
+        DeleteObjects requests — all of them, or at most ``limit`` so the
+        caller can heartbeat between calls (repeat until it returns 0).
+        Refuses the bucket root.  Returns the number removed."""
+        if not prefix or not prefix.endswith("/"):
+            raise ValueError(f"refusing to delete prefix {prefix!r}")
+        listing = self._client.list_objects(self._bucket, prefix=prefix, recursive=True)
+        names = [o.object_name for o in itertools.islice(listing, limit)]
+        if not names:
+            return 0
+        # remove_objects is lazy: the requests are sent while its error
+        # iterator is consumed.
+        errors = list(self._client.remove_objects(self._bucket, (DeleteObject(n) for n in names)))
+        if errors:
+            raise RuntimeError(f"minio: {len(errors)} object(s) not deleted under {prefix!r}: {errors[0]}")
+        return len(names)
 
     # ── parsing helpers ────────────────────────────────────────────
 

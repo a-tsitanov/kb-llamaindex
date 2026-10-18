@@ -123,3 +123,53 @@ def test_build_minio_storage_is_cached(tmp_path: Path, monkeypatch) -> None:
         assert s1 is s2
         MinioCls.return_value.bucket_exists.assert_called_once()
     minio_mod.build_minio_storage.cache_clear()
+
+
+class _BulkClient:
+    def __init__(self, names, errors=()):
+        self.names, self.errors, self.removed = names, list(errors), []
+
+    def list_objects(self, bucket, prefix, recursive):
+        from types import SimpleNamespace
+
+        assert recursive and prefix == "acme/"
+        return iter([SimpleNamespace(object_name=n) for n in self.names])
+
+    def remove_objects(self, bucket, objs):
+        # lazy, like minio: requests go out while the error iterator is consumed
+        for o in objs:
+            self.removed.append(o.name)
+            yield from ()
+        yield from self.errors
+
+
+def _storage(client):
+    s = MinioStorage.__new__(MinioStorage)
+    s._client, s._bucket = client, "kb-uploads"
+    return s
+
+
+def test_delete_prefix_removes_all_under_prefix():
+    c = _BulkClient(["acme/a", "acme/b/c"])
+    assert _storage(c).delete_prefix("acme/") == 2
+    assert c.removed == ["acme/a", "acme/b/c"]
+
+
+def test_delete_prefix_limit_bounds_one_call():
+    c = _BulkClient([f"acme/{i}" for i in range(5)])
+    assert _storage(c).delete_prefix("acme/", limit=2) == 2
+    assert c.removed == ["acme/0", "acme/1"]
+    assert _storage(_BulkClient([])).delete_prefix("acme/", limit=2) == 0
+
+
+def test_delete_prefix_raises_on_delete_errors():
+    c = _BulkClient(["acme/a"], errors=["AccessDenied"])
+    with pytest.raises(RuntimeError, match="not deleted"):
+        _storage(c).delete_prefix("acme/")
+
+
+def test_delete_prefix_refuses_root():
+    s = MinioStorage.__new__(MinioStorage)
+    for bad in ("", "acme"):
+        with pytest.raises(ValueError):
+            s.delete_prefix(bad)
