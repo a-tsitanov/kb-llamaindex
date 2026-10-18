@@ -312,3 +312,13 @@ User decision, supersedes parts of D1 and the auth sections above:
   `owner='legacy-env'` in `setup_db`); default-only feature limits (wiki,
   monitor 409; Wikibase skip; entity-watch `ToolError`) — those are feature
   limits, not authorization.
+
+## Amendment 2026-10-18 — explicit creation only
+
+User decision: graphs are **never auto-created** on first ingest or first
+request. An unknown `X-Graph` stays 404 everywhere (ingest included); a typo
+must not silently provision a new space / collections / schema. The only way
+to create a graph is `POST /admin/graphs` + `ProvisionGraphWorkflow` (§3).
+Following the 2026-10-17 amendment, the `/admin/graphs*` endpoints require
+just a valid key; the `DeleteGraphWorkflow` step "remove the graph from every
+`api_keys.graph_ids`" is dropped (the column no longer exists).
