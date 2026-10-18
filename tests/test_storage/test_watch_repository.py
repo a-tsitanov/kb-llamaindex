@@ -278,7 +278,7 @@ async def test_pooled_connection_runs_in_the_graph_schema(monkeypatch):
     repo = WatchRepository(graph=new_graph_context("acme"))
     assert repo.graph.id == "acme"
     await repo.watched()
-    assert conn.log[:2] == ['SET search_path TO "g_acme", public', "commit"]
+    assert conn.log[:2] == ['SET search_path TO "g_acme", extensions', "commit"]
     assert conn.cur.executed  # the query ran on the scoped connection
 
 
@@ -292,4 +292,4 @@ async def test_dsn_connection_sets_the_graph_schema(monkeypatch):
     monkeypatch.setattr(watch_mod.psycopg.AsyncConnection, "connect", _connect)
     repo = WatchRepository("postgresql://x", graph=new_graph_context("acme"))
     await repo.watched()
-    assert conn.log[:2] == ['SET search_path TO "g_acme", public', "commit"]
+    assert conn.log[:2] == ['SET search_path TO "g_acme", extensions', "commit"]

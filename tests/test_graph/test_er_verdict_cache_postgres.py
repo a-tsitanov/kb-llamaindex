@@ -98,7 +98,7 @@ def cache_with_pool():
     def _make(rows=None):
         cache = PostgresERVerdictCache(graph=default_graph_context())
         pool = _StubPool(rows)
-        cache._pool = lambda: pool  # noqa: SLF001 - test seam
+        cache._pool = lambda: pool
         return cache, pool
 
     return _make
@@ -284,6 +284,6 @@ def test_cache_reads_and_writes_in_the_graphs_schema():
     schema (committed) before the query runs."""
     cache = PostgresERVerdictCache(graph=new_graph_context("acme"))
     pool = _StubPool([{"er_key": "a", "same": True}])
-    cache._pool = lambda: pool  # noqa: SLF001 - test seam
+    cache._pool = lambda: pool
     assert cache.load_verdicts(["a"]) == {"a": True}
-    assert pool.conn.scope_log == ['SET search_path TO "g_acme", public', "commit"]
+    assert pool.conn.scope_log == ['SET search_path TO "g_acme", extensions', "commit"]

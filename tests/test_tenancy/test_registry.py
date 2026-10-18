@@ -185,3 +185,15 @@ async def test_pg_row_loaders_use_short_pool_timeout(monkeypatch):
     assert await _load_row_from_pg("default") is None
     assert await _load_key_row("abc") is None
     assert pool.kwargs == [{"timeout": 1}, {"timeout": 1}]
+
+
+async def test_generation_read_from_row():
+    row = _row("acme") | {"generation": 42}
+    reg = GraphRegistry(loader=_Loader({"acme": row}))
+    assert (await reg.get("acme")).generation == 42
+
+
+def test_registry_selects_generation():
+    from src.tenancy import registry
+
+    assert "generation" in registry._COLS

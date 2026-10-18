@@ -1,6 +1,7 @@
 """Graph-scoped Postgres connections via ``search_path``.
 
-Each graph's tables live in its own schema (``public`` for `default`).  The
+Each graph's tables live in its own schema (``public`` for `default`);
+pg_trgm lives in ``extensions``, the only other schema on the path.  The
 SET is committed immediately so a later rollback inside the caller's block
 cannot silently revert it; the pools' ``reset`` callbacks restore the
 default path when a connection returns, so no schema leaks into the next
@@ -18,7 +19,10 @@ from src.tenancy.context import GraphContext
 
 
 def search_path_sql(graph: GraphContext) -> sql.Composed:
-    return sql.SQL("SET search_path TO {}, public").format(sql.Identifier(graph.pg_schema))
+    # `extensions` (pg_trgm) instead of `public`: a graph schema missing a
+    # table must fail loudly, not fall through to `default`'s public table
+    # (R-P5).  Global tables are always addressed as `public.<t>`.
+    return sql.SQL("SET search_path TO {}, extensions").format(sql.Identifier(graph.pg_schema))
 
 
 async def reset_search_path(conn) -> None:

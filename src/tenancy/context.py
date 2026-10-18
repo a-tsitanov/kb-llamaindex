@@ -35,10 +35,17 @@ class GraphContext:
     report_vec_collection: str
     pg_schema: str
     minio_prefix: str
+    # Bumped each time a graph id is (re)created, so per-process caches
+    # never hand a re-created graph the dropped one's sessions/handles.
+    generation: int = 0
 
     @property
     def is_default(self) -> bool:
         return self.id == DEFAULT_GRAPH_ID
+
+    @property
+    def cache_key(self) -> str:
+        return f"{self.id}#{self.generation}"
 
 
 def default_graph_context() -> GraphContext:

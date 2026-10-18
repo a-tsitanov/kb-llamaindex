@@ -119,3 +119,17 @@ def test_ready_graphs_includes_default_alongside_other_ready_graphs():
     graphs = setup_db._ready_graphs(_SelCur([_row(other)]))
     assert sorted(g.id for g in graphs) == sorted([default_graph_context().id, "acme"])
     assert sum(1 for g in graphs if g.id == default_graph_context().id) == 1
+
+
+def test_pg_trgm_lives_in_extensions_schema():
+    ddl = setup_db._PG_TRGM_DDL
+    assert "CREATE SCHEMA IF NOT EXISTS extensions" in ddl
+    assert "CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA extensions" in ddl
+    assert "ALTER EXTENSION pg_trgm SET SCHEMA extensions" in ddl
+
+
+def test_set_database_search_path_includes_extensions():
+    cur = _Cur()
+    setup_db._set_database_search_path(cur)
+    (stmt, _), = cur.sql
+    assert "ALTER DATABASE" in stmt and "extensions" in stmt and "current_database()" in stmt

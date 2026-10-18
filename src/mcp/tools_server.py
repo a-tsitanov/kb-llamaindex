@@ -41,7 +41,6 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastmcp import FastMCP
-from fastmcp.exceptions import ToolError
 from loguru import logger
 
 from src.config import settings
@@ -55,6 +54,7 @@ from src.mcp._shared import (
 from src.retrieval import atomic_tools
 from src.retrieval.graph_rank import GraphRanker
 from src.stats.align import GRANULARITIES
+from src.tenancy.cache import evict_stale_generations
 from src.tenancy.context import GraphContext
 
 mcp = FastMCP(
@@ -73,8 +73,8 @@ mcp = FastMCP(
 
 
 _lock = asyncio.Lock()
-# Graph-scoped deps keyed by ``graph.id``: retriever, graph (retriever),
-# graph_store, chunks.  The LLM is graph-agnostic and lives in the shared
+# Graph-scoped deps keyed by ``graph.cache_key`` (id#generation): retriever,
+# graph (retriever), graph_store, chunks.  The LLM is graph-agnostic and lives in the shared
 # per-process ``LLMPool``; the embed model is cached once in ``_embed``.
 _deps_by_graph: dict[str, dict[str, Any]] = {}
 _embed: dict[str, Any] = {}
@@ -90,13 +90,15 @@ async def _init(graph: GraphContext) -> dict[str, Any]:
     search-side activities (see ``src/workflow/_search_deps.py``).
     Returns the graph's deps dict.  The embed model is graph-agnostic
     and cached once in ``_embed`` (the dense prefilter reuses it)."""
-    deps = _deps_by_graph.get(graph.id)
+    deps = _deps_by_graph.get(graph.cache_key)
     if deps is not None:
         return deps
     async with _lock:
-        deps = _deps_by_graph.get(graph.id)
+        deps = _deps_by_graph.get(graph.cache_key)
         if deps is not None:
             return deps
+        # A deleted-then-re-created graph id must not reuse old handles.
+        evict_stale_generations(_deps_by_graph, graph)
         from src.ingestion.embeddings import build_embedding_model
         from src.retrieval.vector_index import (
             build_vector_index,
@@ -141,7 +143,7 @@ async def _init(graph: GraphContext) -> dict[str, Any]:
         deps["chunks"] = ChunkRepository(graph=graph, pg=AsyncPostgres(graph=graph))
         # Publish only once fully built so a lock-free reader never sees a
         # half-populated dict.
-        _deps_by_graph[graph.id] = deps
+        _deps_by_graph[graph.cache_key] = deps
         return deps
 
 
@@ -930,13 +932,8 @@ WATCH_KINDS: tuple[str, ...] = (
 
 
 async def _watch_graph() -> GraphContext:
-    """The tool's graph, refused unless it is the default one: the monitor
-    sweep (``sweep_watch``) only reads the default graph's journals, so a
-    watch elsewhere would never fire (mirrors the HTTP 409 for monitor/wiki)."""
-    graph = await current_graph()
-    if not graph.is_default:
-        raise ToolError("entity watch is available only for the default graph")
-    return graph
+    """The tool's graph (any ready graph — the monitor sweeps all of them)."""
+    return await current_graph()
 
 
 def _entity_search(graph: GraphContext):

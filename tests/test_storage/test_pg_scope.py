@@ -29,9 +29,16 @@ class _APool:
 
 def test_search_path_sql_quotes_identifier():
     s = pg_scope.search_path_sql(new_graph_context("acme")).as_string(None)
-    assert s == 'SET search_path TO "g_acme", public'
+    assert s == 'SET search_path TO "g_acme", extensions'
     default_sql = pg_scope.search_path_sql(default_graph_context()).as_string(None)
-    assert default_sql == 'SET search_path TO "public", public'
+    assert default_sql == 'SET search_path TO "public", extensions'
+
+
+def test_non_default_search_path_has_no_public():
+    # R-P5: a missing per-graph table must error, never resolve to the
+    # default graph's table in `public`.
+    s = pg_scope.search_path_sql(new_graph_context("acme")).as_string(None)
+    assert "public" not in s
 
 
 async def test_graph_connection_commits_set_before_yield(monkeypatch):
@@ -41,7 +48,7 @@ async def test_graph_connection_commits_set_before_yield(monkeypatch):
         return pool
     monkeypatch.setattr(pg_scope, "get_pg_pool", fake_get_pool)
     async with pg_scope.graph_connection(new_graph_context("acme")) as conn:
-        assert conn.log == [("execute", 'SET search_path TO "g_acme", public'), ("commit",)]
+        assert conn.log == [("execute", 'SET search_path TO "g_acme", extensions'), ("commit",)]
         await conn.rollback()  # a later rollback cannot revert a committed SET
 
 

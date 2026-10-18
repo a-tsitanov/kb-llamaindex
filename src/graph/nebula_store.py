@@ -18,10 +18,12 @@ from loguru import logger
 from src.config import settings
 from src.graph.entity_table import mirror_entities, node_to_row
 from src.graph.nebula_schema import ensure_schema
+from src.tenancy.cache import evict_stale_generations
 from src.tenancy.context import GraphContext
 
-# One store per graph space (``GraphContext.nebula_space``): ``USE <space>``
-# is per-session state, so each space needs its own session.
+# One store per graph, keyed by ``GraphContext.cache_key`` (id#generation):
+# ``USE <space>`` is per-session state, so each space needs its own session,
+# and a re-created graph id must not reuse the dropped space's session.
 _stores: dict[str, NebulaGraphStore] = {}
 # One ConnectionPool per process, shared by every space's session. Held at
 # module scope also to keep it alive for the life of the process (a GC'd pool
@@ -457,13 +459,17 @@ def build_nebula_graph_store(graph: GraphContext) -> NebulaGraphStore:
     Session re-acquisition goes through ``_acquire_session`` so a graphd
     *restart* (as opposed to an idle-timeout) also heals: the pool writes the
     address off and, on the library defaults, would never take it back."""
-    key = graph.nebula_space
+    key = graph.cache_key
     store = _stores.get(key)
     if store is not None:
         return store
     with _lock:
         store = _stores.get(key)
         if store is None:
+            # A re-created graph id (new generation) must not reuse the dropped
+            # space's session: close and forget the older generations.
+            for stale in evict_stale_generations(_stores, graph):
+                stale.close()
             pool = _shared_pool()
             cfg = settings.nebula
             user, password = cfg.user, cfg.password.get_secret_value()

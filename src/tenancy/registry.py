@@ -17,7 +17,7 @@ from src.tenancy.context import (
 
 _COLS = (
     "id, owner, status, nebula_space, nebula_partition_num, chunks_collection, "
-    "er_vec_collection, report_vec_collection, pg_schema"
+    "er_vec_collection, report_vec_collection, pg_schema, generation"
 )
 
 
@@ -57,6 +57,7 @@ def _context_from_row(row: dict) -> GraphContext:
         report_vec_collection=row["report_vec_collection"],
         pg_schema=row["pg_schema"],
         minio_prefix="" if gid == DEFAULT_GRAPH_ID else f"{gid}/",
+        generation=int(row.get("generation") or 0),
     )
 
 

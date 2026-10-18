@@ -7,8 +7,8 @@ We don't talk to a real Temporal cluster here — only assert that:
   * each tool's input schema exposes the `query` parameter and no legacy
     `mode` selector (R7b: the local flow submits the plan-execute
     ``SearchOrchestratorWorkflow``),
-  * the auth gate fails when KB_MCP_REQUIRE_AUTH=true and no API_KEYS
-    is set.
+  * the startup auth check passes when KB_MCP_REQUIRE_AUTH=false (an
+    empty API_KEYS env no longer exits — R-P6, see test_auth.py).
 """
 
 from __future__ import annotations
@@ -47,28 +47,8 @@ async def test_search_tools_schema_includes_query_param():
         assert "mode" not in props, f"{name} should not expose mode"
 
 
-def test_auth_gate_blocks_when_keys_missing(monkeypatch):
-    """assert_api_key_env_set raises SystemExit when require=true and
-    api_keys list is empty.  Uses the fresh-ApiSettings pattern from
-    tests/test_config.py to avoid module-reload pollution that would
-    break sibling tests in this session."""
-    monkeypatch.setenv("KB_MCP_REQUIRE_AUTH", "true")
-    monkeypatch.setenv("API_KEYS", "")
-    from src.config import settings
-    # Patch the keys_list on the live settings.api so _shared.py's
-    # `settings.api.keys_list` sees an empty list during the test only.
-    monkeypatch.setattr(
-        settings.api.__class__, "keys_list",
-        property(lambda self: []),
-    )
-    import src.mcp._shared as shared
-    with pytest.raises(SystemExit, match="API_KEYS"):
-        shared.assert_api_key_env_set()
-
-
 def test_auth_gate_passes_when_disabled(monkeypatch):
     monkeypatch.setenv("KB_MCP_REQUIRE_AUTH", "false")
     import src.mcp._shared as shared
     # Should not raise even with empty keys.
     shared.assert_api_key_env_set()
-    assert shared.is_valid_key("anything") is True

@@ -25,7 +25,7 @@ def test_migrate_new_graph_creates_schema_and_scopes_ddl():
     cur = _Cur()
     setup_db.migrate_graph_schema(cur, new_graph_context("acme"))
     assert cur.sql[0] == 'CREATE SCHEMA IF NOT EXISTS "g_acme"'
-    assert cur.sql[1] == 'SET search_path TO "g_acme", public'
+    assert cur.sql[1] == 'SET search_path TO "g_acme", extensions'
     assert cur.sql[2 : 2 + len(setup_db.GRAPH_DDL)] == setup_db.GRAPH_DDL
     assert cur.sql[-1] == "RESET search_path"
 
@@ -34,4 +34,4 @@ def test_migrate_default_graph_does_not_create_public():
     cur = _Cur()
     setup_db.migrate_graph_schema(cur, default_graph_context())
     assert not any(s.startswith("CREATE SCHEMA") for s in cur.sql)
-    assert cur.sql[0] == 'SET search_path TO "public", public'
+    assert cur.sql[0] == 'SET search_path TO "public", extensions'

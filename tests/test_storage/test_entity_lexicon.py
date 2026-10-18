@@ -61,6 +61,6 @@ async def test_lexicon_reads_the_graph_schema(monkeypatch):
     monkeypatch.setattr(pg_scope, "get_pg_pool", _get_pool)
     lex = lx.EntityLexicon(graph=new_graph_context("acme"))
     assert await lex.by_norm("росатом", 3) == [{"name": "Росатом"}]
-    assert log[0] == ("set", 'SET search_path TO "g_acme", public')
+    assert log[0] == ("set", 'SET search_path TO "g_acme", extensions')
     assert log[1] == ("commit",)
     assert log[2][0] == "query" and "FROM entity" in log[2][1]

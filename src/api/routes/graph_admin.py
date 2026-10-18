@@ -20,6 +20,7 @@ from src.api.auth import require_api_key
 from src.api.graph_dep import resolve_graph
 from src.config import settings
 from src.graph import analysis
+from src.tenancy.cache import evict_stale_generations
 from src.tenancy.context import GraphContext, graph_scoped_id
 
 router = APIRouter(
@@ -27,17 +28,19 @@ router = APIRouter(
 )
 
 
-# Graph stores keyed by ``graph.id``.  ``_store`` is sync (no await between
+# Graph stores keyed by ``graph.cache_key`` (id#generation; older
+# generations of the same id are evicted on a miss).  ``_store`` is sync (no await between
 # the lookup and the insert), so the event loop cannot interleave two builds.
 _stores: dict[str, Any] = {}
 
 
 def _store(graph: GraphContext) -> Any:
-    store = _stores.get(graph.id)
+    store = _stores.get(graph.cache_key)
     if store is None:
         from src.graph.store import build_graph_store
 
-        store = _stores[graph.id] = build_graph_store(graph)
+        evict_stale_generations(_stores, graph)
+        store = _stores[graph.cache_key] = build_graph_store(graph)
     return store
 
 

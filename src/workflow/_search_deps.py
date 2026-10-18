@@ -34,6 +34,7 @@ from src.retrieval.atomic_tools import (
     GraphRetrieverProtocol,
     RetrieverProtocol,
 )
+from src.tenancy.cache import evict_stale_generations
 from src.tenancy.context import GraphContext
 
 # The unified rerank now owns the top_n cut (after group weighting), so the
@@ -52,7 +53,7 @@ _GLOBAL_KEYS = (
 )
 _global: dict[str, Any] = dict.fromkeys(_GLOBAL_KEYS)
 
-# Graph-scoped deps keyed by ``graph.id``: retriever, ``_vector_index``,
+# Graph-scoped deps keyed by ``graph.cache_key`` (id#generation): retriever, ``_vector_index``,
 # ``graph_retriever`` (+ its per-graph ``graph_retriever_attempted`` flag),
 # ``chunk_repository``.  Each inner dict is created lazily by ``_slot``.
 _per_graph: dict[str, dict[str, Any]] = {}
@@ -61,9 +62,11 @@ _per_graph: dict[str, dict[str, Any]] = {}
 def _slot(graph: GraphContext) -> dict[str, Any]:
     """The per-graph cache dict for ``graph`` (created on first touch).
     Plain dict ops, no await — safe to call with or without ``_lock``."""
-    slot = _per_graph.get(graph.id)
+    slot = _per_graph.get(graph.cache_key)
     if slot is None:
-        slot = _per_graph[graph.id] = {
+        # Drop a deleted-then-re-created id's old slot (stale handles).
+        evict_stale_generations(_per_graph, graph)
+        slot = _per_graph[graph.cache_key] = {
             "retriever": None, "_vector_index": None,
             "graph_retriever": None, "chunk_repository": None,
         }

@@ -197,5 +197,5 @@ def test_mirror_writes_into_the_graphs_schema(monkeypatch):
         new_graph_context("acme"),
         [{"vid": "v1", "name": "n", "label": "", "description": "", "mention_count": 1}],
     )
-    assert pool.conn.scope_log == ['SET search_path TO "g_acme", public', "commit"]
+    assert pool.conn.scope_log == ['SET search_path TO "g_acme", extensions', "commit"]
     assert "INSERT INTO entity" in pool.executed[0][0]

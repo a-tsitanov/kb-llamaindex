@@ -19,12 +19,14 @@ from fastapi import APIRouter, Depends, Query
 from src.api.graph_dep import resolve_graph
 from src.config import settings
 from src.retrieval import atomic_tools
+from src.tenancy.cache import evict_stale_generations
 from src.tenancy.context import GraphContext
 
 router = APIRouter(prefix="/entities", tags=["entities"])
 
 
-# Retrievers keyed by ``graph.id``.  ``_retriever`` is sync (no await
+# Retrievers keyed by ``graph.cache_key`` (id#generation; older
+# generations of the same id are evicted on a miss).  ``_retriever`` is sync (no await
 # between the lookup and the insert), so the event loop cannot interleave
 # two builds.
 _retrievers: dict[str, Any] = {}
@@ -37,12 +39,13 @@ def _retriever(graph: GraphContext) -> Any:
     for the nebula backend: no LlamaIndex PropertyGraphStore exists for
     it, so the nGQL-only retriever is the whole thing.
     """
-    retriever = _retrievers.get(graph.id)
+    retriever = _retrievers.get(graph.cache_key)
     if retriever is None:
         from src.graph.retriever import GraphRetriever
         from src.graph.store import build_graph_store
 
-        retriever = _retrievers[graph.id] = GraphRetriever.for_store(
+        evict_stale_generations(_retrievers, graph)
+        retriever = _retrievers[graph.cache_key] = GraphRetriever.for_store(
             build_graph_store(graph),
             similarity_top_k=settings.agent.graph_similarity_top_k,
         )
