@@ -40,6 +40,33 @@ async def test_get_caches_within_ttl_and_reloads_after():
     assert loader.calls == ["acme", "acme"]
 
 
+async def test_missing_graph_becomes_visible_after_short_negative_ttl():
+    # Live smoke 2026-10-18: a 404 probe cached "absent" for the full 30 s TTL,
+    # so ingest right after provisioning finished still got 404.
+    t = [0.0]
+    loader = _Loader({})
+    reg = GraphRegistry(loader=loader, ttl_s=30, negative_ttl_s=2, clock=lambda: t[0])
+    with pytest.raises(GraphNotFound):
+        await reg.get("acme")
+    with pytest.raises(GraphNotFound):
+        await reg.get("acme")
+    assert loader.calls == ["acme"]  # typo floods still hit the cache
+    loader.rows["acme"] = _row("acme")
+    t[0] = 3
+    assert (await reg.get("acme")).id == "acme"
+
+
+async def test_not_ready_graph_turns_ready_after_short_negative_ttl():
+    t = [0.0]
+    loader = _Loader({"acme": _row("acme", "provisioning")})
+    reg = GraphRegistry(loader=loader, ttl_s=30, negative_ttl_s=2, clock=lambda: t[0])
+    with pytest.raises(GraphNotReady):
+        await reg.get("acme")
+    loader.rows["acme"] = _row("acme")
+    t[0] = 3
+    assert (await reg.get("acme")).id == "acme"
+
+
 async def test_invalidate_forces_reload():
     loader = _Loader({"acme": _row("acme")})
     reg = GraphRegistry(loader=loader)

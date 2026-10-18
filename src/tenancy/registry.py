@@ -66,10 +66,15 @@ class GraphRegistry:
         self,
         loader: Callable[[str], Awaitable[dict | None]] | None = None,
         ttl_s: float = 30.0,
+        negative_ttl_s: float = 2.0,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._loader = loader or _load_row_from_pg
         self._ttl = ttl_s
+        # Absent / not-ready rows are cached only briefly: enough to absorb a
+        # flood of requests with a mistyped X-Graph, short enough that a graph
+        # is usable right after provisioning flips it to `ready`.
+        self._negative_ttl = negative_ttl_s
         self._clock = clock
         self._cache: dict[str, tuple[float, dict | None]] = {}
         self._warned_default = False
@@ -80,10 +85,15 @@ class GraphRegistry:
         else:
             self._cache.pop(graph_id, None)
 
+    def _entry_ttl(self, graph_id: str, row: dict | None) -> float:
+        if graph_id == DEFAULT_GRAPH_ID or (row is not None and row["status"] == "ready"):
+            return self._ttl
+        return self._negative_ttl
+
     async def get_row(self, graph_id: str) -> dict | None:
         now = self._clock()
         hit = self._cache.get(graph_id)
-        if hit is not None and now - hit[0] < self._ttl:
+        if hit is not None and now - hit[0] < self._entry_ttl(graph_id, hit[1]):
             return hit[1]
         row = await self._loader(graph_id)
         self._cache[graph_id] = (now, row)

@@ -4270,8 +4270,8 @@
     "semantic_hash": ""
   },
   "src/tenancy/registry.py": {
-    "mtime": 1792314403.0975657,
-    "ast_hash": "ade4976a94a44b5c9159fc7e8db4dae7",
+    "mtime": 1792330319.3223274,
+    "ast_hash": "a923532954a6c90f74f11ca96c74513f",
     "semantic_hash": ""
   },
   "src/workflow/activity_inputs.py": {
@@ -4355,8 +4355,8 @@
     "semantic_hash": ""
   },
   "tests/test_tenancy/test_registry.py": {
-    "mtime": 1792314391.9214702,
-    "ast_hash": "4ff0cc6579c37641e2f6cd92d5b7de1b",
+    "mtime": 1792330308.5059552,
+    "ast_hash": "f18cd19c0a8bb91e7b97097ebd46b516",
     "semantic_hash": ""
   },
   "tests/test_tenancy/test_storage_names.py": {

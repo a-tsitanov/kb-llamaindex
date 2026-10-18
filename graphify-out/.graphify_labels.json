@@ -1106,6 +1106,12 @@
   "1104": "test_tg_ingest_groups.py",
   "1105": "_no_entity_mirror",
   "1106": "test_value_kind_families_partition_the_enumeration",
+  "1107": "_start_env",
   "1108": "_FakeReportStore",
-  "1112": "_NebulaStmtStore"
+  "1109": "test_config_wave2.py",
+  "1110": "test_search_server.py",
+  "1111": "_gather_context",
+  "1112": "_NebulaStmtStore",
+  "1113": "test_config.py",
+  "1114": "test_community_build_hardening.py"
 }
