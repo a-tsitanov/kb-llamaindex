@@ -322,3 +322,13 @@ to create a graph is `POST /admin/graphs` + `ProvisionGraphWorkflow` (§3).
 Following the 2026-10-17 amendment, the `/admin/graphs*` endpoints require
 just a valid key; the `DeleteGraphWorkflow` step "remove the graph from every
 `api_keys.graph_ids`" is dropped (the column no longer exists).
+
+## Implementation status 2026-10-18 (Plan B)
+
+Implemented per `docs/superpowers/plans/2026-10-18-multi-graph-lifecycle.md`: §3 create/list/patch/delete
+with ProvisionGraphWorkflow / DeleteGraphWorkflow (ids `lifecycle-provision-<id>` / `lifecycle-delete-<id>`
+on the graph_build queue); R-P5 (pg_trgm in `extensions`, search_path `<schema>, extensions`, `ready` only
+when every GRAPH_DDL table exists); per-graph caches keyed by `id#generation` (`graphs.generation`);
+R-P6; entity watch on every graph. Delete does not purge staging blobs (per-run, orphan-swept).
+Deferred: `refresh-all`, `/admin/api-keys`, removal of transitional `graph_id` defaults.
+Operator notes: `docs/multi-graph-ops.md`.
