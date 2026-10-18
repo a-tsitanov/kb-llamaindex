@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from temporalio.common import WorkflowIDReusePolicy
 
 from src.api.auth import require_api_key
-from src.api.graph_dep import resolve_graph
+from src.api.graph_dep import resolve_graph_admin
 from src.config import settings
 from src.graph.alerts import mark_watched
 from src.graph.store import build_graph_store
@@ -23,7 +23,7 @@ router = APIRouter(
 
 @router.post("/rebuild")
 async def wiki_rebuild(
-    all: bool = False, graph: GraphContext = Depends(resolve_graph),
+    all: bool = False, graph: GraphContext = Depends(resolve_graph_admin),
 ) -> dict:
     if not graph.is_default:
         # D6: the wiki is a single corpus-wide artifact of the default graph.
@@ -60,7 +60,7 @@ monitor_router = APIRouter(
 
 
 @monitor_router.post("/sweep")
-async def monitor_sweep(graph: GraphContext = Depends(resolve_graph)) -> dict:
+async def monitor_sweep(graph: GraphContext = Depends(resolve_graph_admin)) -> dict:
     # MonitorSweepWorkflow is default-only in Plan A (zero-arg run, fixed id).
     _require_default_graph_for_monitor(graph)
     if not settings.monitor.enabled:
@@ -78,7 +78,7 @@ async def monitor_sweep(graph: GraphContext = Depends(resolve_graph)) -> dict:
 @monitor_router.post("/watch")
 async def monitor_watch(
     names: list[str], watched: bool = True,
-    graph: GraphContext = Depends(resolve_graph),
+    graph: GraphContext = Depends(resolve_graph_admin),
 ) -> dict:
     # Intentionally NOT gated on settings.monitor.enabled (unlike /sweep): the
     # watchlist is the input the sweep consumes, so operators pre-seed it while

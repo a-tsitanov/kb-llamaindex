@@ -23,16 +23,15 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from src.api.graph_dep import resolve_graph
+from src.api.graph_dep import resolve_graph_write
 from src.stats.align import GRANULARITIES, VALUE_KINDS
 from src.storage.stats import StatsRepository
 from src.tenancy.context import GraphContext
 
-router = APIRouter(
-    prefix="/statistics",
-    tags=["statistics"],
-    dependencies=[Depends(resolve_graph)],
-)
+# No router-level graph dependency: every handler declares the action it
+# performs (spec §3.1), and a second, differently-actioned dependency here
+# would both resolve the graph twice and refuse what the handler allows.
+router = APIRouter(prefix="/statistics", tags=["statistics"])
 
 # Small by design: the subsystem takes curated series, not bulk dumps.
 _MAX_OBSERVATIONS = 1000
@@ -177,7 +176,7 @@ class LoadResponse(BaseModel):
     summary="Upsert one indicator and its observations",
 )
 async def load_statistics(
-    req: LoadRequest, graph: GraphContext = Depends(resolve_graph),
+    req: LoadRequest, graph: GraphContext = Depends(resolve_graph_write),
 ) -> LoadResponse:
     """Idempotent: re-posting the same payload changes nothing.
 

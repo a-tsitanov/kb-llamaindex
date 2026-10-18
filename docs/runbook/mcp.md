@@ -278,11 +278,11 @@ uv run python -m src.mcp.stats_server --transport http --port 9003
 
 ## 6. Auth
 
-Все три сервера используют тот же реестр API-ключей, что и FastAPI route handlers (см. [`src/api/auth.py`](../../src/api/auth.py), [`src/tenancy/api_keys.py`](../../src/tenancy/api_keys.py)): ключ ищется по sha256-хэшу в `public.api_keys`; если строки нет — фолбэк на env `API_KEYS`. Результат lookup'а кэшируется в процессе на 30 с. **Ключ только аутентифицирует**: любой валидный ключ может работать с любым графом; авторизация по графам — в другом слое (вне этого сервиса).
+Все три сервера используют тот же реестр API-ключей, что и FastAPI route handlers (см. [`src/api/auth.py`](../../src/api/auth.py), [`src/tenancy/api_keys.py`](../../src/tenancy/api_keys.py)): ключ ищется по sha256-хэшу в `public.api_keys`; если строки нет — фолбэк на env `API_KEYS`. Результат lookup'а кэшируется в процессе на 30 с. **Ключ аутентифицирует и авторизует** (спека 2026-10-18): он несёт арендатора, права (`read` / `write` / `download_original` / `admin`) и, опционально, список своих графов — см. §6.2.
 
 **Stdio**: env-vars передаются через конфиг клиента (Claude Desktop "env" поле). API_KEYS не нужен если `KB_MCP_REQUIRE_AUTH=false`.
 
-**HTTP/SSE**: header `Authorization: Bearer <token>` ожидается; токен проверяет `RegistryTokenVerifier` ([`src/mcp/_shared.py`](../../src/mcp/_shared.py)) через тот же реестр ключей; claims токена — только `owner` (никакой привязки к графам). Auth-провайдер строится один раз при импорте модуля сервера (`build_sse_auth()`); он включён, только если `KB_MCP_REQUIRE_AUTH=true` и env `API_KEYS` непуст.
+**HTTP/SSE**: header `Authorization: Bearer <token>` ожидается; токен проверяет `RegistryTokenVerifier` ([`src/mcp/_shared.py`](../../src/mcp/_shared.py)) через тот же реестр ключей. Claims токена — права ключа (`owner`, `tenant_id`, `scopes`, `graph_ids`), и привязки к графу в них по-прежнему нет: граф выбирается на каждый вызов (§6.1), права читаются из токена, чтобы решение не ходило в кеш ключей. Auth-провайдер строится один раз при импорте модуля сервера (`build_sse_auth()`); он включён, только если `KB_MCP_REQUIRE_AUTH=true` и env `API_KEYS` непуст.
 
 **Strict mode**: при boot'е (`assert_api_key_env_set()`) сервер падает если `KB_MCP_REQUIRE_AUTH=true` (default) И `API_KEYS` пуст — защита от случайно-открытых портов.
 
@@ -292,9 +292,9 @@ uv run python -m src.mcp.stats_server --transport http --port 9003
 
 - Граф = заголовок `X-Graph`, если он есть (валидация slug — `choose_graph_id`, [`src/api/graph_dep.py`](../../src/api/graph_dep.py); невалидный → «invalid X-Graph»). Одинаково для HTTP/SSE с токеном и без (`KB_MCP_REQUIRE_AUTH=false`); токен на выбор графа не влияет.
 - Без заголовка (и всегда в stdio — там нет HTTP-запроса) — env `KB_MCP_GRAPH` (обычная env-переменная процесса, не поле settings; по умолчанию `default`).
-- Выбранный id всегда резолвится через реестр графов (`public.graphs`): неизвестный граф → `graph '<id>' not found`, граф не в статусе `ready` → `graph '<id>' is <status>`.
+- Выбранный id всегда резолвится через реестр графов (`public.graphs`): неизвестный граф → `graph not found` (без slug'а, см. §6.2 — тот же текст отдаётся на чужой граф), граф не в статусе `ready` → `graph '<id>' is <status>`.
 
-Без `X-Graph` вызов идёт в `KB_MCP_GRAPH` (обычно `default`), поэтому существующим клиентам заголовок не нужен. Создание/удаление графов и выдача ключей через API пока недоступны.
+Без `X-Graph` вызов идёт в `KB_MCP_GRAPH` (обычно `default`), поэтому существующим клиентам заголовок не нужен. Создание/удаление графов — `/admin/graphs*` у FastAPI; выдача ключей — только CLI `scripts/tenant_admin.py`.
 
 ```bash
 # Development без auth:
@@ -315,6 +315,25 @@ KB_MCP_GRAPH=default KB_MCP_REQUIRE_AUTH=false uv run python -m src.mcp.tools_se
 #   Authorization: Bearer <key>
 #   X-Graph: <graph_id>
 ```
+
+### 6.2 Авторизация: проверка на каждый вызов инструмента
+
+Решение принимается **на каждый вызов**, а не один раз при рукопожатии: одна MCP-сессия живёт долго и переживает сколько угодно значений `X-Graph`, так что проверка при подключении давала бы права на все графы сразу. `current_graph(action)` ([`src/mcp/_shared.py`](../../src/mcp/_shared.py)) резолвит граф и зовёт `authz.guard` с действием инструмента (инструменты чтения — `read`, выдача оригинала документа — `download_original`, административные — `admin`).
+
+Тексты `ToolError` (ровно те же коды, что у HTTP, см. [`../DEPLOYMENT.md` §5a](../DEPLOYMENT.md)):
+
+| Ситуация | `ToolError` |
+|---|---|
+| Невалидный slug в `X-Graph` | `invalid X-Graph` |
+| Граф не существует **или принадлежит другому арендатору** | `graph not found` (без slug'а — иначе это оракул существования) |
+| Свой граф не в статусе `ready` | `graph '<id>' is <status>` |
+| Свой граф, но действия нет в `scopes` / граф не в `graph_ids` ключа | `forbidden: <action> not allowed` |
+
+Отказ реестра придерживается до решения: чужой граф в статусе `provisioning` не выдаёт себя ошибкой готовности.
+
+> **Предупреждение.** Без токена проверок НЕТ — ни прав, ни арендатора. Это два документированных режима: stdio (HTTP-запроса нет вовсе) и `KB_MCP_REQUIRE_AUTH=false`. При старте такого процесса в лог уходит однократный warning. Для сервера на сетевом порту `KB_MCP_REQUIRE_AUTH=false` означает полный доступ ко всем графам всех арендаторов — используйте только для локального stdio-клиента.
+
+Режимом управляет `AUTHZ_MODE` (`off` | `log` | `enforce`, по умолчанию `log`), общий с API; в `log` отказ только пишется строкой `authz would-deny …`.
 
 ---
 

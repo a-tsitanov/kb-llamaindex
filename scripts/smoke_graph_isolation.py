@@ -2,6 +2,11 @@
 delete it.  Touches a real stack — run only with explicit approval.
 
     uv run python -m scripts.smoke_graph_isolation --api-base http://localhost:8000 --api-key K
+
+With ``--api-key-b``/``--graph-b`` it additionally proves tenant isolation
+against a second, pre-existing tenant: its ready graph B must be invisible
+and untouchable from key A.  That half only means anything under
+``AUTHZ_MODE=enforce`` — in ``log`` the checks are expected to fail.
 """
 
 from __future__ import annotations
@@ -45,7 +50,64 @@ def _entities(body: dict[str, Any]) -> list[Any]:
     return body.get("entities") or []
 
 
-async def run(api_base: str, api_key: str, gid: str, timeout_s: float) -> None:
+async def check_cross_tenant(
+    http: httpx.AsyncClient, key_a: str, key_b: str, graph_a: str, graph_b: str
+) -> None:
+    """Graph B belongs to another tenant: from key A it must look absent.
+
+    Every refusal is compared against the refusal for a graph that truly
+    does not exist — an answer that merely differs in wording is still an
+    oracle telling the two apart.
+    """
+    a = {"X-API-Key": key_a}
+    b = {"X-API-Key": key_b}
+    absent = f"nosuch{uuid.uuid4().hex[:8]}"
+
+    rows = (await http.get("/admin/graphs", headers=a)).json()
+    ids = [r.get("id") for r in rows]
+    _check("foreign graph absent from list", graph_b not in ids, str(ids)[:200])
+
+    r = await http.get(f"/admin/graphs/{graph_b}", headers=a)
+    _check("foreign graph GET is 404", r.status_code == 404, str(r.status_code))
+
+    async def entities(graph: str) -> httpx.Response:
+        return await http.get(
+            "/api/v1/entities", headers={**a, "X-Graph": graph}, params={"query": "x"}
+        )
+
+    r, r_absent = await entities(graph_b), await entities(absent)
+    _check("foreign graph data is 404", r.status_code == 404, str(r.status_code))
+    _check(
+        "foreign graph reads as nonexistent",
+        (r.status_code, r.text) == (r_absent.status_code, r_absent.text),
+        f"{r.text[:120]} != {r_absent.text[:120]}",
+    )
+
+    async def create(gid: str) -> httpx.Response:
+        return await http.post("/admin/graphs", headers=a, json={"id": gid, "owner": "smoke"})
+
+    r, r_own = await create(graph_b), await create(graph_a)
+    _check("create on foreign slug is 409", r.status_code == 409, str(r.status_code))
+    _check(
+        "409 body hides whose slug it is",
+        (r.status_code, r.text) == (r_own.status_code, r_own.text),
+        f"{r.text[:120]} != {r_own.text[:120]}",
+    )
+
+    r = await http.delete(f"/admin/graphs/{graph_b}", headers=a, params={"confirm": graph_b})
+    _check("foreign graph DELETE is 404", r.status_code == 404, str(r.status_code))
+    row = (await http.get(f"/admin/graphs/{graph_b}", headers=b)).json()
+    _check("foreign graph still ready for its owner", row.get("status") == "ready", str(row)[:200])
+
+
+async def run(
+    api_base: str,
+    api_key: str,
+    gid: str,
+    timeout_s: float,
+    api_key_b: str | None = None,
+    graph_b: str | None = None,
+) -> None:
     key = {"X-API-Key": api_key}
     in_g = {**key, "X-Graph": gid}
     token = f"smokeiso{uuid.uuid4().hex[:8]}"
@@ -65,6 +127,9 @@ async def run(api_base: str, api_key: str, gid: str, timeout_s: float) -> None:
             return row if row.get("status") == "ready" else None
         await wait_for(ready, timeout_s=300)
         _check("graph ready", True)
+
+        if api_key_b and graph_b:
+            await check_cross_tenant(http, api_key, api_key_b, gid, graph_b)
 
         text = f"{token} Corporation signed a contract with {token} Holdings in Berlin.".encode()
         r = await http.post("/api/v1/ingest", headers=in_g,
@@ -107,8 +172,12 @@ def main() -> int:
     p.add_argument("--api-key", required=True)
     p.add_argument("--graph", default="smoke_iso")
     p.add_argument("--timeout", type=float, default=900.0, help="ingest completion timeout, s")
+    p.add_argument("--api-key-b", help="key of a second tenant, to check cross-tenant isolation")
+    p.add_argument("--graph-b", help="ready graph owned by --api-key-b's tenant")
     a = p.parse_args()
-    asyncio.run(run(a.api_base, a.api_key, a.graph, a.timeout))
+    if bool(a.api_key_b) != bool(a.graph_b):
+        p.error("--api-key-b and --graph-b go together")
+    asyncio.run(run(a.api_base, a.api_key, a.graph, a.timeout, a.api_key_b, a.graph_b))
     return 0
 
 

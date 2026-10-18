@@ -19,11 +19,10 @@ from src.api.graph_dep import resolve_graph
 from src.storage.postgres import GROUP_BY_COLUMN, AsyncPostgres
 from src.tenancy.context import GraphContext
 
-router = APIRouter(
-    prefix="/stats",
-    tags=["stats"],
-    dependencies=[Depends(resolve_graph)],
-)
+# No router-level graph dependency: every handler declares the action it
+# performs (spec §3.1), and a second, differently-actioned dependency here
+# would both resolve the graph twice and refuse what the handler allows.
+router = APIRouter(prefix="/stats", tags=["stats"])
 
 _DATE_FIELDS = {"created_at", "doc_date"}
 

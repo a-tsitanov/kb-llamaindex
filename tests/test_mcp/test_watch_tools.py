@@ -221,7 +221,9 @@ _WATCH_TOOL_CALLS = [
 
 @pytest.mark.parametrize("tool,args,kwargs", _WATCH_TOOL_CALLS)
 async def test_watch_tools_accept_non_default_graph(monkeypatch, tool, args, kwargs):
-    async def _acme():
+    # `action` is what the tool asks to be authorized for; which tool asks for
+    # which is pinned in tests/test_mcp/test_tool_authz.py.
+    async def _acme(action=None):
         return G
 
     graphs: list[str] = []
@@ -242,7 +244,7 @@ async def test_watch_tools_accept_non_default_graph(monkeypatch, tool, args, kwa
 async def test_watch_tools_run_on_default_graph(monkeypatch):
     from src.tenancy.context import default_graph_context
 
-    async def _default():
+    async def _default(action=None):
         return default_graph_context()
 
     watch = _Watch(watches=[{"entity_vid": "v", "entity_name": "X"}])

@@ -2,7 +2,9 @@ import pytest
 from fastmcp.exceptions import ToolError
 
 import src.mcp._shared as sh
+from src.config import settings
 from src.tenancy.api_keys import ApiKeyRecord
+from src.tenancy.authz import ALL_ACTIONS
 from src.tenancy.context import default_graph_context, new_graph_context
 
 
@@ -11,21 +13,52 @@ class _Reg:
         return default_graph_context() if gid == "default" else new_graph_context(gid)
 
 
-# Spec amendment 2026-10-17: the token authenticates only; the graph is the
-# X-Graph header if present, else KB_MCP_GRAPH (default "default") — the same
-# for HTTP with or without auth and for stdio.
+class _OneKey:
+    def __init__(self, rec):
+        self.rec = rec
+
+    async def lookup(self, k):
+        return self.rec if k == "good" else None
 
 
-async def test_verifier_claims_are_minimal(monkeypatch):
-    class _Store:
-        async def lookup(self, k):
-            return ApiKeyRecord("acme") if k == "good" else None
-    monkeypatch.setattr(sh, "get_api_key_store", lambda: _Store())
-    v = sh.RegistryTokenVerifier()
-    tok = await v.verify_token("good")
-    assert tok.claims == {"owner": "acme"}
+async def mint_token(monkeypatch, rec: ApiKeyRecord):
+    """A token exactly as ``RegistryTokenVerifier`` mints one.
+
+    Never hand-built: the claims contract then lives in the verifier alone,
+    and a test that drifts from it fails here instead of passing against an
+    imitation.  Shared with ``tests/test_mcp/test_tool_authz.py``."""
+    monkeypatch.setattr(sh, "get_api_key_store", lambda: _OneKey(rec))
+    return await sh.RegistryTokenVerifier().verify_token("good")
+
+
+# Spec 2026-10-18 §3.2: the token authenticates AND carries the key's rights;
+# the graph is the X-Graph header if present, else KB_MCP_GRAPH (default
+# "default") — the same for HTTP with or without auth and for stdio.  The
+# decision is taken on every tool call, never once at the handshake.
+
+
+async def test_verifier_claims_carry_the_key_rights(monkeypatch):
+    """Claims are the record flattened to JSON primitives (fastmcp may
+    serialise or log them); `_record_from_token` reads them back per call."""
+    tok = await mint_token(monkeypatch, ApiKeyRecord.full("acme"))
+    assert tok.claims == {
+        "owner": "acme",
+        "tenant_id": "default",
+        "scopes": sorted(ALL_ACTIONS),
+        "graph_ids": None,
+    }
+    assert tok.scopes == sorted(ALL_ACTIONS)
     assert tok.client_id == "acme"
-    assert await v.verify_token("bad") is None
+    assert await sh.RegistryTokenVerifier().verify_token("bad") is None
+
+
+async def test_record_from_token_round_trips_a_narrowed_key(monkeypatch):
+    rec = ApiKeyRecord(
+        owner="a", tenant_id="t1", scopes=frozenset({"read"}), graph_ids=("g1", "g2"),
+    )
+    tok = await mint_token(monkeypatch, rec)
+    assert tok.claims["graph_ids"] == ["g1", "g2"]  # JSON primitive, not a tuple
+    assert sh._record_from_token(tok) == rec
 
 
 async def test_current_graph_http_uses_header(monkeypatch):
@@ -34,11 +67,27 @@ async def test_current_graph_http_uses_header(monkeypatch):
     assert (await sh.current_graph()).id == "acme_hr"
 
 
-async def test_current_graph_http_any_graph_allowed(monkeypatch):
-    """No per-key authorization: any X-Graph slug is honoured."""
+async def test_current_graph_foreign_graph_is_tool_error(monkeypatch):
+    """A graph of another tenant must answer exactly as one that does not
+    exist — same string, naming no slug — or the error is an oracle."""
+    monkeypatch.setattr(settings.authz, "mode", "enforce")
     monkeypatch.setattr(sh, "get_graph_registry", lambda: _Reg())
     monkeypatch.setattr(sh, "get_http_headers", lambda **kw: {"x-graph": "other"})
-    assert (await sh.current_graph()).id == "other"
+    tok = await mint_token(monkeypatch, ApiKeyRecord.full("acme", tenant_id="t2"))
+    monkeypatch.setattr(sh, "get_access_token", lambda: tok)
+    with pytest.raises(ToolError) as foreign:
+        await sh.current_graph()
+
+    from src.tenancy.registry import GraphNotFound
+
+    class _Missing:
+        async def get(self, gid):
+            raise GraphNotFound(gid)
+    monkeypatch.setattr(sh, "get_graph_registry", lambda: _Missing())
+    with pytest.raises(ToolError) as ghost:
+        await sh.current_graph()
+    assert str(foreign.value) == str(ghost.value) == sh.GRAPH_NOT_FOUND_DETAIL
+    assert "other" not in str(foreign.value)
 
 
 async def test_current_graph_http_without_header_uses_configured_graph(monkeypatch):

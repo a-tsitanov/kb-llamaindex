@@ -54,6 +54,7 @@ from src.mcp._shared import (
 from src.retrieval import atomic_tools
 from src.retrieval.graph_rank import GraphRanker
 from src.stats.align import GRANULARITIES
+from src.tenancy.authz import Action
 from src.tenancy.cache import evict_stale_generations
 from src.tenancy.context import GraphContext
 
@@ -931,9 +932,12 @@ WATCH_KINDS: tuple[str, ...] = (
 )
 
 
-async def _watch_graph() -> GraphContext:
-    """The tool's graph (any ready graph — the monitor sweeps all of them)."""
-    return await current_graph()
+async def _watch_graph(action: Action = Action.READ) -> GraphContext:
+    """The tool's graph (any ready graph — the monitor sweeps all of them).
+
+    Subscribing, unsubscribing and acknowledging change state, so those three
+    tools pass ``Action.WRITE``; reading the watchlist or the feed stays read."""
+    return await current_graph(action)
 
 
 def _entity_search(graph: GraphContext):
@@ -1058,13 +1062,13 @@ async def kb_watch(name: str, kinds: list[str] | None = None, note: str = "") ->
     events (new_mention, new_connection, new_identifier, new_event, contradiction);
     empty = all. `note` is a free-text reason. Only events detected after
     the subscription are shown."""
-    return await _watch(name, kinds, note, graph=await _watch_graph())
+    return await _watch(name, kinds, note, graph=await _watch_graph(Action.WRITE))
 
 
 @mcp.tool(timeout=120)
 async def kb_unwatch(name_or_vid: str) -> dict[str, Any]:
     """Remove an entity from the watchlist (by its watched name or vid)."""
-    return await _unwatch(name_or_vid, graph=await _watch_graph())
+    return await _unwatch(name_or_vid, graph=await _watch_graph(Action.WRITE))
 
 
 @mcp.tool(timeout=120)
@@ -1085,7 +1089,7 @@ async def kb_watch_feed(include_acked: bool = False, limit: int = 50) -> dict[st
 @mcp.tool(timeout=120)
 async def kb_ack(event_ids: list[int] | None = None, all: bool = False) -> dict[str, Any]:
     """Mark feed events as read (`event_ids` from `kb_watch_feed`, or `all`)."""
-    return await _ack(event_ids, all, graph=await _watch_graph())
+    return await _ack(event_ids, all, graph=await _watch_graph(Action.WRITE))
 
 
 def main() -> None:

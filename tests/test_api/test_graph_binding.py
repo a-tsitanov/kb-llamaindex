@@ -8,13 +8,18 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from src.api import auth, graph_dep
+from src.config import settings
 from src.tenancy.api_keys import ApiKeyRecord
 from src.tenancy.context import default_graph_context, new_graph_context
 
-# Spec amendment 2026-10-17: a key authenticates only; any valid key may use
-# any graph, selected by X-Graph (absent -> default).
-USER = ApiKeyRecord(owner="u")
-ADMIN = USER  # no admin keys any more — admin endpoints take any valid key
+# These tests are about BINDING — which graph a route works in — so the key
+# is deliberately one no route's action can refuse: `full` carries all four
+# actions in tenant `default`, exactly what an `API_KEYS` entry still yields.
+# Who may do what lives in test_graph_dep_authz.py (the seam) and
+# test_route_actions.py (the label each route declares).
+USER = ApiKeyRecord.full("u")
+ADMIN = USER  # the same key: routes differ by the action they ask for, not by key kind
+READER = ApiKeyRecord(owner="r", tenant_id="default", scopes=frozenset({"read"}), graph_ids=None)
 
 
 class _Store:
@@ -60,7 +65,7 @@ async def test_admin_routes_reject_invalid_key(as_key):
 
 
 async def test_admin_routes_accept_plain_valid_key(as_key):
-    """No admin gating: any valid key passes auth on admin endpoints."""
+    """A key holding `admin` passes every admin endpoint (no separate key kind)."""
     from src.api.routes import admin, graph_admin
 
     as_key(USER)
@@ -218,3 +223,40 @@ async def test_ingest_original_object_key_is_graph_prefixed(as_key):
     assert len(keys) == 2
     assert keys[0].startswith("acme/") and keys[0].endswith("/f.md")
     assert keys[1].startswith("acme/") and keys[1].endswith("/original/f.docx")
+
+
+# S6: the action is declared by the ROUTE, so a key short of it is turned away
+# by the dependency — before the handler, before any workflow or storage call.
+@pytest.mark.parametrize(
+    ("method", "path", "detail"),
+    [
+        ("post", "/admin/graph/stats", "admin not allowed for this key"),
+        ("post", "/admin/wiki/rebuild", "admin not allowed for this key"),
+        ("post", "/api/v1/admin/communities/rebuild", "admin not allowed for this key"),
+        ("post", "/api/v1/ingest", "write not allowed for this key"),
+        ("post", "/api/v1/statistics/load", "write not allowed for this key"),
+        ("get", "/api/v1/documents/00000000-0000-0000-0000-000000000000",
+         "download_original not allowed for this key"),
+    ],
+)
+async def test_route_action_refuses_a_read_only_key(as_key, monkeypatch, method, path, detail):
+    from src.api.main import app
+
+    as_key(READER)
+    monkeypatch.setattr(settings.authz, "mode", "enforce")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await getattr(ac, method)(path, headers={"X-API-Key": "k"})
+    assert (r.status_code, r.json()["detail"]) == (403, detail), r.text
+
+
+async def test_read_only_key_still_reads(as_key, monkeypatch):
+    from src.storage.postgres import AsyncPostgres
+
+    as_key(READER)
+    monkeypatch.setattr(settings.authz, "mode", "enforce")
+    from src.api.main import app
+
+    with patch.object(AsyncPostgres, "status_counts_by", new=AsyncMock(return_value=[])):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            r = await ac.get("/api/v1/stats/messages", headers={"X-API-Key": "k"})
+    assert r.status_code == 200, r.text

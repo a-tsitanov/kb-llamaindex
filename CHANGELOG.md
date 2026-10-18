@@ -8,6 +8,66 @@ with a section in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 loosely (Added / Changed / Fixed / Notes per stage).
 
+## [Tenancy / Authz] — 2026-10-18 — Ключ несёт арендатора и права, граф авторизуется
+
+### Added
+- `src/tenancy/authz.py` — единственное место решения: `Action`
+  (`read` / `write` / `download_original` / `admin`), чистая `authorize`
+  (порядок правил: `scope` → `unknown` → `tenant` → `graph`), обёртка
+  `guard` с режимом и `tenant_filter` для фильтров репозитория.
+- `AUTHZ_MODE` (`off` | `log` | `enforce`, по умолчанию `log`) в
+  `AuthzSettings`, в `x-app-env` `docker-compose.prod.yml` и в
+  `.env.reference`; `init: service_completed_successfully` добавлен
+  mcp-search / mcp-tools / mcp-stats.
+- `public.tenants` (+ арендатор `default`), `public.schema_migration`,
+  колонки `graphs.tenant_id`, `api_keys.tenant_id|scopes|graph_ids` с
+  индексами; одноразовое наследование полных прав существующим ключам под
+  отметкой `authz_grandfather_v1`.
+- `scripts/tenant_admin.py` — `create` / `key` / `revoke` / `list`:
+  единственный способ завести арендатора и выписать ключ (HTTP-маршрута
+  нет принципиально, сырой ключ печатается один раз).
+- `tests/test_tenancy/test_guards.py`: `authorize` только через `guard`,
+  фильтр арендатора только через `authz.tenant_filter`, `AUTHZ_MODE` не
+  переключается через окружение ни в одном поведенческом тесте.
+- `scripts/smoke_graph_isolation.py --api-key-b/--graph-b` — живая проверка
+  изоляции двух арендаторов (прогон только по явному разрешению).
+
+### Changed
+- `ApiKeyRecord` несёт `owner, tenant_id, scopes, graph_ids`;
+  загрузчик читает строку схемонезависимо
+  (`SELECT to_jsonb(k) - 'key_hash'`). Ключ теперь не только
+  аутентифицирует — это отменяет часть амендмента 2026-10-17.
+- HTTP-шов: `graph_for(action)` и четыре зависимости по действиям; у
+  `stats` / `statistics` убраны зависимости уровня маршрутизатора, так что
+  граф резолвится ровно один раз на запрос.
+- MCP-шов: права ключа едут в claims `AccessToken`, решение принимается на
+  КАЖДЫЙ вызов инструмента (сессия переживает любое число `X-Graph`).
+- Чужой граф отвечает как несуществующий: 404 / `ToolError` с телом
+  `graph not found` (без slug'а). Тело 409 у `POST /admin/graphs` стало
+  непрозрачным (`graph id is not available`) — одинаковым для своего и
+  чужого занятого slug'а.
+- `GraphContext` / `GraphNotReady` несут `tenant_id`, так что шов решает
+  без второго похода в реестр.
+- Документы: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md` §5a (порядок
+  выката log → сутки → enforce), `deploy/offline/DEPLOYMENT.md` (шаг
+  миграции на существующей базе), `docs/multi-graph-ops.md` §4,
+  `docs/runbook/mcp.md` §6.2, `docs/bruno/README.md`.
+
+### Notes
+- Умолчание `log` — не защита: решение считается и пишется строкой
+  `authz would-deny …`, но запрос проходит. `off` — аварийный тумблер:
+  выключает и `guard`, и фильтры арендатора.
+- Асимметрия намеренная: строка ключа без колонки `scopes` (код выкачен
+  раньше миграции) = полные права (fail-open), строка графа без
+  `tenant_id` = `unknown` → 404 (fail-closed).
+- Воркер не тронут: `resolve_graph_for_activity` и ~25 его вызовов
+  остаются без проверок — `graph_id` попал во вход workflow с уже
+  авторизованного входа.
+- Остаточные каналы приняты: `POST /admin/graphs` всегда выдаёт занятость
+  slug'а (физические имена выводятся из id), и негативный кеш реестра
+  (2 с против 30 с) отличает отсутствующий граф от чужого по времени.
+- `graphs.owner` остался свободным текстом и доступом больше не управляет.
+
 ## [Source Trust] — 2026-08-30 — Доверие к источнику решает конфликты фактов
 
 ### Added

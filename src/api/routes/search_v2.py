@@ -21,7 +21,7 @@ from loguru import logger
 from temporalio.common import WorkflowIDReusePolicy
 
 from src.api.auth import require_api_key
-from src.api.graph_dep import resolve_graph
+from src.api.graph_dep import resolve_graph, resolve_graph_admin
 from src.config import settings
 from src.models.search import DocumentRef, SearchRequest, SearchResponse, SourceCitation
 from src.observability.trace import trace_request
@@ -294,7 +294,7 @@ async def search_auto(
     status_code=status.HTTP_202_ACCEPTED,
     summary="Trigger offline graph-community build (GDS Leiden + summaries)",
 )
-async def rebuild_communities(graph: GraphContext = Depends(resolve_graph)) -> dict[str, str]:
+async def rebuild_communities(graph: GraphContext = Depends(resolve_graph_admin)) -> dict[str, str]:
     """Start the OFFLINE ``CommunityBuildWorkflow`` on ``kb-graph-build``.
 
     Fully decoupled from the query path: detects graph communities (GDS

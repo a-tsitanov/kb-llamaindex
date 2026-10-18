@@ -30,8 +30,8 @@ async def test_invalid_key_returns_403() -> None:
 
 @pytest.mark.asyncio
 async def test_valid_key_returns_key() -> None:
-    # Env API_KEYS resolve via the legacy fallback (R-A3); the record only
-    # authenticates (no graph binding / admin flag — amendment 2026-10-17).
+    # Env API_KEYS resolve via the legacy fallback (R-A3) and stay fully
+    # privileged inside the `default` tenant (spec 2026-10-18, A7).
     valid = settings.api.keys_list[0]
     out = await require_api_key(x_api_key=valid)
-    assert out == ApiKeyRecord(owner="legacy-env")
+    assert out == ApiKeyRecord.full("legacy-env")

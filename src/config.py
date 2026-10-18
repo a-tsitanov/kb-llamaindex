@@ -51,6 +51,10 @@ _DEFAULT_ROLE_TIERS: dict[str, LLMTier] = {
 }
 
 
+# Graph-authorization modes, least to most protective.
+_AUTHZ_MODES = frozenset({"off", "log", "enforce"})
+
+
 # ── per-subsystem settings ───────────────────────────────────────────
 
 
@@ -74,6 +78,32 @@ class ApiSettings(BaseSettings):
     @cached_property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+
+class AuthzSettings(BaseSettings):
+    """The single switch arming graph authorization (spec 2026-10-18 §6).
+
+    ``off`` is the emergency lever: ``authz.guard`` allows without consulting
+    the rules AND ``authz.tenant_filter`` stops filtering, so behaviour goes
+    back to "any valid key, any graph".  ``log`` (the default — the feature
+    ships dark) decides, reports every would-be refusal and still allows.
+    ``enforce`` acts on the decision.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="AUTHZ_", env_file=".env", extra="ignore")
+
+    mode: str = Field(
+        default="log",
+        description="off|log|enforce — off disables guard AND tenant filters, "
+        "log only reports would-be refusals, enforce acts on them.",
+    )
+
+    @field_validator("mode")
+    @classmethod
+    def _mode_is_known(cls, v: str) -> str:
+        if v not in _AUTHZ_MODES:
+            raise ValueError(f"mode must be one of {sorted(_AUTHZ_MODES)}, got {v!r}")
+        return v
 
 
 class MilvusSettings(BaseSettings):
@@ -1243,6 +1273,10 @@ class Settings(BaseSettings):
         return ApiSettings()
 
     @cached_property
+    def authz(self) -> AuthzSettings:
+        return AuthzSettings()
+
+    @cached_property
     def milvus(self) -> MilvusSettings:
         return MilvusSettings()
 
@@ -1388,6 +1422,7 @@ __all__ = [
     "AgentSettings",
     "AnalyticsSettings",
     "ApiSettings",
+    "AuthzSettings",
     "EventsSettings",
     "HFSettings",
     "IngestionSettings",

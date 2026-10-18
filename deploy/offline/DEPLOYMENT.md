@@ -390,6 +390,26 @@ $C up -d <svc>       # пересоздать после изменения env/
 2. **srv02:** `temporal temporal-ui litellm llm-search` → (однократно, на чистой базе) `init` → `api worker ingest-consumer mcp-search mcp-tools mcp-stats webui prometheus grafana`
 3. **srv03:** `llm-ingest-0 llm-ingest-1 worker-llm`
 
+### Апгрейд образа на СУЩЕСТВУЮЩЕЙ базе: сначала миграция, потом рестарт
+
+`docker-compose.srv02.yml` сбрасывает `depends_on` у всех семи app-сервисов
+(`!reset {}`), поэтому порядок «init → остальные» здесь ничем не обеспечен:
+`init` из списка выше запускается только на чистой базе. При обновлении кода
+миграцию надо прогнать руками — **до** рестарта приложения:
+
+```bash
+# srv02, до `up -d` новых образов:
+$C run --rm --no-deps init python -m scripts.setup_db   # дождаться завершения
+$C up -d api worker ingest-consumer mcp-search mcp-tools mcp-stats
+```
+
+Без этого шага отказа не будет, но и защиты не будет: до миграции ключи из
+`public.api_keys` работают в режиме **полных прав** (загрузчик читает строку
+схемонезависимо, отсутствие колонки `scopes` = fail-open) и пишут в лог
+однократный warning `run scripts.setup_db`. То есть `AUTHZ_MODE=enforce` на
+немигрированной базе не ограничивает ничего. Порядок включения режимов —
+[`docs/DEPLOYMENT.md` §5a](../../docs/DEPLOYMENT.md).
+
 ### Частые операции
 
 | Задача | Как |

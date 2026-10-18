@@ -9,6 +9,7 @@ from loguru import logger
 
 from src.tenancy.context import (
     DEFAULT_GRAPH_ID,
+    DEFAULT_TENANT_ID,
     GraphContext,
     InvalidGraphId,
     default_graph_context,
@@ -17,7 +18,7 @@ from src.tenancy.context import (
 
 _COLS = (
     "id, owner, status, nebula_space, nebula_partition_num, chunks_collection, "
-    "er_vec_collection, report_vec_collection, pg_schema, generation"
+    "er_vec_collection, report_vec_collection, pg_schema, generation, tenant_id"
 )
 
 
@@ -28,9 +29,12 @@ class GraphNotFound(LookupError):
 
 
 class GraphNotReady(RuntimeError):
-    def __init__(self, graph_id: str, status: str) -> None:
+    def __init__(self, graph_id: str, status: str, tenant_id: str = DEFAULT_TENANT_ID) -> None:
         super().__init__(f"graph {graph_id!r} is {status}")
         self.graph_id, self.status = graph_id, status
+        # Carried so a seam can authorize a not-ready graph before admitting
+        # that it exists (a 409 for someone else's graph is an oracle).
+        self.tenant_id = tenant_id
 
 
 async def _load_row_from_pg(graph_id: str) -> dict | None:
@@ -58,6 +62,9 @@ def _context_from_row(row: dict) -> GraphContext:
         pg_schema=row["pg_schema"],
         minio_prefix="" if gid == DEFAULT_GRAPH_ID else f"{gid}/",
         generation=int(row.get("generation") or 0),
+        # `.get`: rows from a pre-migration schema (and from the hand-written
+        # SELECT in scripts/setup_db.py) have no tenant_id column yet.
+        tenant_id=row.get("tenant_id") or DEFAULT_TENANT_ID,
     )
 
 
@@ -123,7 +130,7 @@ class GraphRegistry:
                 return default_graph_context()
             raise GraphNotFound(graph_id)
         if row["status"] != "ready":
-            raise GraphNotReady(graph_id, row["status"])
+            raise GraphNotReady(graph_id, row["status"], row.get("tenant_id") or DEFAULT_TENANT_ID)
         return _context_from_row(row)
 
 

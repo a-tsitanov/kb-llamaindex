@@ -184,3 +184,122 @@ async def test_list_ready_contexts():
 async def test_mark_deleting_refuses_default():
     with pytest.raises(ValueError):
         await graph_repo.mark_deleting("default", conn_factory=_factory([])[0])
+
+
+# --- tenancy (plan S8): `tenant_id` is data, `tenant_filter` is enforcement ---
+
+
+async def test_create_or_resume_writes_tenant_id_last():
+    f, cur, _ = _factory([{"id": "acme"}])
+    out = await graph_repo.create_or_resume("acme", "team", 12, tenant_id="t1", conn_factory=f)
+    assert out == graph_repo.CreateOutcome("created", "provisioning")
+    stmt, params = cur.sql[0]
+    assert "tenant_id" in stmt
+    # The column goes to the END of the list so the prefix stays stable.
+    assert params[:4] == ("acme", "team", "g_acme", 12)
+    assert params[-1] == "t1"
+
+
+async def test_create_or_resume_writes_tenant_id_without_any_filter():
+    # Ownership is written in EVERY mode; `tenant_filter=None` only means
+    # "do not check", never "do not record".
+    f, cur, _ = _factory([{"id": "acme"}])
+    await graph_repo.create_or_resume(
+        "acme", "team", 12, tenant_id="t1", tenant_filter=None, conn_factory=f
+    )
+    assert cur.sql[0][1][-1] == "t1"
+
+
+async def test_resume_filters_by_tenant_when_asked():
+    f, cur, _ = _factory([None, {"id": "acme"}])
+    out = await graph_repo.create_or_resume(
+        "acme", "team", 10, tenant_id="t1", tenant_filter="t1", conn_factory=f
+    )
+    assert out == graph_repo.CreateOutcome("resumed", "provisioning")
+    stmt, params = cur.sql[1]
+    assert "AND tenant_id = %s" in stmt and params == ("acme", "t1")
+
+
+async def test_resume_is_unfiltered_without_tenant_filter():
+    f, cur, _ = _factory([None, {"id": "acme"}])
+    await graph_repo.create_or_resume("acme", "team", 10, tenant_id="t1", conn_factory=f)
+    stmt, params = cur.sql[1]
+    assert "tenant_id" not in stmt and params == ("acme",)
+
+
+async def test_conflict_select_reads_the_tenant():
+    f, cur, _ = _factory([None, None, {"status": "ready", "tenant_id": "t1"}])
+    await graph_repo.create_or_resume(
+        "acme", "team", 10, tenant_id="t1", tenant_filter="t1", conn_factory=f
+    )
+    assert "tenant_id" in cur.sql[2][0]
+
+
+async def test_conflict_with_own_row_keeps_the_status():
+    f, _, _ = _factory([None, None, {"status": "ready", "tenant_id": "t1"}])
+    out = await graph_repo.create_or_resume(
+        "acme", "team", 10, tenant_id="t1", tenant_filter="t1", conn_factory=f
+    )
+    assert out == graph_repo.CreateOutcome("conflict", "ready")
+
+
+async def test_conflict_with_foreign_row_is_opaque():
+    # The caller must not learn the status of a graph it may not see.
+    f, _, _ = _factory([None, None, {"status": "ready", "tenant_id": "t2"}])
+    out = await graph_repo.create_or_resume(
+        "acme", "team", 10, tenant_id="t1", tenant_filter="t1", conn_factory=f
+    )
+    assert out == graph_repo.CreateOutcome("conflict", "unavailable")
+
+
+async def test_conflict_with_row_lacking_tenant_is_foreign_when_filtering():
+    # Fail-closed: a row from before the migration is not "mine".
+    f, _, _ = _factory([None, None, {"status": "ready"}])
+    out = await graph_repo.create_or_resume(
+        "acme", "team", 10, tenant_id="t1", tenant_filter="t1", conn_factory=f
+    )
+    assert out == graph_repo.CreateOutcome("conflict", "unavailable")
+
+
+async def test_list_rows_filters_by_tenant():
+    f, cur, _ = _factory([[_row("acme")]])
+    await graph_repo.list_rows(tenant_id="t1", conn_factory=f)
+    stmt, params = cur.sql[0]
+    assert "WHERE tenant_id = %s" in stmt and stmt.endswith("ORDER BY id")
+    assert params == ("t1",)
+
+
+async def test_list_rows_is_unfiltered_by_default():
+    f, cur, _ = _factory([[_row("acme")]])
+    await graph_repo.list_rows(conn_factory=f)
+    stmt, params = cur.sql[0]
+    assert "WHERE" not in stmt and params == ()
+
+
+async def test_patch_row_filters_by_tenant():
+    f, cur, _ = _factory([_row("acme")])
+    await graph_repo.patch_row("acme", owner="o", max_inflight=None, tenant_id="t1", conn_factory=f)
+    stmt, params = cur.sql[0]
+    # One statement: nothing can slip between the check and the write.
+    assert "AND tenant_id = %s" in stmt.split("RETURNING")[0]
+    assert params == ("o", None, "acme", "t1")
+
+
+async def test_patch_row_is_unfiltered_by_default():
+    f, cur, _ = _factory([_row("acme")])
+    await graph_repo.patch_row("acme", owner=None, max_inflight=4, conn_factory=f)
+    stmt, params = cur.sql[0]
+    assert "tenant_id" not in stmt.split("RETURNING")[0] and params == (None, 4, "acme")
+
+
+async def test_mark_deleting_filters_inside_the_locking_cte():
+    f, cur, _ = _factory([{"prev": "ready"}])
+    assert await graph_repo.mark_deleting("acme", tenant_id="t1", conn_factory=f) == "ready"
+    stmt, params = cur.sql[0]
+    assert "AND tenant_id = %s" in stmt.split("FOR UPDATE")[0]
+    assert params == ("acme", "t1")
+
+
+async def test_mark_deleting_makes_a_foreign_graph_look_missing():
+    f, _, _ = _factory([None])
+    assert await graph_repo.mark_deleting("acme", tenant_id="t1", conn_factory=f) is None

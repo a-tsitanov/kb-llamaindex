@@ -17,7 +17,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api.auth import require_api_key
-from src.api.graph_dep import resolve_graph
+from src.api.graph_dep import resolve_graph_admin
 from src.config import settings
 from src.graph import analysis
 from src.tenancy.cache import evict_stale_generations
@@ -45,7 +45,7 @@ def _store(graph: GraphContext) -> Any:
 
 
 @router.post("/stats")
-async def graph_stats(graph: GraphContext = Depends(resolve_graph)) -> dict:
+async def graph_stats(graph: GraphContext = Depends(resolve_graph_admin)) -> dict:
     """Operational snapshot: entity/relationship counts, degree
     distribution, duplicate-name groups, community count.
 
@@ -55,7 +55,7 @@ async def graph_stats(graph: GraphContext = Depends(resolve_graph)) -> dict:
 
 
 @router.post("/refresh-stats")
-async def graph_refresh_stats(graph: GraphContext = Depends(resolve_graph)) -> dict:
+async def graph_refresh_stats(graph: GraphContext = Depends(resolve_graph_admin)) -> dict:
     """Recompute Nebula's tag/edge counts (`SUBMIT JOB STATS`).
 
     `/admin/graph/stats` serves those counts rather than scanning — the
@@ -67,7 +67,9 @@ async def graph_refresh_stats(graph: GraphContext = Depends(resolve_graph)) -> d
 
 
 @router.post("/pagerank")
-async def graph_pagerank(top_n: int = 20, graph: GraphContext = Depends(resolve_graph)) -> dict:
+async def graph_pagerank(
+    top_n: int = 20, graph: GraphContext = Depends(resolve_graph_admin),
+) -> dict:
     """Top-N most central entities by weighted PageRank."""
     return {"top": await analysis.pagerank(
         _store(graph), top_n=top_n,
@@ -78,7 +80,7 @@ async def graph_pagerank(top_n: int = 20, graph: GraphContext = Depends(resolve_
 async def graph_personalized_pagerank(
     seeds: list[str],
     top_n: int = 20,
-    graph: GraphContext = Depends(resolve_graph),
+    graph: GraphContext = Depends(resolve_graph_admin),
 ) -> dict:
     """Top-N entities by PageRank biased toward the given seed entities
     (relevance/centrality *relative to* the seeds)."""
@@ -92,7 +94,7 @@ async def graph_personalized_pagerank(
 
 
 @router.post("/components")
-async def graph_components(graph: GraphContext = Depends(resolve_graph)) -> dict:
+async def graph_components(graph: GraphContext = Depends(resolve_graph_admin)) -> dict:
     """Weakly-connected-component count + size distribution."""
     return await analysis.components(_store(graph))
 
@@ -102,7 +104,7 @@ async def graph_shortest_path(
     source: str,
     target: str,
     max_hops: int = 6,
-    graph: GraphContext = Depends(resolve_graph),
+    graph: GraphContext = Depends(resolve_graph_admin),
 ) -> dict:
     """Shortest path between two entities by exact name."""
     return await analysis.shortest_path(
@@ -118,7 +120,7 @@ async def graph_shortest_path(
     status_code=status.HTTP_202_ACCEPTED,
     summary="Trigger offline analytics materialization (GDS centrality + link-prediction + risk)",
 )
-async def materialize(graph: GraphContext = Depends(resolve_graph)) -> dict[str, str]:
+async def materialize(graph: GraphContext = Depends(resolve_graph_admin)) -> dict[str, str]:
     """Fire-and-forget: start AnalyticsMaterializeWorkflow on the graph-build queue."""
     from temporalio.common import WorkflowIDReusePolicy
 

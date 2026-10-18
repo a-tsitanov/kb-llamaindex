@@ -1,8 +1,21 @@
 """API key lookup (``public.api_keys``, sha256-hashed) with legacy env fallback (R-A3).
 
-Authentication only: a valid key may use ANY graph (graph chosen by the
-``X-Graph`` header).  Per-graph authorization lives in another layer
-(spec amendment 2026-10-17)."""
+A key carries its rights, not just its identity: the tenant it belongs to,
+the actions it may perform and an optional narrowing to specific graphs
+(``graph_ids is None`` = every graph of its tenant).  The decision itself
+is taken in :mod:`src.tenancy.authz`; this module only loads the record.
+
+Two fallbacks here and in the graph registry are deliberately ASYMMETRIC:
+
+* a key row WITHOUT a ``scopes`` key means ``public.api_keys`` has not been
+  migrated yet -> fail-OPEN (full rights, i.e. exactly today's behaviour),
+  because the code really can start before ``scripts.setup_db`` runs and
+  fail-closed would be a service outage for every key;
+* a graph row without ``tenant_id`` is fail-CLOSED (reason ``unknown`` ->
+  404).
+
+Do not "align" the two.
+"""
 
 from __future__ import annotations
 
@@ -14,11 +27,21 @@ from dataclasses import dataclass
 from loguru import logger
 
 from src.config import settings
+from src.tenancy.authz import ALL_ACTIONS
+from src.tenancy.context import DEFAULT_TENANT_ID
 
 
 @dataclass(frozen=True)
 class ApiKeyRecord:
     owner: str
+    tenant_id: str
+    scopes: frozenset[str]
+    graph_ids: tuple[str, ...] | None  # None = every graph of the tenant
+
+    @classmethod
+    def full(cls, owner: str, tenant_id: str = DEFAULT_TENANT_ID) -> ApiKeyRecord:
+        """Every action on every graph of ``tenant_id`` — the pre-tenancy key."""
+        return cls(owner=owner, tenant_id=tenant_id, scopes=ALL_ACTIONS, graph_ids=None)
 
 
 def hash_api_key(raw: str) -> str:
@@ -26,6 +49,14 @@ def hash_api_key(raw: str) -> str:
 
 
 async def _load_key_row(key_hash: str) -> dict | None:
+    """Read the key row as jsonb, naming no column but ``key_hash``.
+
+    Naming ``tenant_id``/``scopes``/``graph_ids`` would raise UndefinedColumn
+    on a table ``scripts.setup_db`` has not migrated yet; the ``except`` in
+    :meth:`ApiKeyStore.lookup` swallows it and would drop EVERY db key into
+    the env fallback (403 per key, cached for the TTL).  mcp-search/-tools/
+    -stats and the offline cluster can start before the migration.
+    """
     from psycopg.rows import dict_row
 
     from src.storage.pg_pool import get_pg_pool
@@ -35,10 +66,36 @@ async def _load_key_row(key_hash: str) -> dict | None:
     # blocking the request for the pool's default wait.
     async with pool.connection(timeout=1) as conn, conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(
-            "SELECT owner FROM public.api_keys WHERE key_hash = %s",
+            "SELECT to_jsonb(k) - 'key_hash' AS j FROM public.api_keys k WHERE key_hash = %s",
             (key_hash,),
         )
-        return await cur.fetchone()
+        row = await cur.fetchone()
+        return row["j"] if row else None
+
+
+_warned_no_scopes = False
+
+
+def _record_from_row(j: dict) -> ApiKeyRecord:
+    """Map a raw ``public.api_keys`` row to a record (pure)."""
+    global _warned_no_scopes
+    if "scopes" in j:
+        # Present-but-empty is a real, rightless key; absent is pre-migration.
+        scopes = frozenset(j["scopes"] or ())
+    else:
+        scopes = ALL_ACTIONS
+        if not _warned_no_scopes:
+            _warned_no_scopes = True
+            logger.warning(
+                "authz: public.api_keys has no scopes column — "
+                "pre-migration fallback, run scripts.setup_db"
+            )
+    return ApiKeyRecord(
+        owner=j["owner"],
+        tenant_id=j.get("tenant_id") or DEFAULT_TENANT_ID,
+        scopes=scopes,
+        graph_ids=tuple(j["graph_ids"]) if j.get("graph_ids") is not None else None,
+    )
 
 
 class ApiKeyStore:
@@ -66,9 +123,9 @@ class ApiKeyStore:
             logger.warning("api key lookup failed; falling back to env API_KEYS: {e}", e=exc)
             row = None
         if row is not None:
-            rec: ApiKeyRecord | None = ApiKeyRecord(owner=row["owner"])
+            rec: ApiKeyRecord | None = _record_from_row(row)
         elif raw_key in settings.api.keys_list:
-            rec = ApiKeyRecord(owner="legacy-env")
+            rec = ApiKeyRecord.full("legacy-env")
         else:
             rec = None
         self._cache[h] = (now, rec)

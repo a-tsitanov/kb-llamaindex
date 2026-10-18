@@ -133,6 +133,29 @@ CREATE INDEX IF NOT EXISTS bot_request_user_time_idx
     ON public.bot_request (telegram_id, started_at DESC);
 """
 
+# Tenants own graphs and keys (spec 2026-10-18 §1).  The `default` row is the
+# pre-tenancy world and MUST exist before any `REFERENCES public.tenants(id)`
+# runs — the FK arrives by ALTER on tables that already hold rows, so an empty
+# `tenants` would fail the ALTER on every existing graph/key.  Hence the INSERT
+# inside this multi-statement block (GLOBAL_DDL runs in order, and all of it
+# before `_bootstrap_registry`), exactly like `_PG_TRGM_DDL`.
+#
+# `schema_migration` records one-off data migrations that must not repeat —
+# today only `_grandfather_scopes`.
+_TENANTS_DDL = """
+CREATE TABLE IF NOT EXISTS public.tenants (
+    id          TEXT PRIMARY KEY,
+    name        TEXT        NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO public.tenants (id, name) VALUES ('default', 'Default tenant')
+    ON CONFLICT (id) DO NOTHING;
+CREATE TABLE IF NOT EXISTS public.schema_migration (
+    name        TEXT PRIMARY KEY,
+    applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+"""
+
 # Multi-graph registry (Plan A).  Lives in `public` regardless of which
 # schema a given graph's own tables live in — this is the directory that
 # maps a graph id to its physical storage names, not per-graph data.
@@ -154,18 +177,72 @@ CREATE TABLE IF NOT EXISTS public.graphs (
     updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE public.graphs ADD COLUMN IF NOT EXISTS generation BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.graphs ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'
+    REFERENCES public.tenants(id);
+CREATE INDEX IF NOT EXISTS graphs_tenant_idx ON public.graphs (tenant_id);
 """
 
-# API keys, sha256-hashed at rest — never the raw key.  Global (public): a key
-# authenticates only and is not bound to any graph (graph = X-Graph header;
-# per-graph authorization is another layer — spec amendment 2026-10-17).
+# API keys, sha256-hashed at rest — never the raw key.  Global (public), and
+# since the 2026-10-18 spec a key also carries its rights: the tenant it
+# belongs to, the actions it may perform and an optional narrowing to named
+# graphs (NULL = every graph of its tenant).  `is_admin` does NOT come back —
+# the `admin` scope replaces it.
+#
+# Additive migration only (ADD COLUMN IF NOT EXISTS with a DEFAULT), so code
+# still running `SELECT owner` keeps working against the new schema.  The
+# `scopes` default is the WEAKEST right: a row written by something that does
+# not know about scopes must not arrive with powers.  Rows that predate the
+# column are handled once by `_grandfather_scopes`.
 _API_KEYS_DDL = """
 CREATE TABLE IF NOT EXISTS public.api_keys (
     key_hash    TEXT PRIMARY KEY,
     owner       TEXT NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE public.api_keys ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'
+    REFERENCES public.tenants(id);
+ALTER TABLE public.api_keys ADD COLUMN IF NOT EXISTS scopes TEXT[] NOT NULL DEFAULT '{read}';
+ALTER TABLE public.api_keys ADD COLUMN IF NOT EXISTS graph_ids TEXT[];
+CREATE INDEX IF NOT EXISTS api_keys_tenant_idx ON public.api_keys (tenant_id);
 """
+
+# Every action, as a SQL literal.  Spelled out rather than built from
+# `src.tenancy.authz.Action` so the emitted SQL is stable and greppable;
+# `tests/test_scripts/test_setup_db_authz.py` guards the two against drift.
+_FULL_SCOPES_SQL = "ARRAY['read', 'write', 'download_original', 'admin']"
+
+# One-off: keys that predate the `scopes` column keep every action, so the
+# migration itself revokes nothing.  Guarded by a marker row rather than
+# being idempotent by nature — an unguarded blanket UPDATE would hand back,
+# on every later `setup_db` run, exactly the rights an operator had just
+# revoked by hand.
+_GRANDFATHER_MARKER = "authz_grandfather_v1"
+
+
+def _grandfather_scopes(cur) -> None:
+    """Give every pre-migration key the full scope set; a no-op once the
+    marker row sits in `public.schema_migration`.
+
+    Read-then-write, not one atomic statement: under READ COMMITTED two init
+    containers can both find no marker and both write the same blanket grant
+    (harmless — identical set), which is why the claim carries `ON CONFLICT
+    DO NOTHING` so the loser does not abort setup_db on the duplicate.  What
+    the marker really protects is the LATER run, after an operator has
+    narrowed a key by hand.
+    """
+    cur.execute(
+        "SELECT 1 FROM public.schema_migration WHERE name = %s",
+        (_GRANDFATHER_MARKER,),
+    )
+    if cur.fetchall():  # at most one row; empty means "never ran"
+        return
+    cur.execute(f"UPDATE public.api_keys SET scopes = {_FULL_SCOPES_SQL}")
+    cur.execute(
+        "INSERT INTO public.schema_migration (name) VALUES (%s) "
+        "ON CONFLICT (name) DO NOTHING",
+        (_GRANDFATHER_MARKER,),
+    )
+    logger.info("authz: existing api_keys grandfathered to full scopes")
 
 
 def _bootstrap_registry(cur) -> None:
@@ -174,6 +251,8 @@ def _bootstrap_registry(cur) -> None:
     from src.tenancy.api_keys import hash_api_key
     from src.tenancy.context import default_graph_context
 
+    # Before anything this run inserts — those rows carry their scopes.
+    _grandfather_scopes(cur)
     d = default_graph_context()
     cur.execute(
         "INSERT INTO public.graphs (id, owner, status, nebula_space, nebula_partition_num, "
@@ -186,9 +265,13 @@ def _bootstrap_registry(cur) -> None:
         hash_api_key(k.strip()) for k in settings.api.keys.split(",") if k.strip()
     ]
     for key_hash in env_hashes:
+        # Rights spelled out, never left to the column DEFAULT '{read}':
+        # that would quietly strip tg_ingest, the offline webui and
+        # graph_refresh.sh of ingest rights on the very next run.
         cur.execute(
-            "INSERT INTO public.api_keys (key_hash, owner) "
-            "VALUES (%s, 'legacy-env') ON CONFLICT (key_hash) DO NOTHING",
+            "INSERT INTO public.api_keys (key_hash, owner, tenant_id, scopes) "
+            f"VALUES (%s, 'legacy-env', 'default', {_FULL_SCOPES_SQL}) "
+            "ON CONFLICT (key_hash) DO NOTHING",
             (key_hash,),
         )
     # R-P7: API_KEYS is the source of truth for legacy-env rows — a key
@@ -319,7 +402,9 @@ def setup_temporal_retention() -> None:
 # pg_trgm lives in `extensions`; GRAPH_DDL trigram indexes find
 # `gin_trgm_ops` through the `extensions` entry of every graph's search_path.
 GLOBAL_DDL: list[str] = [
-    _PG_TRGM_DDL, _BOT_USER_DDL, _BOT_REQUEST_DDL, _BOT_INDEXES_DDL, _GRAPHS_DDL, _API_KEYS_DDL,
+    _PG_TRGM_DDL, _BOT_USER_DDL, _BOT_REQUEST_DDL, _BOT_INDEXES_DDL,
+    # `_TENANTS_DDL` strictly before the two tables that reference it.
+    _TENANTS_DDL, _GRAPHS_DDL, _API_KEYS_DDL,
 ]
 
 

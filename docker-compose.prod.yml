@@ -39,6 +39,11 @@ x-app-env: &app-env
   API_CORS_ORIGINS: ${API_CORS_ORIGINS:?set allowed origin(s) for prod, e.g. https://app.example.com}
   MINIO_SECURE: ${MINIO_SECURE:-false}
   API_KEYS: ${API_KEYS:-changeme-key}
+  # Graph authorization: off (kill switch — guard AND tenant filters inert) |
+  # log (default: decide, write `authz would-deny …`, allow anyway) | enforce.
+  # Prod services get this explicit allow-list and no env_file, so a var that
+  # is not listed here never reaches the container.
+  AUTHZ_MODE: ${AUTHZ_MODE:-log}
   METRICS_ENABLED: "true"
   METRICS_BIND_ADDRESS: 0.0.0.0:9090
   # ── Models / embeddings — MUST match the external proxy + Milvus.
@@ -199,6 +204,8 @@ services:
     depends_on:
       temporal: {condition: service_started}
       nebula-graphd: {condition: service_healthy}
+      # Reads public.api_keys — must not come up against an un-migrated schema.
+      init: {condition: service_completed_successfully}
     restart: unless-stopped
 
   mcp-tools:
@@ -218,6 +225,8 @@ services:
     depends_on:
       milvus: {condition: service_healthy}
       nebula-graphd: {condition: service_healthy}
+      # Reads public.api_keys — must not come up against an un-migrated schema.
+      init: {condition: service_completed_successfully}
     restart: unless-stopped
 
   # MCP-3: exact external statistics.  Deliberately the thinnest of the
@@ -235,6 +244,11 @@ services:
       - "${MCP_STATS_PORT:-9003}:9003"
     depends_on:
       postgres: {condition: service_healthy}
+      # Reads public.api_keys — must not come up against an un-migrated schema.
+      # This is a START-ORDER edge only (init in turn waits on milvus/nebula);
+      # once up, mcp-stats keeps serving with the semantic side down, which is
+      # the boundary the paragraph above is about.
+      init: {condition: service_completed_successfully}
     restart: unless-stopped
 
   # Lens (board, agent, web) moved to its own project ~/projects/lens (2026-10-08); it

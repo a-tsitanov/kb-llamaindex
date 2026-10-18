@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from temporalio.exceptions import WorkflowAlreadyStartedError
 from urllib3.exceptions import MaxRetryError
 
-from src.api.graph_dep import resolve_graph
+from src.api.graph_dep import resolve_graph, resolve_graph_write
 from src.config import settings
 from src.ingest_queue.priorities import PRIO_LIVE
 from src.retrieval.date_filters import iso_to_epoch_days, today_epoch_days
@@ -83,7 +83,7 @@ async def upload_document(
     # written, but the watch sweep raises no events for these rows.
     backfill: bool = Form(default=False),
     x_version_tag: str | None = Header(default=None, alias="X-Version-Tag"),
-    graph: GraphContext = Depends(resolve_graph),
+    graph: GraphContext = Depends(resolve_graph_write),
 ) -> IngestEnqueuedResponse:
     pg = AsyncPostgres(graph=graph)
     if not file.filename:

@@ -11,7 +11,12 @@ from typing import Any, Literal
 
 from psycopg.rows import dict_row
 
-from src.tenancy.context import DEFAULT_GRAPH_ID, GraphContext, new_graph_context
+from src.tenancy.context import (
+    DEFAULT_GRAPH_ID,
+    DEFAULT_TENANT_ID,
+    GraphContext,
+    new_graph_context,
+)
 from src.tenancy.registry import _COLS, GraphNotFound, _context_from_row
 
 ROW_COLS = _COLS + ", status_error, max_inflight, created_at, updated_at"
@@ -48,20 +53,32 @@ async def create_or_resume(
     owner: str,
     partition_num: int,
     *,
+    tenant_id: str = DEFAULT_TENANT_ID,
+    tenant_filter: str | None = None,
     conn_factory: ConnFactory | None = None,
 ) -> CreateOutcome:
     """Insert a `provisioning` row; a `failed` row is reset to
-    `provisioning` (resume); any other existing row is a conflict."""
+    `provisioning` (resume); any other existing row is a conflict.
+
+    The two tenant parameters are deliberately separate: ``tenant_id`` is
+    DATA — whose the new row is, written in every AUTHZ_MODE, or rows would
+    end up mislabelled while the switch is off — and ``tenant_filter`` is
+    ENFORCEMENT (None = do not check).  Callers take the latter from
+    :func:`src.tenancy.authz.tenant_filter`, never from the key directly.
+    """
     g = new_graph_context(
         graph_id, nebula_partition_num=partition_num
     )  # validates, rejects default
     async with (conn_factory or _pool_conn)() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
+            # `tenant_id` goes LAST, so the leading parameters keep their
+            # positions for every existing caller and test.
             await cur.execute(
                 "INSERT INTO public.graphs (id, owner, status, nebula_space, nebula_partition_num, "
-                "chunks_collection, er_vec_collection, report_vec_collection, pg_schema, generation) "
+                "chunks_collection, er_vec_collection, report_vec_collection, pg_schema, generation, "
+                "tenant_id) "
                 "VALUES (%s, %s, 'provisioning', %s, %s, %s, %s, %s, %s, "
-                "(extract(epoch from clock_timestamp()) * 1000000)::bigint) "
+                "(extract(epoch from clock_timestamp()) * 1000000)::bigint, %s) "
                 "ON CONFLICT (id) DO NOTHING RETURNING id",
                 (
                     g.id,
@@ -72,6 +89,7 @@ async def create_or_resume(
                     g.er_vec_collection,
                     g.report_vec_collection,
                     g.pg_schema,
+                    tenant_id,
                 ),
             )
             if await cur.fetchone() is not None:
@@ -80,20 +98,40 @@ async def create_or_resume(
                 # New generation: a failed delete may already have dropped
                 # storage that long-lived processes still cache under the
                 # old `id#generation` key.
-                await cur.execute(
+                q = (
                     "UPDATE public.graphs SET status = 'provisioning', status_error = '', "
                     "generation = (extract(epoch from clock_timestamp()) * 1000000)::bigint, "
-                    "updated_at = now() WHERE id = %s AND status = 'failed' RETURNING id",
-                    (g.id,),
+                    "updated_at = now() WHERE id = %s AND status = 'failed'"
                 )
+                params: tuple = (g.id,)
+                if tenant_filter is not None:
+                    q += " AND tenant_id = %s"
+                    params += (tenant_filter,)
+                await cur.execute(q + " RETURNING id", params)
                 if await cur.fetchone() is not None:
                     outcome = CreateOutcome("resumed", "provisioning")
                 else:
-                    await cur.execute("SELECT status FROM public.graphs WHERE id = %s", (g.id,))
+                    await cur.execute(
+                        "SELECT status, tenant_id FROM public.graphs WHERE id = %s", (g.id,)
+                    )
                     row = await cur.fetchone()
-                    outcome = CreateOutcome("conflict", row["status"] if row else "unknown")
+                    outcome = _conflict_outcome(row, tenant_filter)
         await conn.commit()
     return outcome
+
+
+def _conflict_outcome(row: dict | None, tenant_filter: str | None) -> CreateOutcome:
+    """Status of the colliding row, or ``unavailable`` when it is not ours.
+
+    Fail-closed: a row whose ``tenant_id`` is missing (pre-migration) counts
+    as foreign, because the status of another tenant's graph must not leak
+    out through the 409 body.
+    """
+    if row is None:
+        return CreateOutcome("conflict", "unknown")
+    if tenant_filter is not None and row.get("tenant_id") != tenant_filter:
+        return CreateOutcome("conflict", "unavailable")
+    return CreateOutcome("conflict", row["status"])
 
 
 async def get_row(graph_id: str, *, conn_factory: ConnFactory | None = None) -> dict | None:
@@ -102,9 +140,17 @@ async def get_row(graph_id: str, *, conn_factory: ConnFactory | None = None) -> 
         return await cur.fetchone()
 
 
-async def list_rows(*, conn_factory: ConnFactory | None = None) -> list[dict]:
+async def list_rows(
+    *, tenant_id: str | None = None, conn_factory: ConnFactory | None = None
+) -> list[dict]:
+    """Every graph, or only ``tenant_id``'s when a filter is given."""
+    q = f"SELECT {ROW_COLS} FROM public.graphs"
+    params: tuple = ()
+    if tenant_id is not None:
+        q += " WHERE tenant_id = %s"
+        params = (tenant_id,)
     async with (conn_factory or _pool_conn)() as conn, conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(f"SELECT {ROW_COLS} FROM public.graphs ORDER BY id")
+        await cur.execute(q + " ORDER BY id", params)
         return await cur.fetchall()
 
 
@@ -113,16 +159,24 @@ async def patch_row(
     *,
     owner: str | None,
     max_inflight: int | None,
+    tenant_id: str | None = None,
     conn_factory: ConnFactory | None = None,
 ) -> dict | None:
+    """Patch the row; with ``tenant_id`` only when it belongs to that tenant.
+
+    The filter is part of the same statement, so nothing can slip between
+    the ownership check and the write."""
+    q = (
+        "UPDATE public.graphs SET owner = COALESCE(%s, owner), "
+        "max_inflight = COALESCE(%s, max_inflight), updated_at = now() WHERE id = %s"
+    )
+    params: tuple = (owner, max_inflight, graph_id)
+    if tenant_id is not None:
+        q += " AND tenant_id = %s"
+        params += (tenant_id,)
     async with (conn_factory or _pool_conn)() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
-            await cur.execute(
-                "UPDATE public.graphs SET owner = COALESCE(%s, owner), "
-                "max_inflight = COALESCE(%s, max_inflight), updated_at = now() "
-                f"WHERE id = %s RETURNING {ROW_COLS}",
-                (owner, max_inflight, graph_id),
-            )
+            await cur.execute(f"{q} RETURNING {ROW_COLS}", params)
             row = await cur.fetchone()
         await conn.commit()
     return row
@@ -151,21 +205,30 @@ async def set_status(
     return changed
 
 
-async def mark_deleting(graph_id: str, *, conn_factory: ConnFactory | None = None) -> str | None:
+async def mark_deleting(
+    graph_id: str, *, tenant_id: str | None = None, conn_factory: ConnFactory | None = None
+) -> str | None:
     """Set `deleting` unless the row is `provisioning`; return the previous
     status (None = no such graph; `provisioning` = row left unchanged).
     One locked statement, so a concurrent resume cannot slip in between
-    the check and the write."""
+    the check and the write.
+
+    ``tenant_id`` narrows the LOCKED read itself, so a foreign graph is
+    reported exactly as a missing one and no window is left between the
+    ownership check and the write."""
     if graph_id == DEFAULT_GRAPH_ID:
         raise ValueError("the default graph is not deletable")
+    owned = " AND tenant_id = %s" if tenant_id is not None else ""
+    params: tuple = (graph_id,) if tenant_id is None else (graph_id, tenant_id)
     async with (conn_factory or _pool_conn)() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
-                "WITH old AS (SELECT id, status AS prev FROM public.graphs WHERE id = %s FOR UPDATE), "
+                "WITH old AS (SELECT id, status AS prev FROM public.graphs "
+                f"WHERE id = %s{owned} FOR UPDATE), "
                 "upd AS (UPDATE public.graphs g SET status = 'deleting', updated_at = now() "
                 "FROM old WHERE g.id = old.id AND old.prev <> 'provisioning' RETURNING g.id) "
                 "SELECT prev FROM old",
-                (graph_id,),
+                params,
             )
             row = await cur.fetchone()
         await conn.commit()

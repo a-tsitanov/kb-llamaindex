@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Graphs are created ONLY explicitly; an unknown `X-Graph` stays 404 everywhere (amendment 2026-10-18). No auto-provisioning anywhere.
-- Any valid API key may call any endpoint incl. `/admin/graphs*`; no per-key authorization (amendment 2026-10-17). Do not reintroduce `is_admin` / `graph_ids`.
+- ~~Any valid API key may call any endpoint incl. `/admin/graphs*`; no per-key authorization (amendment 2026-10-17). Do not reintroduce `is_admin` / `graph_ids`.~~ **CANCELLED by `docs/superpowers/specs/2026-10-18-tenancy-authz-design.md`** (implemented 2026-10-18): a key now carries `tenant_id`, `scopes` and `graph_ids`, and every seam authorizes through `authz.guard`. `graph_ids` IS back (a key may be narrowed to its own graphs); `is_admin` is NOT — the `admin` scope replaces it. Do not "restore" this constraint: it is encoded in `tests/test_tenancy/test_guards.py` the other way round now.
 - Slug: `^[a-z][a-z0-9_]{1,30}$` via `validate_graph_id`; `default` is reserved and can never be provisioned, dropped or deleted.
 - New graph physical names come only from `new_graph_context(id, nebula_partition_num=n)`: space `g_<id>`, collections `g_<id>_chunks|_er_vec|_report_vec`, schema `g_<id>`, MinIO prefix `<id>/`.
 - `default` keeps legacy names (`kb`, `kb_llamaindex`, `entity_er_vec`, `community_report_vec`, `public`, `""`) and byte-identical Temporal workflow ids.

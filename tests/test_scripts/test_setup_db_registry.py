@@ -8,15 +8,22 @@ class _Cur:
     def execute(self, q, params=None):
         self.sql.append((str(q), params))
 
+    def fetchall(self):
+        # No `schema_migration` marker row: the one-off grandfathering runs.
+        return []
+
 
 def test_global_ddl_creates_registry_tables_in_public():
     assert "CREATE TABLE IF NOT EXISTS public.graphs" in setup_db._GRAPHS_DDL
     assert "CREATE TABLE IF NOT EXISTS public.api_keys" in setup_db._API_KEYS_DDL
 
 
-def test_api_keys_ddl_has_no_authorization_columns():
-    # Spec amendment 2026-10-17: keys authenticate only.
-    assert "graph_ids" not in setup_db._API_KEYS_DDL
+def test_api_keys_ddl_has_authorization_columns():
+    # Spec 2026-10-18 reverses the 2026-10-17 amendment: a key carries its
+    # rights.  `is_admin` does not come back — the `admin` scope replaces it.
+    assert "graph_ids" in setup_db._API_KEYS_DDL
+    assert "scopes" in setup_db._API_KEYS_DDL
+    assert "tenant_id" in setup_db._API_KEYS_DDL
     assert "is_admin" not in setup_db._API_KEYS_DDL
 
 
@@ -31,8 +38,12 @@ def test_bootstrap_inserts_default_row_idempotently(monkeypatch):
     assert all("ON CONFLICT (key_hash) DO NOTHING" in s for s, _ in cur.sql if "public.api_keys" in s and "INSERT" in s)
     for s, _ in cur.sql:
         if "INSERT INTO public.api_keys" in s:
-            assert "graph_ids" not in s and "is_admin" not in s
+            assert "is_admin" not in s
             assert "'legacy-env'" in s
+            # Rights are spelled out, never left to the column DEFAULT.
+            assert "tenant_id" in s
+            for action in ("read", "write", "download_original", "admin"):
+                assert f"'{action}'" in s
 
 
 def _deletes(cur):

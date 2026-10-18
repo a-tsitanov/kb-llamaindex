@@ -1,6 +1,6 @@
 import pytest
 
-from src.tenancy.context import default_graph_context, new_graph_context
+from src.tenancy.context import DEFAULT_TENANT_ID, default_graph_context, new_graph_context
 from src.tenancy.registry import GraphNotFound, GraphNotReady, GraphRegistry
 
 
@@ -224,3 +224,33 @@ def test_registry_selects_generation():
     from src.tenancy import registry
 
     assert "generation" in registry._COLS
+
+
+def test_cols_include_tenant():
+    from src.tenancy import registry
+
+    assert "tenant_id" in registry._COLS
+
+
+async def test_context_carries_row_tenant():
+    reg = GraphRegistry(loader=_Loader({"acme": _row("acme") | {"tenant_id": "t1"}}))
+    assert (await reg.get("acme")).tenant_id == "t1"
+
+
+async def test_row_without_tenant_defaults():
+    """Fail-OPEN on a pre-migration row: no `tenant_id` column yet means the
+    graph still belongs to the `default` tenant it was created in."""
+    reg = GraphRegistry(loader=_Loader({"acme": _row("acme")}))
+    assert (await reg.get("acme")).tenant_id == DEFAULT_TENANT_ID
+
+
+async def test_not_ready_carries_tenant():
+    reg = GraphRegistry(loader=_Loader({"acme": _row("acme", "provisioning") | {"tenant_id": "t1"}}))
+    with pytest.raises(GraphNotReady) as ei:
+        await reg.get("acme")
+    assert ei.value.tenant_id == "t1"
+    # a pre-migration row still raises, with the default tenant
+    reg2 = GraphRegistry(loader=_Loader({"acme": _row("acme", "provisioning")}))
+    with pytest.raises(GraphNotReady) as ei2:
+        await reg2.get("acme")
+    assert ei2.value.tenant_id == DEFAULT_TENANT_ID

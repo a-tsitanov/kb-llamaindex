@@ -3,6 +3,7 @@ import pytest
 from src.config import settings
 from src.tenancy.context import (
     DEFAULT_GRAPH_ID,
+    DEFAULT_TENANT_ID,
     GraphContext,
     InvalidGraphId,
     default_graph_context,
@@ -65,3 +66,15 @@ def test_new_graph_context_rejects_reserved_and_invalid():
 def test_graph_scoped_id_keeps_default_ids_unchanged():
     assert graph_scoped_id("ingest", DEFAULT_GRAPH_ID, "doc1") == "ingest-doc1"
     assert graph_scoped_id("ingest", "acme", "doc1") == "ingest-acme-doc1"
+
+
+def test_default_context_tenant_is_default():
+    assert default_graph_context().tenant_id == DEFAULT_TENANT_ID
+    assert new_graph_context("acme").tenant_id == DEFAULT_TENANT_ID
+
+
+def test_new_graph_context_tenant_override():
+    ctx = new_graph_context("acme", tenant_id="t1")
+    assert ctx.tenant_id == "t1"
+    # the tenant is metadata only: physical names stay derived from the id
+    assert ctx.nebula_space == new_graph_context("acme").nebula_space

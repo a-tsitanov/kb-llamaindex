@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from src.config import settings
 
 DEFAULT_GRAPH_ID = "default"
+# Tenant every pre-tenancy graph and key is inherited into (spec A7).
+DEFAULT_TENANT_ID = "default"
 _SLUG = re.compile(r"^[a-z][a-z0-9_]{1,30}$")
 
 
@@ -38,6 +40,9 @@ class GraphContext:
     # Bumped each time a graph id is (re)created, so per-process caches
     # never hand a re-created graph the dropped one's sessions/handles.
     generation: int = 0
+    # Owning tenant, carried from the registry row to the enforcement seams
+    # so authorization never needs a second trip to the registry.
+    tenant_id: str = DEFAULT_TENANT_ID
 
     @property
     def is_default(self) -> bool:
@@ -68,7 +73,12 @@ def transitional_default_graph() -> GraphContext:
     return default_graph_context()
 
 
-def new_graph_context(graph_id: str, *, nebula_partition_num: int = 10) -> GraphContext:
+def new_graph_context(
+    graph_id: str,
+    *,
+    nebula_partition_num: int = 10,
+    tenant_id: str = DEFAULT_TENANT_ID,
+) -> GraphContext:
     validate_graph_id(graph_id)
     if graph_id == DEFAULT_GRAPH_ID:
         raise InvalidGraphId("'default' is reserved")
@@ -81,6 +91,7 @@ def new_graph_context(graph_id: str, *, nebula_partition_num: int = 10) -> Graph
         report_vec_collection=f"g_{graph_id}_report_vec",
         pg_schema=f"g_{graph_id}",
         minio_prefix=f"{graph_id}/",
+        tenant_id=tenant_id,
     )
 
 

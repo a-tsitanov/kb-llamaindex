@@ -6,14 +6,21 @@ from src.tenancy.api_keys import ApiKeyRecord
 from src.tenancy.context import new_graph_context
 from src.tenancy.registry import GraphNotFound, GraphNotReady
 
-ONE = ApiKeyRecord(owner="a")
+ONE = ApiKeyRecord.full("a")
 
 
-# Spec amendment 2026-10-17: the graph is chosen ONLY by X-Graph (absent ->
-# default); there is no per-key authorization at this layer.
+# `choose_graph_id` only maps the header to an id (absent -> default); the
+# access decision happens after it, in the dependency `graph_for` builds.
+# It stays decision-free because MCP reuses it through `src/mcp/_shared.py`.
 @pytest.mark.parametrize(
     ("hdr", "expected"),
-    [(None, "default"), ("acme", "acme"), ("acme_hr", "acme_hr"), ("other", "other"), ("default", "default")],
+    [
+        (None, "default"),
+        ("acme", "acme"),
+        ("acme_hr", "acme_hr"),
+        ("other", "other"),
+        ("default", "default"),
+    ],
 )
 def test_choose_graph_ok(hdr, expected):
     assert graph_dep.choose_graph_id(hdr) == expected
@@ -42,10 +49,17 @@ async def test_resolve_graph_maps_registry_errors(monkeypatch):
     with pytest.raises(HTTPException) as ei:
         await graph_dep.resolve_graph(ONE, "acme")
     assert ei.value.status_code == 404
-    monkeypatch.setattr(graph_dep, "get_graph_registry", lambda: _Reg(GraphNotReady("acme", "deleting")))
+    # One slug-free text for "no such graph" and "not your graph" alike.
+    assert ei.value.detail == graph_dep.GRAPH_NOT_FOUND_DETAIL
+    assert "acme" not in ei.value.detail
+    monkeypatch.setattr(
+        graph_dep, "get_graph_registry", lambda: _Reg(GraphNotReady("acme", "deleting"))
+    )
     with pytest.raises(HTTPException) as ei:
         await graph_dep.resolve_graph(ONE, "acme")
     assert ei.value.status_code == 409
+    # A graph of one's OWN tenant may still say why it is unusable.
+    assert ei.value.detail == "graph 'acme' is deleting"
     monkeypatch.setattr(graph_dep, "get_graph_registry", lambda: _Reg(new_graph_context("acme")))
     assert (await graph_dep.resolve_graph(ONE, "acme")).id == "acme"
 
@@ -56,6 +70,7 @@ async def test_require_api_key_statuses(monkeypatch):
     class _Store:
         async def lookup(self, k):
             return ONE if k == "good" else None
+
     monkeypatch.setattr(auth, "get_api_key_store", lambda: _Store())
     with pytest.raises(HTTPException) as ei:
         await auth.require_api_key(None)

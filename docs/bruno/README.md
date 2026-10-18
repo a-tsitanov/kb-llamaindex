@@ -68,11 +68,21 @@ X-API-Key: {{apiKey}}
 Bruno подставляет его автоматически, поскольку запросы берут значение
 из `vars` активного окружения.
 
+Ключ не только аутентифицирует (спека 2026-10-18): он несёт арендатора и
+права — `read`, `write`, `download_original` (скачивание оригинала файла —
+отдельное право, не часть `read`), `admin`. При `AUTHZ_MODE=enforce` коллекция
+проходит целиком только под полноправным ключом: ключ без `write` получит 403
+на **Upload Document**, без `download_original` — на **Download Source**, без
+`admin` — на **Rebuild Communities** и `/admin/graph/*`. Заголовок
+`X-Graph: <id>` выбирает граф; чужой или несуществующий граф — 404
+`graph not found`. Ключи выдаёт `scripts/tenant_admin.py`.
+
 Исключения (в коде нет `X-API-Key`):
-- `GET /health` — публичная liveness-проба.
-- `POST /admin/wiki/rebuild` — не имеет зависимости `require_api_key`
-  (и подключён без префикса `/api/v1`). Считайте его
-  внутренним/операторским эндпоинтом.
+- `GET /health` — публичная liveness-проба. Единственное.
+
+`POST /admin/wiki/rebuild` подключён без префикса `/api/v1`, но ключ требует
+(действие `admin`), как и `/admin/monitor/*`, `/admin/graph/*`,
+`/admin/graphs*`.
 
 ## Типичный сценарий
 

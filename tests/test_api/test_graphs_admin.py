@@ -62,7 +62,7 @@ def ctx(monkeypatch):
     monkeypatch.setattr(graphs_admin.graph_repo, "set_status", set_status)
     app = FastAPI()
     app.include_router(graphs_admin.router)
-    app.dependency_overrides[require_api_key] = lambda: ApiKeyRecord(owner="t")
+    app.dependency_overrides[require_api_key] = lambda: ApiKeyRecord.full("t")
     state["http"] = TestClient(app)
     return state
 
@@ -85,9 +85,12 @@ def test_post_resume_failed_starts_again(ctx):
 
 @pytest.mark.parametrize("status", ["ready", "provisioning", "deleting"])
 def test_post_existing_ready_is_409(ctx, status):
+    # The body is opaque on purpose: a 409 naming the status would tell the
+    # caller what it may not see about another tenant's graph (plan S8).
     ctx["outcome"] = graph_repo.CreateOutcome("conflict", status)
     r = ctx["http"].post("/admin/graphs", json={"id": "acme", "owner": "t"})
-    assert r.status_code == 409 and status in r.json()["detail"]
+    assert r.status_code == 409 and r.json()["detail"] == "graph id is not available"
+    assert status not in r.text
     assert ctx["client"].started == []
 
 
@@ -119,7 +122,7 @@ def test_delete_guards(ctx):
 
 
 def test_delete_provisioning_is_409(ctx):
-    ctx["row"] = {"id": "acme", "status": "provisioning"}
+    ctx["row"] = {"id": "acme", "status": "provisioning", "tenant_id": "default"}
     ctx["prev"] = "provisioning"
     r = ctx["http"].delete("/admin/graphs/acme?confirm=acme")
     assert r.status_code == 409
@@ -128,7 +131,7 @@ def test_delete_provisioning_is_409(ctx):
 def test_delete_racing_resume_is_409(ctx):
     # A pre-read saw `failed`, but a concurrent POST resumed the row to
     # `provisioning`; the atomic mark_deleting reports it and nothing starts.
-    ctx["row"] = {"id": "acme", "status": "failed"}
+    ctx["row"] = {"id": "acme", "status": "failed", "tenant_id": "default"}
     ctx["prev"] = "provisioning"
     r = ctx["http"].delete("/admin/graphs/acme?confirm=acme")
     assert r.status_code == 409
@@ -136,6 +139,8 @@ def test_delete_racing_resume_is_409(ctx):
 
 
 def test_delete_start_failure_marks_failed_only_from_deleting(ctx):
+    # DELETE now reads the row to authorize it, so the row has to exist.
+    ctx["row"] = {"id": "acme", "status": "ready", "tenant_id": "default"}
     ctx["client"] = _Client(fail=True)
     r = ctx["http"].delete("/admin/graphs/acme?confirm=acme")
     assert r.status_code == 500
@@ -143,7 +148,7 @@ def test_delete_start_failure_marks_failed_only_from_deleting(ctx):
 
 
 def test_delete_starts_workflow(ctx):
-    ctx["row"] = {"id": "acme", "status": "ready"}
+    ctx["row"] = {"id": "acme", "status": "ready", "tenant_id": "default"}
     r = ctx["http"].delete("/admin/graphs/acme?confirm=acme")
     assert r.status_code == 202
     assert r.json()["workflow_id"] == "lifecycle-delete-acme"

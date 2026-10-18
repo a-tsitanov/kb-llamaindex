@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 
-from src.api.graph_dep import resolve_graph
+from src.api.graph_dep import resolve_graph_download
 from src.storage.minio import S3Error, build_minio_storage
 from src.storage.postgres import AsyncPostgres
 from src.tenancy.context import GraphContext
@@ -34,7 +34,7 @@ router = APIRouter(tags=["documents"])
 )
 async def download_document(
     doc_id: str,
-    graph: GraphContext = Depends(resolve_graph),
+    graph: GraphContext = Depends(resolve_graph_download),
     variant: Literal["original", "text"] | None = Query(
         default=None,
         description="original = uploaded binary (if stored), text = "

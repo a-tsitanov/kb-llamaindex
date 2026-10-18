@@ -2,9 +2,11 @@
 
 Keys are looked up in ``public.api_keys`` (sha256-hashed) via
 :class:`~src.tenancy.api_keys.ApiKeyStore`, with the legacy ``API_KEYS``
-env list as fallback (R-A3).  A key authenticates only: any valid key may
-use any graph (selected by ``X-Graph``); authorization is another layer.
-Health endpoint stays public; everything else requires the header.
+env list as fallback (R-A3).  This dependency only authenticates: it
+returns the record, which carries the tenant and the rights
+(:mod:`src.tenancy.authz` decides with them, per-graph, at the graph
+dependency).  Health endpoint stays public; everything else requires the
+header.
 """
 
 from __future__ import annotations
