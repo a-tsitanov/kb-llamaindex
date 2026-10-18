@@ -48,34 +48,17 @@ def parse_args() -> dict[str, Any]:
 
 
 def assert_api_key_env_set() -> None:
-    """Best-effort startup check.
-
-    When ``KB_MCP_REQUIRE_AUTH=true``, exits with a clear message if
-    no API_KEYS are configured — protects ops from accidentally
-    exposing an open MCP server.
-    """
+    """Startup notice.  Auth (when on) validates bearer tokens against the
+    API-key registry (``public.api_keys`` + legacy env keys), so an empty
+    ``API_KEYS`` env is fine when keys live in the DB (R-P6)."""
     if not _auth_required():
         logger.warning(
             "MCP auth DISABLED via KB_MCP_REQUIRE_AUTH=false — "
             "anyone reaching this port can call tools",
         )
         return
-    keys = settings.api.keys_list
-    if not keys:
-        raise SystemExit(
-            "MCP startup: API_KEYS env is empty — refusing to expose "
-            "tools without auth.  Set API_KEYS=... or "
-            "KB_MCP_REQUIRE_AUTH=false to opt out.",
-        )
-
-
-def is_valid_key(provided: str) -> bool:
-    """Match against the configured API key list."""
-    if not _auth_required():
-        return True
-    if not provided:
-        return False
-    return provided in settings.api.keys_list
+    if not settings.api.keys_list:
+        logger.info("MCP auth: API_KEYS env empty — relying on public.api_keys only")
 
 
 class RegistryTokenVerifier(TokenVerifier):
@@ -136,27 +119,12 @@ async def current_graph() -> GraphContext:
 
 
 def build_sse_auth() -> RegistryTokenVerifier | None:
-    """Build a FastMCP auth provider for HTTP/SSE transports.
-
-    Returns a ``RegistryTokenVerifier`` when ``KB_MCP_REQUIRE_AUTH`` is
-    on and env API keys exist; otherwise ``None`` (auth disabled —
-    stdio/desktop usage).  The verifier validates the incoming
-    ``Authorization: Bearer <key>`` header against the API-key registry
-    (DB keys + legacy env keys); it authenticates only (no graph claims).
-    Enforced only on HTTP/SSE transports; stdio is unaffected.
-
-    The result is computed once at import time (when the server module
-    is loaded), not lazily per request.
-    """
+    """FastMCP auth provider for HTTP transports: a ``RegistryTokenVerifier``
+    unless ``KB_MCP_REQUIRE_AUTH`` is disabled.  Keys come from the registry
+    (DB + legacy env), so an empty env no longer disables auth (R-P6).
+    The verifier authenticates only (no graph claims).  Evaluated once at
+    import time; stdio is unaffected."""
     if not _auth_required():
-        return None
-    keys = settings.api.keys_list
-    if not keys:
-        logger.warning(
-            "build_sse_auth: KB_MCP_REQUIRE_AUTH is on but API_KEYS is "
-            "empty — SSE transport will start WITHOUT auth.  Set API_KEYS "
-            "or KB_MCP_REQUIRE_AUTH=false.",
-        )
         return None
     return RegistryTokenVerifier()
 

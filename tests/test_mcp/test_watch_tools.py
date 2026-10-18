@@ -208,7 +208,7 @@ async def test_ack_needs_ids_or_all(repos):
     assert "error" in await ts._ack(None, False, graph=G)
 
 
-# ── default-only gate (the monitor sweep only covers the default graph) ──
+# ── every graph (the monitor sweep covers default + every ready graph) ──
 
 _WATCH_TOOL_CALLS = [
     ("kb_watch", ("Иванов",), {}),
@@ -220,20 +220,23 @@ _WATCH_TOOL_CALLS = [
 
 
 @pytest.mark.parametrize("tool,args,kwargs", _WATCH_TOOL_CALLS)
-async def test_watch_tools_refuse_non_default_graph(monkeypatch, tool, args, kwargs):
-    from fastmcp.exceptions import ToolError
-
+async def test_watch_tools_accept_non_default_graph(monkeypatch, tool, args, kwargs):
     async def _acme():
         return G
 
-    def _boom(graph):
-        raise AssertionError("repository must not be reached for a non-default graph")
+    graphs: list[str] = []
+
+    def _repo(graph):
+        graphs.append(graph.id)
+        raise RuntimeError("repo reached")
 
     monkeypatch.setattr(ts, "current_graph", _acme)
-    monkeypatch.setattr(ts, "_entity_search", _boom)
-    monkeypatch.setattr(ts, "_watch_repo", _boom)
-    with pytest.raises(ToolError, match="entity watch is available only for the default graph"):
+    monkeypatch.setattr(ts, "_entity_search", _repo)
+    monkeypatch.setattr(ts, "_watch_repo", _repo)
+    with pytest.raises(RuntimeError, match="repo reached"):
         await getattr(ts, tool)(*args, **kwargs)
+    # the repository is reached, scoped to the non-default graph
+    assert graphs and set(graphs) == {"acme"}
 
 
 async def test_watch_tools_run_on_default_graph(monkeypatch):

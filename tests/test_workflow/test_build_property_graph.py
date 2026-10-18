@@ -204,9 +204,9 @@ async def test_writes_watch_journals_with_the_pairs_the_graph_created(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_skips_watch_journals_for_non_default_graph(monkeypatch):
-    """Entity watch is default-only (the monitor sweep reads only the default
-    graph's journals) — a non-default graph must not grow journals."""
+async def test_records_watch_journals_for_non_default_graph(monkeypatch):
+    """Entity watch runs on every graph (the monitor sweeps all ready graphs),
+    so a non-default graph's build writes journals scoped to that graph."""
     from src.config import settings
 
     monkeypatch.setattr(settings.signals, "source_trust", {})
@@ -240,7 +240,8 @@ async def test_skips_watch_journals_for_non_default_graph(monkeypatch):
     ):
         out = await build_property_graph(merged)
 
-    journal.assert_not_awaited()
+    journal.assert_awaited_once()
+    assert journal.await_args.args[0].graph.id == "acme"
     assert out.relations == 1
 
 

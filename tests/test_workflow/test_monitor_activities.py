@@ -203,6 +203,12 @@ async def test_detect_alerts_burst_gated_off(monkeypatch: pytest.MonkeyPatch) ->
 # ── entity-watch sweep activity ──────────────────────────────────────
 
 
+async def _default_only():
+    from src.tenancy.context import default_graph_context
+
+    return [default_graph_context()]
+
+
 @pytest.mark.asyncio
 async def test_sweep_watch_tallies_events(monkeypatch):
     import src.workflow.monitor.activities as acts
@@ -212,6 +218,7 @@ async def test_sweep_watch_tallies_events(monkeypatch):
 
     monkeypatch.setattr(acts, "run_watch_sweep", _run)
     monkeypatch.setattr(acts, "WatchRepository", lambda *, graph: object())
+    monkeypatch.setattr(acts, "_watch_graphs", _default_only)
     out = await acts.sweep_watch()
     assert out.events == 3 and out.by_kind == {"new_mention": 2, "new_identifier": 1}
     assert out.error == ""
@@ -226,5 +233,6 @@ async def test_sweep_watch_never_raises(monkeypatch):
 
     monkeypatch.setattr(acts, "run_watch_sweep", _boom)
     monkeypatch.setattr(acts, "WatchRepository", lambda *, graph: object())
+    monkeypatch.setattr(acts, "_watch_graphs", _default_only)
     out = await acts.sweep_watch()
     assert out.events == 0 and "pg down" in out.error

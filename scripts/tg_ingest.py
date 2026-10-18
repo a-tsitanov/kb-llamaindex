@@ -71,6 +71,30 @@ def _message_to_doc(msg: Any, channel: str) -> tuple[str, str, str] | None:
     return filename, text, document_date
 
 
+def client_headers(graph: str | None) -> dict[str, str]:
+    """Default headers for every KB call: ``X-Graph`` when a graph is set
+    (absent → the server uses `default`)."""
+    if not graph:
+        return {}
+    from src.tenancy.context import validate_graph_id
+
+    return {"X-Graph": validate_graph_id(graph)}
+
+
+def scoped_state_path(path: Path | str, graph: str | None) -> Path:
+    """Sync cursors are per target graph: a non-default graph gets its own
+    state file (``x.state.json`` → ``x.state.<graph>.json``), so switching
+    ``--graph`` bootstraps that graph instead of resuming the cursors that
+    advanced while feeding another one.  `default` keeps the plain path
+    (existing deployments)."""
+    from src.tenancy.context import DEFAULT_GRAPH_ID, validate_graph_id
+
+    p = Path(path)
+    if not graph or graph == DEFAULT_GRAPH_ID:
+        return p
+    return p.with_name(f"{p.stem}.{validate_graph_id(graph)}{p.suffix}")
+
+
 async def post_ingest(
     http: Any,
     api_base: str,
@@ -422,9 +446,17 @@ def main() -> int:
     p.add_argument("--queue", default=None, help="target ingest queue (rabbitmq backend)")
     p.add_argument("--api-base", default="http://localhost:8000")
     p.add_argument("--api-key", default=os.environ.get("KB_API_KEY", "dev-local-key"))
+    p.add_argument(
+        "--graph", default=os.environ.get("KB_GRAPH") or None,
+        help="target graph id (X-Graph); default: server's `default` graph",
+    )
     p.add_argument("--session", default=".tg_ingest.session")
     # sync-mode knobs
-    p.add_argument("--state", default=".tg_ingest.state.json", help="sync: per-dialog last_id JSON")
+    p.add_argument(
+        "--state", default=".tg_ingest.state.json",
+        help="sync: per-dialog last_id JSON (a non-default --graph gets "
+        "its own file: x.state.<graph>.json)",
+    )
     p.add_argument("--poll-interval", type=float, default=60.0, help="sync: seconds between rounds")
     p.add_argument(
         "--bootstrap-limit", type=int, default=100,
@@ -458,7 +490,7 @@ def main() -> int:
         channels = [c.strip() for c in args.channels.split(",") if c.strip()]
         async with (
             TelegramClient(args.session, api_id, api_hash) as tg,
-            httpx.AsyncClient(timeout=30.0) as http,
+            httpx.AsyncClient(timeout=30.0, headers=client_headers(args.graph)) as http,
         ):
             await read_and_enqueue(
                 tg,
@@ -479,10 +511,11 @@ def main() -> int:
         folder_names = [
             n for n in (args.folders or "").split(",") if n.strip()
         ]
-        state = load_state(args.state)
+        state_path = scoped_state_path(args.state, args.graph)
+        state = load_state(state_path)
         async with (
             TelegramClient(args.session, api_id, api_hash) as tg,
-            httpx.AsyncClient(timeout=30.0) as http,
+            httpx.AsyncClient(timeout=30.0, headers=client_headers(args.graph)) as http,
         ):
             missing_warned = False
             while True:
@@ -510,7 +543,7 @@ def main() -> int:
                     http,
                     dialogs=dialogs,
                     state=state,
-                    save=lambda: save_state(args.state, state),
+                    save=lambda: save_state(state_path, state),
                     api_base=args.api_base,
                     api_key=args.api_key,
                     queue=args.queue,
@@ -541,7 +574,7 @@ def main() -> int:
             return 2
         async with (
             TelegramClient(args.session, api_id, api_hash) as tg,
-            httpx.AsyncClient(timeout=30.0) as http,
+            httpx.AsyncClient(timeout=30.0, headers=client_headers(args.graph)) as http,
         ):
             dialogs = select_dialogs([d async for d in tg.iter_dialogs()])
             res = await tg(functions.messages.GetDialogFiltersRequest())

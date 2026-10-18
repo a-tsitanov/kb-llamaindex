@@ -16,13 +16,23 @@ def test_build_sse_auth_returns_none_when_disabled(monkeypatch):
     assert _shared.build_sse_auth() is None
 
 
-def test_build_sse_auth_returns_none_when_no_keys(monkeypatch):
+def test_build_sse_auth_uses_registry_even_without_env_keys(monkeypatch):
+    # R-P6: DB-only key deployments must still get auth on HTTP transports.
     monkeypatch.setenv("KB_MCP_REQUIRE_AUTH", "true")
     monkeypatch.setattr(
         _shared, "settings",
         SimpleNamespace(api=SimpleNamespace(keys_list=[])),
     )
-    assert _shared.build_sse_auth() is None
+    assert isinstance(_shared.build_sse_auth(), _shared.RegistryTokenVerifier)
+
+
+def test_startup_check_does_not_exit_without_env_keys(monkeypatch):
+    monkeypatch.setenv("KB_MCP_REQUIRE_AUTH", "true")
+    monkeypatch.setattr(
+        _shared, "settings",
+        SimpleNamespace(api=SimpleNamespace(keys_list=[])),
+    )
+    _shared.assert_api_key_env_set()  # must not raise SystemExit
 
 
 def test_build_sse_auth_builds_verifier_with_keys(monkeypatch):
