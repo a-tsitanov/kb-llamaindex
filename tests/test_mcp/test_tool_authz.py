@@ -123,10 +123,33 @@ async def test_mutating_watch_tools_ask_for_write(seam, name, call):
     assert watch.calls == [], name
 
 
-async def test_watch_feed_stays_read_and_passes_with_a_read_only_key(seam):
+async def test_watch_feed_asks_for_write_because_it_marks_rows_seen(seam):
+    """The feed looks like a read and is not: `_watch_feed` calls
+    `mark_seen`, so a read-only key could clear another operator's feed on
+    every poll.  The repository must not be reached at all."""
     watch = await seam(READ_ONLY)
+    with pytest.raises(ToolError, match="forbidden: write not allowed"):
+        await ts.kb_watch_feed()
+    assert watch.calls == []
+
+
+async def test_watch_feed_runs_with_a_write_key(seam):
+    watch = await seam(WRITE_ONLY)
     assert await ts.kb_watch_feed() == {"count": 0, "cards": []}
     assert watch.calls == ["feed", "mark_seen"]
+
+
+async def test_full_document_text_asks_for_download_original(seam, monkeypatch):
+    """`read_full_document` hands out the raw source text — the same payload
+    `GET /api/v1/documents/{id}?variant=text` gates behind
+    `download_original`.  A `read` key must not get over MCP what it is
+    refused over HTTP."""
+    await seam(READ_ONLY)
+    called: list[str] = []
+    monkeypatch.setattr(ts, "_c", lambda graph: called.append("ctx") or object())
+    with pytest.raises(ToolError, match="forbidden: download_original not allowed"):
+        await ts.read_full_document("d1")
+    assert called == []
 
 
 async def test_no_access_token_skips_authz(seam):

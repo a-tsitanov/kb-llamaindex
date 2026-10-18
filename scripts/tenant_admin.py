@@ -137,6 +137,12 @@ def _cmd_create(cur, args: argparse.Namespace) -> int:
 
 
 def _cmd_key(cur, args: argparse.Namespace, scopes: list[str], graphs: list[str] | None) -> int:
+    # Checked here rather than in `run`: it needs the connection.  Without it a
+    # typo surfaces as an unhandled ForeignKeyViolation traceback.
+    cur.execute("SELECT 1 FROM public.tenants WHERE id = %s", (args.tenant,))
+    if cur.fetchone() is None:
+        print(f"no tenant {args.tenant!r} — create it first: tenant_admin create --id {args.tenant} --name ...")
+        return 2
     raw = secrets.token_urlsafe(_KEY_BYTES)
     key_hash = hash_api_key(raw)
     cur.execute(
@@ -154,6 +160,14 @@ def _cmd_key(cur, args: argparse.Namespace, scopes: list[str], graphs: list[str]
     return 0
 
 
+def _env_key_hashes() -> set[str]:
+    """sha256 of every key still listed in env ``API_KEYS``.
+
+    Its own function so the revoke warning can be driven in tests without
+    reaching into the settings singleton, which other tests rebuild."""
+    return {hash_api_key(k) for k in settings.api.keys_list}
+
+
 def _cmd_revoke(cur, args: argparse.Namespace) -> int:
     cur.execute(
         "DELETE FROM public.api_keys WHERE key_hash = %s RETURNING owner",
@@ -165,6 +179,18 @@ def _cmd_revoke(cur, args: argparse.Namespace) -> int:
         return 1
     print(f"revoked  owner={row[0]}  key_hash={args.key_hash[:12]}")
     print("note: cached lookups keep working for up to 30 s (restart api/mcp-* to cut it short)")
+    # A key still listed in env API_KEYS is NOT revoked by deleting its row:
+    # ApiKeyStore.lookup falls back to `ApiKeyRecord.full("legacy-env")`, which
+    # hands it EVERY action in tenant `default` — broader than whatever it just
+    # lost — and the next `setup_db` re-inserts the row.  Say so instead of
+    # reporting a revocation that did not happen.
+    if args.key_hash in _env_key_hashes():
+        print(
+            "WARNING: this key is also in env API_KEYS, so it still authenticates "
+            "with FULL rights in tenant 'default' via the legacy fallback. "
+            "Remove it from API_KEYS and re-run scripts.setup_db to finish the revocation."
+        )
+        return 2
     return 0
 
 

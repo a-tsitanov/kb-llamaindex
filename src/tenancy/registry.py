@@ -62,8 +62,11 @@ def _context_from_row(row: dict) -> GraphContext:
         pg_schema=row["pg_schema"],
         minio_prefix="" if gid == DEFAULT_GRAPH_ID else f"{gid}/",
         generation=int(row.get("generation") or 0),
-        # `.get`: rows from a pre-migration schema (and from the hand-written
-        # SELECT in scripts/setup_db.py) have no tenant_id column yet.
+        # `.get`: the hand-written SELECT in scripts/setup_db.py and the test
+        # fixtures build rows without the column.  NOT a pre-migration path:
+        # `_COLS` names tenant_id, so a pre-migration `public.graphs` raises
+        # UndefinedColumn in the loader long before this runs — the migration
+        # has to land before the code, see docs/DEPLOYMENT.md §5a.
         tenant_id=row.get("tenant_id") or DEFAULT_TENANT_ID,
     )
 

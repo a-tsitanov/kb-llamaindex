@@ -533,7 +533,10 @@ async def read_full_document(
     REQUIRES: a `doc_id`. For large documents prefer
     `get_chunks_by_doc_id` (this returns one big blob, truncated at
     `max_chars`)."""
-    graph = await current_graph()
+    # Raw source text of an uploaded file — the same payload
+    # `GET /api/v1/documents/{doc_id}?variant=text` hands out, so it carries
+    # the same right.  Chunks stay `read`: those are processed fragments.
+    graph = await current_graph(Action.DOWNLOAD_ORIGINAL)
     r = await atomic_tools.read_full_document(
         await _c(graph), doc_id=doc_id, max_chars=max_chars,
     )
@@ -935,8 +938,11 @@ WATCH_KINDS: tuple[str, ...] = (
 async def _watch_graph(action: Action = Action.READ) -> GraphContext:
     """The tool's graph (any ready graph — the monitor sweeps all of them).
 
-    Subscribing, unsubscribing and acknowledging change state, so those three
-    tools pass ``Action.WRITE``; reading the watchlist or the feed stays read."""
+    Subscribing, unsubscribing and acknowledging change state, so they pass
+    ``Action.WRITE`` — and so does the feed: ``_watch_feed`` marks the rows it
+    returns as seen (``watch_seen``), which is shared state, so a read-only
+    key must not be able to clear another operator's feed.  Only the
+    watchlist is a pure read."""
     return await current_graph(action)
 
 
@@ -1083,7 +1089,7 @@ async def kb_watch_feed(include_acked: bool = False, limit: int = 50) -> dict[st
     source document (title, date, `link` to GET the document — add
     `?variant=original` for the uploaded file). Unacknowledged events only
     unless `include_acked`. Acknowledge with `kb_ack`."""
-    return await _watch_feed(include_acked, limit, graph=await _watch_graph())
+    return await _watch_feed(include_acked, limit, graph=await _watch_graph(Action.WRITE))
 
 
 @mcp.tool(timeout=120)

@@ -50,8 +50,14 @@ class _Conn:
         return False
 
 
-def _run(argv, results=()):
-    """Drive the CLI end to end (argparse included) against a fake cursor."""
+def _run(argv, results=None):
+    """Drive the CLI end to end (argparse included) against a fake cursor.
+
+    `key` first asks whether the tenant exists, so a test that does not care
+    about that branch gets the "it exists" answer by default.  Passing an
+    explicit `[]` means "the tenant is not there"."""
+    if results is None:
+        results = [(1,)] if argv and argv[0] == "key" else []
     cur = _Cur(results)
     rc = tenant_admin.run(tenant_admin._parse_args(argv), conn_factory=lambda: _Conn(cur))
     return rc, cur
@@ -187,6 +193,27 @@ def test_revoke_deletes_the_row_by_hash(capsys):
     assert "WHERE key_hash = %s" in sql
     assert params == (h,)
     assert "ci" in capsys.readouterr().out
+
+
+def test_key_refuses_an_unknown_tenant_without_inserting(capsys):
+    """A typo in --tenant used to surface as a raw ForeignKeyViolation
+    traceback; it answers like the other operator mistakes now."""
+    rc, cur = _run(["key", "--tenant", "typo", "--owner", "ci", "--scopes", "read"], results=[])
+    assert rc == 2
+    assert _stmts(cur, "INSERT INTO public.api_keys") == []
+    assert "no tenant" in capsys.readouterr().out.lower()
+
+
+def test_revoke_warns_when_the_key_also_lives_in_env_api_keys(capsys, monkeypatch):
+    """Deleting the row does NOT revoke such a key: ApiKeyStore falls back to
+    `ApiKeyRecord.full("legacy-env")`, which is broader than whatever it just
+    lost, and setup_db re-inserts the row on its next run."""
+    h = hash_api_key("env-key")
+    monkeypatch.setattr(tenant_admin, "_env_key_hashes", lambda: {h})
+    rc, _ = _run(["revoke", "--key-hash", h], results=[("legacy-env",)])
+    out = capsys.readouterr().out
+    assert rc == 2
+    assert "API_KEYS" in out and "FULL rights" in out
 
 
 def test_revoke_reports_a_hash_that_matched_nothing(capsys):

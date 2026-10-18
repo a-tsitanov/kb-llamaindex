@@ -63,9 +63,15 @@ async def check_cross_tenant(
     b = {"X-API-Key": key_b}
     absent = f"nosuch{uuid.uuid4().hex[:8]}"
 
-    rows = (await http.get("/admin/graphs", headers=a)).json()
-    ids = [r.get("id") for r in rows]
-    _check("foreign graph absent from list", graph_b not in ids, str(ids)[:200])
+    resp = await http.get("/admin/graphs", headers=a)
+    rows = resp.json()
+    # A 403/500 answers an error object, not a list; iterating it would raise
+    # AttributeError and abort the whole run instead of failing this one check.
+    if not isinstance(rows, list):
+        _check("foreign graph absent from list", False, f"HTTP {resp.status_code}: {str(rows)[:160]}")
+    else:
+        ids = [r.get("id") for r in rows]
+        _check("foreign graph absent from list", graph_b not in ids, str(ids)[:200])
 
     r = await http.get(f"/admin/graphs/{graph_b}", headers=a)
     _check("foreign graph GET is 404", r.status_code == 404, str(r.status_code))
