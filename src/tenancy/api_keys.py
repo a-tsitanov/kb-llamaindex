@@ -98,6 +98,41 @@ def _record_from_row(j: dict) -> ApiKeyRecord:
     )
 
 
+async def records_for_owner(owner: str) -> list[ApiKeyRecord]:
+    """Живые ключи этого владельца — для проверки права ПЕРЕД доставкой.
+
+    Доставка наблюдения (``src/watch/delivery.py``) идёт не в ответ на
+    запрос, а сама, поэтому ключа в руках у неё нет: есть только `owner`
+    подписки.  Отсюда чтение по владельцу — обратное обычному чтению по
+    хешу.
+
+    Отозвали все ключи владельца — список пуст, и доставка молчит.  Это и
+    есть «отзыв прав останавливает доставку»: физическая изоляция таблиц
+    от утечки через webhook не спасает, потому что утечка идёт наружу.
+
+    НЕ кешируется, в отличие от ``ApiKeyStore.lookup``: отзыв должен
+    действовать сразу, а доставка — редкая операция (раз в проход свипа),
+    так что экономить на ней нечего.  Легаси-ключи из ``API_KEYS`` под
+    владельцем ``legacy-env`` здесь не видны — у них нет строки в
+    таблице, и подписка на такое имя доставки не получит (подписки
+    создаются ключом, у которого строка есть).
+    """
+    if not owner:
+        return []
+    from psycopg.rows import dict_row
+
+    from src.storage.pg_pool import get_pg_pool
+
+    pool = await get_pg_pool()
+    async with pool.connection(timeout=1) as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT to_jsonb(k) - 'key_hash' AS j FROM public.api_keys k WHERE owner = %s",
+            (owner,),
+        )
+        rows = await cur.fetchall()
+    return [_record_from_row(r["j"]) for r in rows]
+
+
 class ApiKeyStore:
     def __init__(
         self,

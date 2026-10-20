@@ -8,6 +8,62 @@ with a section in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 loosely (Added / Changed / Fixed / Notes per stage).
 
+## [Watch P2] — 2026-10-20 — Контур наблюдения: одна дуга, провенанс, доставка
+
+Спека `docs/superpowers/specs/2026-10-20-watch-contour-design.md`, план
+`docs/superpowers/plans/2026-10-20-watch-contour.md`, runbook
+`docs/runbook/watch.md`.
+
+### Added
+- Пакет `src/watch/` — журналы, детекторы, репозиторий, доставка,
+  активности, воркфлоу. Границы исполняет
+  `tests/test_watch/test_boundaries.py`: ядро не знает о наблюдении, кроме
+  трёх названных адаптеров, а наблюдение не знает о приёме мимо
+  `IntakeRepository`.
+- Провенанс приёма в теле события (`detail.provenance`): источник
+  (`source_kind`), вердикт приёма, ссылка на владельца тела. «Новая связь»
+  из перепоста и из первоисточника по графу неразличимы — различие знает
+  реестр приёма, и спрашивается он одним вопросом на пачку
+  (`IntakeRepository.provenance_of`), а не на событие. Fail-soft:
+  недоступный реестр оставляет события без подписи, но не теряет их.
+- Доставка событий подписчикам: адресат НА ПОДПИСКЕ
+  (`watch.webhook_url`), дедуп ключом `(owner, event_id)` в
+  `watch_delivery`, повтор по счётчику попыток (расписание повтора — тот же
+  свип), суточный потолок `MONITOR_DAILY_PUSH_LIMIT` с остатком одной
+  сводкой (`watch_digest`), активность `deliver_watch` вторым шагом
+  воркфлоу.
+- `records_for_owner` — чтение ключей по владельцу: доставка идёт сама, не
+  в ответ на запрос, поэтому ключа в руках у неё нет. Нет живого ключа с
+  правом `read` на этот граф — рассылка молчит, а события остаются
+  неотправленными (права могут вернуть).
+- `risk_rise` как вид события: чтение `risk_score`/`risk_score_prev` ПО
+  СПИСКУ ПОДПИСОК (а не по графовому флагу), политика повтора в ключе
+  дедупа.
+
+### Changed
+- `AUTHZ_MODE` на доставку НЕ влияет: зовётся `authorize`, а не `guard`.
+  Режим `log` пропускает запрос ради окна наблюдения, а здесь «пропустить»
+  значит отправить содержимое графа на чужой адрес. Исключение объявлено в
+  arch-тесте `tests/test_tenancy/test_guards.py`, а не сделано молча.
+- `kb_watch` принимает `webhook_url` (только `http`/`https`); пусто —
+  только лента, и это же способ доставку отключить.
+
+### Removed
+- Дуга `:Alert` целиком: `detect_alerts`, `deliver_alerts`,
+  `src/graph/alerts.py`, `src/graph/alert_store.py`, флаг `Entity.watched`,
+  маршрут `POST /admin/monitor/watch`, контракты `MonitorIn`/`MonitorResult`/
+  `DeliverIn`/`DeliverResult`, переменные `MONITOR_WEBHOOK_URL`,
+  `MONITOR_NEW_WINDOW_DAYS`, `MONITOR_BURST_*`, примитив аналитики `alerts`
+  (каталог 42 → 41).
+
+### Notes
+- **Выкат:** воркер (пул `monitor`) обязан подняться с новым кодом — иначе
+  расписание не найдёт `sweep_watch`/`deliver_watch`. Имя воркфлоу
+  сохранено, пересобирать расписание не нужно. Схема доезжает
+  `scripts/setup_db.py`.
+- Узлы `:Alert` в уже наполненных графах остаются мусором: код их больше
+  не читает и не пишет, чистка операторская.
+
 ## [Intake 1.6] — 2026-10-20 — Квота приёма на граф
 
 ### Added

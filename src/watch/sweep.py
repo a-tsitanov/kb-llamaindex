@@ -12,6 +12,8 @@ from collections import Counter
 from collections.abc import Callable
 from typing import Any, get_args
 
+from loguru import logger
+
 from src.graph.nebula_store import entity_vid
 from src.ingestion.identifiers import IdentifierType
 
@@ -159,9 +161,39 @@ DETECTORS: dict[str, Callable[[list[dict[str, Any]], dict[str, str]], list[dict[
 }
 
 
-async def run_watch_sweep(repo: Any, *, batch: int = 1000, max_batches: int = 50) -> dict[str, int]:
+async def _attach_provenance(events: list[dict[str, Any]], provenance: Any) -> None:
+    """Дописать событиям провенанс приёма — одним вопросом на пачку.
+
+    Fail-soft намеренно: событие — факт графа, а провенанс к нему
+    подпись.  Падать из-за недоступного реестра значило бы не записать
+    события и не сдвинуть курсор, то есть потерять уведомления ради
+    подписи под ними.
+    """
+    doc_ids = sorted({e["doc_id"] for e in events if e.get("doc_id")})
+    if not doc_ids:
+        return
+    try:
+        known = await provenance(doc_ids)
+    except Exception:
+        logger.warning("watch sweep: провенанс приёма недоступен, события без него")
+        return
+    for e in events:
+        prov = known.get(e.get("doc_id") or "")
+        if prov:
+            e.setdefault("detail", {})["provenance"] = prov
+
+
+async def run_watch_sweep(
+    repo: Any, *, batch: int = 1000, max_batches: int = 50, provenance: Any = None,
+) -> dict[str, int]:
     """One pass over every journal past its cursor. Returns detected events
-    by kind (the dedup key may still drop some at insert)."""
+    by kind (the dedup key may still drop some at insert).
+
+    ``provenance`` — необязательная корутина ``(doc_ids) -> {doc_id: {...}}``;
+    её даёт реестр приёма (``IntakeRepository.provenance_of``), и свип
+    зовёт её ОДИН раз на пачку событий, а не на событие.  Без неё
+    поведение прежнее: ключа `provenance` в `detail` просто нет.
+    """
     watched = await repo.watched()
     counts: Counter[str] = Counter()
     for journal, detect in DETECTORS.items():
@@ -171,6 +203,8 @@ async def run_watch_sweep(repo: Any, *, batch: int = 1000, max_batches: int = 50
             if not rows:
                 break
             events = detect(rows, watched) if watched else []
+            if events and provenance is not None:
+                await _attach_provenance(events, provenance)
             # The cursor moves even when nobody watches: a later subscription
             # starts from "now", never from history.
             await repo.save_events(journal, events, last_id=max(int(r["id"]) for r in rows))

@@ -985,10 +985,18 @@ def _candidate(row: dict[str, Any]) -> dict[str, Any]:
 
 async def _watch(
     name: str, kinds: list[str] | None, note: str, *, graph: GraphContext,
+    webhook_url: str = "",
 ) -> dict[str, Any]:
     bad = sorted(set(kinds or []) - set(WATCH_KINDS))
     if bad:
         return {"error": f"unknown kinds {bad}; expected a subset of {list(WATCH_KINDS)}"}
+    # Адресат уходит в исходящий запрос С СЕРВЕРА, поэтому схема
+    # проверяется на записи, а не только при отправке: негодная строка не
+    # должна попадать в таблицу вовсе.
+    from src.watch.delivery import destination_ok
+
+    if webhook_url and not destination_ok(webhook_url):
+        return {"error": "webhook_url must be an http(s) URL"}
     search = _entity_search(graph)
     hits = await search.search(name, mode="exact", limit=5)
     if len(hits) != 1:
@@ -999,8 +1007,12 @@ async def _watch(
         return {"status": "ambiguous", "query": name,
                 "candidates": [_candidate(h) for h in hits]}
     hit = hits[0]
-    await _watch_repo(graph).add_watch(_OWNER, hit["vid"], hit["name"], kinds=list(kinds or []), note=note)
-    return {"status": "watching", "entity": _candidate(hit), "kinds": list(kinds or [])}
+    await _watch_repo(graph).add_watch(
+        _OWNER, hit["vid"], hit["name"], kinds=list(kinds or []), note=note,
+        webhook_url=webhook_url,
+    )
+    return {"status": "watching", "entity": _candidate(hit), "kinds": list(kinds or []),
+            "delivery": "webhook" if webhook_url else "feed only"}
 
 
 async def _unwatch(name_or_vid: str, *, graph: GraphContext) -> dict[str, Any]:
@@ -1066,7 +1078,9 @@ async def _ack(
 
 
 @mcp.tool(timeout=120)
-async def kb_watch(name: str, kinds: list[str] | None = None, note: str = "") -> dict[str, Any]:
+async def kb_watch(
+    name: str, kinds: list[str] | None = None, note: str = "", webhook_url: str = "",
+) -> dict[str, Any]:
     """Put an entity (person, organisation, phone, …) on watch: new documents
     mentioning it, new connections / identifiers and contradicting facts then
     show up in `kb_watch_feed`.
@@ -1076,8 +1090,14 @@ async def kb_watch(name: str, kinds: list[str] | None = None, note: str = "") ->
     nothing — call again with the exact candidate name. `kinds` limits the
     events (new_mention, new_connection, new_identifier, new_event, contradiction);
     empty = all. `note` is a free-text reason. Only events detected after
-    the subscription are shown."""
-    return await _watch(name, kinds, note, graph=await _watch_graph(Action.WRITE))
+    the subscription are shown.
+
+    `webhook_url` (http/https) turns on PUSH delivery to that address, on top
+    of the feed: at most `MONITOR_DAILY_PUSH_LIMIT` events a day, the rest in
+    one digest. Empty keeps (or turns off) feed-only. Delivery stops by itself
+    once the subscriber's keys may no longer read this graph."""
+    return await _watch(name, kinds, note, graph=await _watch_graph(Action.WRITE),
+                        webhook_url=webhook_url)
 
 
 @mcp.tool(timeout=120)

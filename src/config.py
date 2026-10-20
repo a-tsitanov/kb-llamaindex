@@ -974,6 +974,14 @@ class MonitorSettings(BaseSettings):
     deliver_batch: int = Field(
         default=100, ge=1, description="Сколько неотправленных событий доставлять за один свип"
     )
+    daily_push_limit: int = Field(
+        default=20,
+        ge=0,
+        description=(
+            "Потолок пушей на подписку в сутки; остаток уходит одной сводкой. "
+            "0 — только сводка. Переопределяется колонкой watch.daily_push_limit"
+        ),
+    )
     document_link: str = Field(
         default="/api/v1/documents/{doc_id}",
         description="Шаблон ссылки на документ в ленте наблюдения ({doc_id} подставляется)",

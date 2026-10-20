@@ -4,8 +4,9 @@
 (``scripts/setup_monitor_schedule.py``), и переименование означало бы
 ручную пересборку расписания на каждом стенде.
 
-Содержимое после вывода дуги `:Alert` — один шаг: свип журналов и роста
-риска.  Доставка добавляется отдельной активностью (S4 плана P2).
+Два шага: свип (журналы и рост риска → события) и доставка
+(события → адресаты подписок).  Порядок обязателен — рассылка должна
+видеть события этого прохода, иначе отставала бы на период расписания.
 """
 
 from __future__ import annotations
@@ -16,7 +17,11 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
-    from src.analytics.contracts import SweepResult, WatchSweepResult
+    from src.analytics.contracts import (
+        SweepResult,
+        WatchDeliverResult,
+        WatchSweepResult,
+    )
 
 _RETRY = RetryPolicy(
     maximum_attempts=2,
@@ -39,8 +44,25 @@ class MonitorSweepWorkflow:
             heartbeat_timeout=timedelta(minutes=2),
             retry_policy=_RETRY,
         )
+        # Доставка — отдельная активность и идёт ПОСЛЕ свипа: события
+        # этого прохода должны успеть появиться, иначе рассылка всегда
+        # отставала бы на один период расписания.
+        deliver = await workflow.execute_activity(
+            "deliver_watch",
+            result_type=WatchDeliverResult,
+            # Последовательная рассылка: в пределе deliver_batch ×
+            # webhook_timeout_s (по умолчанию 100 × 5 с), плюс запас.
+            start_to_close_timeout=timedelta(minutes=12),
+            schedule_to_close_timeout=timedelta(minutes=25),
+            heartbeat_timeout=timedelta(minutes=2),
+            retry_policy=_RETRY,
+        )
         return SweepResult(
             watch_events=watch.events,
             by_kind=dict(watch.by_kind),
-            error=watch.error,
+            delivered=deliver.delivered,
+            failed=deliver.failed,
+            suppressed=deliver.suppressed,
+            refused=deliver.refused,
+            error="; ".join(e for e in (watch.error, deliver.error) if e),
         )

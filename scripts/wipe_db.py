@@ -95,6 +95,11 @@ def _parse_args() -> argparse.Namespace:
 # читается в том же порядке, в каком Postgres снимает строки.
 _PG_TABLES = (
     "doc_processing", "documents", "ingest_metrics",
+    # Журнал доставки и сводки чистятся ПЕРЕД событиями: их строки
+    # ссылаются на event_id, и оставить их значило бы хранить историю
+    # отправок несуществующих событий — по ней доставка решает, что
+    # отправлять, то есть мусор напрямую влияет на поведение.
+    "watch_delivery", "watch_digest",
     "entity_mention", "edge_new", "watch_event", "watch_seen",
     "monitor_cursor", "risk_snapshot",
 )

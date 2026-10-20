@@ -1,8 +1,8 @@
 """MonitorSweepWorkflow — интеграционный тест на time-skipping сервере.
 
-После вывода дуги `:Alert` у воркфлоу один шаг: свип. Тест держит
-именно это — лишняя активность в расписании означала бы, что удалённая
-дуга вернулась через воркфлоу.
+У воркфлоу два шага: свип и доставка — в этом порядке, чтобы рассылка
+видела события этого прохода. Тест держит порядок и сборку итога:
+счётчики доставки не должны смешиваться со счётчиками обнаружения.
 """
 
 from __future__ import annotations
@@ -15,13 +15,22 @@ from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
-from src.analytics.contracts import WatchSweepResult
+from src.analytics.contracts import WatchDeliverResult, WatchSweepResult
 from src.watch.workflow import MonitorSweepWorkflow
+
+_ORDER: list[str] = []
 
 
 @activity.defn(name="sweep_watch")
 async def _sweep_stub() -> WatchSweepResult:
+    _ORDER.append("sweep")
     return WatchSweepResult(events=5, by_kind={"new_mention": 4, "risk_rise": 1})
+
+
+@activity.defn(name="deliver_watch")
+async def _deliver_stub() -> WatchDeliverResult:
+    _ORDER.append("deliver")
+    return WatchDeliverResult(delivered=3, failed=1, suppressed=2, refused=1)
 
 
 @pytest.mark.asyncio
@@ -39,7 +48,7 @@ async def test_monitor_sweep_workflow_returns_tally() -> None:
             env.client,
             task_queue="t-mon",
             workflows=[MonitorSweepWorkflow],
-            activities=[_sweep_stub],
+            activities=[_sweep_stub, _deliver_stub],
             workflow_runner=UnsandboxedWorkflowRunner(),
         ),
     ):
@@ -51,4 +60,7 @@ async def test_monitor_sweep_workflow_returns_tally() -> None:
 
     assert out.watch_events == 5
     assert out.by_kind == {"new_mention": 4, "risk_rise": 1}
+    assert (out.delivered, out.failed, out.suppressed, out.refused) == (3, 1, 2, 1)
     assert out.error == ""
+    # Рассылка после обнаружения, иначе отставала бы на период расписания.
+    assert _ORDER == ["sweep", "deliver"]

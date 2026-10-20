@@ -778,3 +778,45 @@ class IntakeRepository:
             )
             row = await cur.fetchone()
         return int(row[0]) if row else 0
+
+    async def provenance_of(
+        self, doc_ids: list[uuid.UUID] | list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Что приём знает об этих документах — одним запросом на пачку.
+
+        Нужно наблюдению (контур `src/watch`): «новая связь» из перепоста
+        и «новая связь» из первоисточника по графу неразличимы — узлы и
+        связи одинаковые, — а различие знает реестр приёма.
+
+        ЕДИНСТВЕННОЕ, что наблюдение спрашивает у приёма, и спрашивает
+        методом, а не join'ом: SQL по ``documents`` принадлежит приёму
+        (критерий шага 1.3), и второй его экземпляр в чужом контуре
+        разъехался бы с первым при следующей правке реестра — ровно так
+        разъехались читатели статуса до расщепления.
+
+        Отсутствующий документ в ответе НЕ появляется: ключ с пустым
+        значением читался бы как «источник неизвестен», тогда как правда
+        — «строки нет».  Статус обработки тут не спрашивается: у
+        наблюдения он и так есть, сам факт события.
+        """
+        if not doc_ids:
+            return {}
+        async with (
+            self._conn() as conn,
+            conn.cursor(row_factory=dict_row) as cur,
+        ):
+            await cur.execute(
+                "SELECT id, source_kind, intake_status, duplicate_of, doc_date "
+                "FROM documents WHERE id = ANY(%s)",
+                ([str(d) for d in doc_ids],),
+            )
+            rows = await cur.fetchall()
+        return {
+            str(r["id"]): {
+                "source_kind": r["source_kind"] or "",
+                "intake_status": r["intake_status"] or "accepted",
+                "duplicate_of": str(r["duplicate_of"]) if r["duplicate_of"] else None,
+                "doc_date": r["doc_date"].isoformat() if r["doc_date"] else None,
+            }
+            for r in rows
+        }

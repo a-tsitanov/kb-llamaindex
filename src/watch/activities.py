@@ -24,11 +24,13 @@ import asyncio
 from loguru import logger
 from temporalio import activity
 
-from src.analytics.contracts import WatchSweepResult
+from src.analytics.contracts import WatchDeliverResult, WatchSweepResult
 from src.config import settings
 from src.graph.store import build_graph_store
+from src.intake.repository import IntakeRepository
 from src.tenancy import graph_repo
 from src.tenancy.context import GraphContext, default_graph_context
+from src.watch.delivery import deliver_due
 from src.watch.repository import WatchRepository
 from src.watch.sweep import detect_risk_rise, run_watch_sweep
 from src.workflow.heartbeat import heartbeat_every
@@ -101,7 +103,10 @@ async def sweep_watch() -> WatchSweepResult:
         for graph in await _watch_graphs():
             repo = WatchRepository(graph=graph)
             try:
-                for kind, n in (await run_watch_sweep(repo)).items():
+                # Провенанс спрашивается у реестра приёма — единственное,
+                # что наблюдение знает о приёме (arch-тест правила 5).
+                provenance = IntakeRepository(graph=graph).provenance_of
+                for kind, n in (await run_watch_sweep(repo, provenance=provenance)).items():
                     by_kind[kind] = by_kind.get(kind, 0) + n
                 risk = await _risk_events(repo, graph, await repo.watched())
                 if risk:
@@ -113,4 +118,38 @@ async def sweep_watch() -> WatchSweepResult:
                             error="; ".join(errors))
 
 
-MONITOR_ACTIVITIES = [sweep_watch]
+@activity.defn
+async def deliver_watch() -> WatchDeliverResult:
+    """Разослать события подписчикам — по каждому готовому графу.
+
+    Отдельная активность, а не хвост свипа: доставка ходит в чужие
+    адреса, и её таймаут, ретраи и отказы не должны смешиваться с
+    обнаружением событий.  Свип без доставки осмыслен (лента работает),
+    доставка без свипа безвредна (нечего отправлять).
+
+    Fail-soft на граф, как и свип: чужой упавший webhook не повод
+    остановить рассылку остальным.
+    """
+    tally: dict[str, int] = {}
+    errors: list[str] = []
+    async with heartbeat_every(30.0, {"stage": "deliver"}):
+        for graph in await _watch_graphs():
+            try:
+                for key, n in (await deliver_due(
+                    WatchRepository(graph=graph), graph,
+                )).items():
+                    tally[key] = tally.get(key, 0) + n
+            except Exception as exc:
+                logger.warning("deliver_watch failed  graph={g}: {e}", g=graph.id, e=exc)
+                errors.append(f"{graph.id}: {exc}")
+    return WatchDeliverResult(
+        delivered=tally.get("delivered", 0),
+        failed=tally.get("failed", 0),
+        suppressed=tally.get("suppressed", 0),
+        refused=tally.get("refused", 0),
+        digests=tally.get("digests", 0),
+        error="; ".join(errors),
+    )
+
+
+MONITOR_ACTIVITIES = [sweep_watch, deliver_watch]

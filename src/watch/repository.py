@@ -229,16 +229,27 @@ class WatchRepository:
     # ── subscriptions ───────────────────────────────────────────────
 
     async def add_watch(
-        self, owner: str, vid: str, name: str, *, kinds: list[str] | None = None, note: str = "",
+        self, owner: str, vid: str, name: str, *, kinds: list[str] | None = None,
+        note: str = "", webhook_url: str = "",
     ) -> None:
+        """Создать или обновить подписку.
+
+        ``webhook_url`` пусто = доставки нет, только лента.  Повторная
+        подписка адресат ПЕРЕЗАПИСЫВАЕТ, в том числе пустым: это
+        единственный способ отключить доставку, оставив подписку, и
+        «подписаться заново без адресата» должно значить именно то, что
+        написано.
+        """
         async with self._conn() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "INSERT INTO watch (owner, entity_vid, entity_name, kinds, note) "
-                    "VALUES (%s, %s, %s, %s, %s) "
+                    "INSERT INTO watch "
+                    "(owner, entity_vid, entity_name, kinds, note, webhook_url) "
+                    "VALUES (%s, %s, %s, %s, %s, %s) "
                     "ON CONFLICT (owner, entity_vid) DO UPDATE SET "
-                    "kinds = EXCLUDED.kinds, note = EXCLUDED.note, muted_until = NULL",
-                    (owner, vid, name, list(kinds or []), note),
+                    "kinds = EXCLUDED.kinds, note = EXCLUDED.note, "
+                    "webhook_url = EXCLUDED.webhook_url, muted_until = NULL",
+                    (owner, vid, name, list(kinds or []), note, webhook_url),
                 )
             await conn.commit()
 
@@ -255,7 +266,8 @@ class WatchRepository:
     async def list_watch(self, owner: str) -> list[dict[str, Any]]:
         async with self._conn() as conn, conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
-                "SELECT entity_vid, entity_name, kinds, muted_until, note, created_at "
+                "SELECT entity_vid, entity_name, kinds, muted_until, note, "
+                "webhook_url, daily_push_limit, created_at "
                 "FROM watch WHERE owner = %s ORDER BY created_at",
                 (owner,),
             )
@@ -316,6 +328,113 @@ class WatchRepository:
                     n = len(ids)
             await conn.commit()
         return int(n or 0)
+
+
+
+    # ── доставка ────────────────────────────────────────────────────
+
+    async def due_deliveries(
+        self, *, limit: int = 100, max_attempts: int = 3,
+    ) -> list[dict[str, Any]]:
+        """События, которые пора отправить, вместе с адресатом подписки.
+
+        Критерии — те же, что у ленты (`_VISIBLE`): подписанная сущность,
+        подписанный вид, событие ПОСЛЕ создания подписки, подписка не в
+        мюте.  Плюс два своих: у подписки есть адресат и это событие ей
+        ещё не отправляли.
+
+        Повтор ограничен счётчиком попыток: 'failed' с неисчерпанными
+        попытками возвращается снова, исчерпавший — нет.  Отдельной
+        очереди ретраев нет намеренно: следующий проход свипа и есть
+        расписание повтора.
+
+        `suppressed` (не влезло в суточный потолок) НЕ возвращается: это
+        не отложенная отправка, а решение «показали сводкой», и повторять
+        его значило бы доставлять задним числом то, что подписчик уже
+        видел сжатым.
+        """
+        sql = (
+            "SELECT e.id, e.entity_vid, e.entity_name, e.kind, e.doc_id, e.doc_date, "
+            "e.detail, e.why, e.detected_at, "
+            "w.owner, w.webhook_url, w.daily_push_limit, "
+            "COALESCE(dl.attempts, 0) AS attempts "
+            "FROM watch_event e "
+            "JOIN watch w ON w.entity_vid = e.entity_vid "
+            "LEFT JOIN watch_delivery dl ON dl.owner = w.owner AND dl.event_id = e.id "
+            "WHERE w.webhook_url <> '' "
+            "  AND e.detected_at >= w.created_at "
+            "  AND (cardinality(w.kinds) = 0 OR e.kind = ANY(w.kinds)) "
+            "  AND (w.muted_until IS NULL OR w.muted_until < now()) "
+            "  AND (dl.state IS NULL "
+            "       OR (dl.state = 'failed' AND dl.attempts < %s)) "
+            "ORDER BY w.owner, e.id LIMIT %s"
+        )
+        async with self._conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(sql, (int(max_attempts), int(limit)))
+            return list(await cur.fetchall())
+
+    async def pushes_today(self, owner: str) -> int:
+        """Сколько событий отправлено этому подписчику с начала суток UTC.
+
+        Сводки не считаются: сводка — одно сообщение ВМЕСТО потока, и
+        включив её в счёт, потолок в единицу съедала бы сама сводка.
+        """
+        async with self._conn() as conn, conn.cursor() as cur:
+            await cur.execute(
+                "SELECT COUNT(*) FROM watch_delivery "
+                "WHERE owner = %s AND state = 'delivered' "
+                "AND updated_at >= date_trunc('day', now())",
+                (owner,),
+            )
+            row = await cur.fetchone()
+        return int(row[0]) if row else 0
+
+    async def mark_delivery(
+        self, owner: str, event_id: int, state: str, *,
+        error: str = "", digest_of: int | None = None,
+    ) -> None:
+        """Записать исход отправки одного события одному подписчику.
+
+        Счётчик попыток растёт только у неудач: успех и подавление —
+        окончательные исходы, и считать их попытками значило бы исчерпать
+        лимит повторов на успешных отправках.
+        """
+        async with self._conn() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "INSERT INTO watch_delivery "
+                    "(owner, event_id, state, attempts, last_error, digest_of, updated_at) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, now()) "
+                    "ON CONFLICT (owner, event_id) DO UPDATE SET "
+                    "state = EXCLUDED.state, "
+                    "attempts = watch_delivery.attempts + EXCLUDED.attempts, "
+                    "last_error = EXCLUDED.last_error, "
+                    "digest_of = COALESCE(EXCLUDED.digest_of, watch_delivery.digest_of), "
+                    "updated_at = now()",
+                    (owner, int(event_id), state, 1 if state == "failed" else 0,
+                     error[:500], digest_of),
+                )
+            await conn.commit()
+
+    async def open_digest(self, owner: str, events: int) -> int:
+        async with self._conn() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "INSERT INTO watch_digest (owner, events) VALUES (%s, %s) RETURNING id",
+                    (owner, int(events)),
+                )
+                row = await cur.fetchone()
+            await conn.commit()
+        return int(row[0])
+
+    async def close_digest(self, digest_id: int, state: str, error: str = "") -> None:
+        async with self._conn() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE watch_digest SET state = %s, last_error = %s WHERE id = %s",
+                    (state, error[:500], int(digest_id)),
+                )
+            await conn.commit()
 
 
 __all__ = ["JOURNALS", "WatchRepository"]

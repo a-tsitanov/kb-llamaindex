@@ -409,6 +409,48 @@ CREATE TABLE IF NOT EXISTS watch_event (
     dedup_key   TEXT NOT NULL UNIQUE,
     detected_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Доставка (P2 S4).  Адресат — НА ПОДПИСКЕ: один URL на установку не мог
+-- быть правильным для нескольких подписчиков, и именно он делал доставку
+-- безадресной.  Пусто = не доставлять, только лента.
+ALTER TABLE watch ADD COLUMN IF NOT EXISTS webhook_url TEXT NOT NULL DEFAULT '';
+-- NULL = взять потолок из настроек (MONITOR_DAILY_PUSH_LIMIT).
+ALTER TABLE watch ADD COLUMN IF NOT EXISTS daily_push_limit INTEGER;
+
+-- Сводка остатка: что не влезло в суточный потолок, уходит ОДНИМ
+-- сообщением.  Своя таблица, а не строка в watch_delivery: сводок у
+-- подписчика много (по одной за проход), и ключ (owner, event_id) места
+-- под них не имеет.
+CREATE TABLE IF NOT EXISTS watch_digest (
+    id         BIGSERIAL PRIMARY KEY,
+    owner      TEXT    NOT NULL,
+    events     INTEGER NOT NULL DEFAULT 0,
+    state      TEXT    NOT NULL DEFAULT 'pending'
+               CHECK (state IN ('pending', 'delivered', 'failed')),
+    last_error TEXT    NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Журнал доставки.  Первичный ключ (owner, event_id) И ЕСТЬ дедуп: одно
+-- событие одному подписчику уходит один раз, сколько бы раз свип ни
+-- перезапускался.  Состояние доставки живёт ОТДЕЛЬНО от watch_seen
+-- (прочтение подписчиком): «отправлено» и «прочитано» — разные факты, и
+-- смешав их, мы считали бы доставленным то, что человек открыл сам.
+CREATE TABLE IF NOT EXISTS watch_delivery (
+    owner      TEXT    NOT NULL,
+    event_id   BIGINT  NOT NULL,
+    state      TEXT    NOT NULL DEFAULT 'pending'
+               CHECK (state IN ('pending', 'delivered', 'failed', 'suppressed')),
+    attempts   INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT    NOT NULL DEFAULT '',
+    digest_of  BIGINT  REFERENCES watch_digest(id) ON DELETE SET NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (owner, event_id)
+);
+
+-- «Что сегодня отправлено этому подписчику» — запрос на каждый проход.
+CREATE INDEX IF NOT EXISTS watch_delivery_owner_day_idx
+    ON watch_delivery (owner, state, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS watch_seen (
     owner    TEXT NOT NULL,
     event_id BIGINT NOT NULL,

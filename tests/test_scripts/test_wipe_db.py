@@ -33,6 +33,7 @@ def test_wipe_clears_watch_journals_and_events_but_keeps_subscriptions():
     from scripts.wipe_db import _PG_TABLES
 
     for t in ("entity_mention", "edge_new", "watch_event", "watch_seen",
+              "watch_delivery", "watch_digest",
               "monitor_cursor", "risk_snapshot"):
         assert t in _PG_TABLES
     assert "watch" not in _PG_TABLES

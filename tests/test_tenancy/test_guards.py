@@ -68,6 +68,17 @@ def _call_args(text: str, func: str) -> list[str]:
     return out
 
 
+# Единственное место ВНЕ authz.py, которому разрешено звать `authorize`
+# напрямую, — доставка наблюдения.  Причина ровно обратна общему правилу:
+# режим `log` существует ради окна наблюдения, когда отказ пишется в лог,
+# а запрос пропускается, но здесь «пропустить» означает ОТПРАВИТЬ
+# содержимое графа на чужой адрес — то есть совершить то, от чего
+# защищаемся.  Доставка не запрос: откатить её нельзя, и пропускать
+# нечего.  См. ``src/watch/delivery.py::_may_read`` и спеку
+# ``docs/superpowers/specs/2026-10-20-watch-contour-design.md`` §6.4.
+_AUTHORIZE_DIRECT_ALLOWED = {"src/tenancy/authz.py", "src/watch/delivery.py"}
+
+
 def test_authorize_is_only_reached_through_guard():
     # `authorize` is the pure rule set and knows nothing about AUTHZ_MODE:
     # a seam calling it directly would refuse even with the kill switch
@@ -76,7 +87,13 @@ def test_authorize_is_only_reached_through_guard():
         r"(?<![\w.])authorize\(|\bauthz\.authorize\(|"
         r"^from src\.tenancy\.authz import .*\bauthorize\b"
     )
-    assert _hits(pattern, {"src/tenancy/authz.py"}) == []
+    assert _hits(pattern, _AUTHORIZE_DIRECT_ALLOWED) == []
+
+
+def test_the_allowlist_names_files_that_exist():
+    """Исключение на несуществующий путь — тихо расширенное правило."""
+    missing = [rel for rel in sorted(_AUTHORIZE_DIRECT_ALLOWED) if not (ROOT / rel).is_file()]
+    assert missing == []
 
 
 def test_repository_tenant_filters_come_from_authz():

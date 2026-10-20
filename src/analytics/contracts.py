@@ -150,6 +150,22 @@ class WatchSweepResult(_Frozen):
     error: str = ""
 
 
+class WatchDeliverResult(_Frozen):
+    """Итог прохода доставки наблюдения.
+
+    ``refused`` — не отказ отправки, а отказ в праве или негодный
+    адресат: такие события остаются неотправленными, и смешивать их с
+    ``failed`` нельзя, иначе отзыв прав читался бы как сбой сети.
+    """
+
+    delivered: int = 0
+    failed: int = 0
+    suppressed: int = 0
+    refused: int = 0
+    digests: int = 0
+    error: str = ""
+
+
 class SweepResult(_Frozen):
     """Итог одного прохода наблюдения.
 
@@ -162,4 +178,6 @@ class SweepResult(_Frozen):
     by_kind: dict[str, int] = {}
     delivered: int = 0
     failed: int = 0
+    suppressed: int = 0
+    refused: int = 0
     error: str = ""

@@ -33,8 +33,8 @@ class _Watch:
         self._feed = list(feed_rows)
         self._watches = list(watches)
 
-    async def add_watch(self, owner, vid, name, *, kinds=None, note=""):
-        self.added.append((owner, vid, name, kinds, note))
+    async def add_watch(self, owner, vid, name, *, kinds=None, note="", webhook_url=""):
+        self.added.append((owner, vid, name, kinds, note, webhook_url))
 
     async def remove_watch(self, owner, vid):
         self.removed.append((owner, vid))
@@ -86,7 +86,7 @@ async def test_watch_exact_name_subscribes(repos):
     out = await ts._watch("Блинов Андрей Степанович", None, "КУСП 805", graph=G)
     assert out["status"] == "watching"
     assert watch.added == [("default", entity_vid("Блинов Андрей Степанович"),
-                            "Блинов Андрей Степанович", [], "КУСП 805")]
+                            "Блинов Андрей Степанович", [], "КУСП 805", "")]
 
 
 async def test_watch_single_fuzzy_hit_subscribes(repos):

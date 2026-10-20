@@ -10,7 +10,7 @@ async def test_sweep_watch_covers_all_ready_graphs(monkeypatch):
     async def ready(**kw):
         return [default_graph_context(), new_graph_context("acme"), new_graph_context("beta")]
 
-    async def run(repo):
+    async def run(repo, **kw):
         seen.append(repo.graph.id)
         if repo.graph.id == "beta":
             raise RuntimeError("beta broke")
@@ -40,7 +40,7 @@ async def test_sweep_watch_includes_default_when_registry_down(monkeypatch):
 
     seen = []
 
-    async def run(repo):
+    async def run(repo, **kw):
         seen.append(repo.graph.id)
         return {}
 

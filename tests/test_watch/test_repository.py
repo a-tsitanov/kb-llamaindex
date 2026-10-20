@@ -193,7 +193,9 @@ async def test_add_watch_upserts_on_owner_and_entity():
     await repo.add_watch("default", "v", "Блинов", kinds=["new_mention"], note="КУСП 805")
     sql, params = conn.cur.executed[0]
     assert "INSERT INTO watch" in sql and "ON CONFLICT (owner, entity_vid)" in sql
-    assert params == ("default", "v", "Блинов", ["new_mention"], "КУСП 805")
+    # Адресат доставки пишется всегда, в том числе пустым: пусто =
+    # «только лента», и это единственный способ её отключить.
+    assert params == ("default", "v", "Блинов", ["new_mention"], "КУСП 805", "")
 
 
 async def test_remove_watch_reports_whether_anything_was_removed():
