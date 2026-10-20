@@ -99,6 +99,19 @@ def enqueue(client: httpx.Client, args: argparse.Namespace, txt_path: Path) -> s
             f"intake_status={detail.get('intake_status', '?')}"
         )
         return str(job_id)
+    if resp.status_code == httpx.codes.TOO_MANY_REQUESTS:
+        # Квота графа (шаг 1.6): в пайплайне нет места, а не сломался приём.
+        # Без этой ветки оператор получил бы трассировку httpx, из которой
+        # не видно ни квоты, ни того, что прогон достаточно повторить позже.
+        detail = ""
+        try:
+            detail = str((resp.json() or {}).get("detail") or "")
+        except ValueError:
+            detail = resp.text[:200]
+        raise SystemExit(
+            f"graph backlog is full (quota), corpus not enqueued: {detail}; "
+            "retry once the pipeline drains"
+        )
     resp.raise_for_status()
     job_id = str(resp.json()["job_id"])
     print(f"enqueued job_id={job_id}")

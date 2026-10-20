@@ -84,3 +84,17 @@ def test_409_without_doc_id_gives_up(corpus: Path) -> None:
     client = _Client(_resp(409, {"detail": {"message": "duplicate"}}))
 
     assert enqueue(client, _ARGS, corpus) is None
+
+
+def test_quota_refusal_is_reported_as_quota_not_as_a_crash(corpus: Path) -> None:
+    """429 — «в графе нет места», и прогон обязан сказать это словами.
+
+    Без этой ветки `raise_for_status` отдал бы оператору трассировку
+    httpx, из которой не видно ни квоты, ни того, что повторить прогон
+    можно просто позже (шаг 1.6).
+    """
+    client = _Client(_resp(429, {"detail": "graph backlog is full: 500, cap 500"}))
+
+    with pytest.raises(SystemExit) as exc:
+        enqueue(client, _ARGS, corpus)
+    assert "quota" in str(exc.value).lower() or "backlog" in str(exc.value).lower()

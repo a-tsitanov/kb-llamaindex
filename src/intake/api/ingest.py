@@ -43,6 +43,9 @@ from src.workflow.contracts import IngestParams
 
 router = APIRouter(tags=["ingestion"])
 
+# Сколько секунд просить фидер подождать при квотном отказе (шаг 1.6).
+QUOTA_RETRY_AFTER_S = 30
+
 # Anything outside this set in a client-supplied original filename becomes
 # "_" (path separators, quotes, control chars) so it can't escape the
 # `<doc_id>/original/` prefix or break the download Content-Disposition.
@@ -332,6 +335,39 @@ async def upload_document(
     # и тем же `accept_kwargs`: инвариант живёт в одной точке записи, а не в
     # каждом вызывающем (src/intake/repository.py).
     duplicate_of = first.id if first is not None else None
+
+    # Квота приёма (шаг 1.6): потолок — сколько НЕОБРАБОТАННЫХ документов
+    # арендатор держит в общем пайплайне.  Проверяется ПОСЛЕ дедупа и ДО
+    # хранилища, и каждая половина порядка осмысленна:
+    #
+    # * после дедупа — повтор места в пайплайне не занимает, и 429 вместо
+    #   409 заставил бы фидер приходить с тем же телом снова, вместо того
+    #   чтобы узнать, что тело уже принято;
+    # * до хранилища — иначе отказ стоил бы диска, ровно как у дедупа.
+    #
+    # NULL в колонке = квоты нет, и тогда запроса не делается вовсе:
+    # установка без квот не получает лишнего обращения к Postgres на
+    # каждый документ.
+    if graph.max_inflight is not None:
+        inflight = await pg.inflight_count()
+        if inflight >= graph.max_inflight:
+            logger.warning(
+                "ingest refused by quota  graph={g}  inflight={i}  cap={c}",
+                g=graph.id, i=inflight, c=graph.max_inflight,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    f"graph backlog is full: {inflight} unprocessed documents, "
+                    f"cap {graph.max_inflight}"
+                ),
+                # Фидер обязан отличать «сейчас нет места» от «сломалось»:
+                # 429 плюс срок возврата, а не 503 и не тихая очередь.
+                # Величина консервативная и не зависит от скорости графа —
+                # осмысленная оценка требовала бы пропускной способности,
+                # которой у маршрута нет.
+                headers={"Retry-After": str(QUOTA_RETRY_AFTER_S)},
+            )
 
     # Wrap BOTH the storage init (which on cold-start probes the
     # bucket via `bucket_exists`) AND the actual `put_object` call.

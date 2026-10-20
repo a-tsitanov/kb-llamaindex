@@ -28,6 +28,19 @@ KB_API_URL = os.environ["KB_API_URL"].rstrip("/")
 KB_API_KEY = os.environ["KB_API_KEY"]
 DOCS2MD_URL = os.environ["DOCS2MD_URL"].rstrip("/")
 ASSET_IMG = re.compile(r"!\[([^\]]*)\]\(assets/[^)]*\)")
+
+# Отступление на квотный отказ приёма (429, шаг 1.6).
+QUOTA_ATTEMPTS = 3
+QUOTA_DEFAULT_WAIT_S = 30
+QUOTA_MAX_WAIT_S = 60
+
+
+def _quota_wait(r: httpx.Response) -> int:
+    try:
+        wait = int(r.headers.get("Retry-After", QUOTA_DEFAULT_WAIT_S))
+    except (TypeError, ValueError):
+        wait = QUOTA_DEFAULT_WAIT_S
+    return max(1, min(wait, QUOTA_MAX_WAIT_S))
 TIMEOUT = httpx.Timeout(300.0, connect=10.0)
 
 
@@ -67,14 +80,26 @@ async def submit(
         files["original"] = (Path(rel).name, data, "application/octet-stream")
     rec["md_chars"] = len(markdown)
     t0 = time.monotonic()
-    r = await c.post(
-        f"{KB_API_URL}/api/v1/ingest",
-        headers={"X-API-Key": KB_API_KEY},
-        files={"file": (Path(rel).stem + ".md", markdown.encode("utf-8"), "text/markdown")} | files,
-        data={"department": tag}
-        | ({"priority": str(priority)} if priority is not None else {})
-        | ({"backfill": "true"} if backfill else {}),
-    )
+    # Квота графа (шаг 1.6) отвечает 429 с Retry-After: в пайплайне нет
+    # места.  Загрузчик — массовый, ждать ему естественно; счётчик отказов
+    # остаётся в записи, чтобы по логу было видно, что прогон упирался в
+    # потолок, а не в сбой.  Исчерпав попытки, запись остаётся не-2xx, и
+    # повторный прогон по тому же логу вернётся к этому файлу.
+    for attempt in range(QUOTA_ATTEMPTS):
+        r = await c.post(
+            f"{KB_API_URL}/api/v1/ingest",
+            headers={"X-API-Key": KB_API_KEY},
+            files={"file": (Path(rel).stem + ".md", markdown.encode("utf-8"), "text/markdown")} | files,
+            data={"department": tag}
+            | ({"priority": str(priority)} if priority is not None else {})
+            | ({"backfill": "true"} if backfill else {}),
+        )
+        if r.status_code != 429:
+            break
+        rec["quota_waits"] = rec.get("quota_waits", 0) + 1
+        if attempt == QUOTA_ATTEMPTS - 1:
+            break
+        await asyncio.sleep(_quota_wait(r))
     rec["ingest_ms"] = round((time.monotonic() - t0) * 1000)
     rec["ingest_status"] = r.status_code
     try:

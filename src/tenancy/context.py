@@ -43,6 +43,13 @@ class GraphContext:
     # Owning tenant, carried from the registry row to the enforcement seams
     # so authorization never needs a second trip to the registry.
     tenant_id: str = DEFAULT_TENANT_ID
+    # Квота приёма (шаг 1.6): сколько НЕОБРАБОТАННЫХ документов арендатор
+    # может держать в общем пайплайне.  None = квоты нет, и это умолчание:
+    # колонка `public.graphs.max_inflight` nullable, у существующих графов
+    # в ней NULL, поэтому их поведение не меняется.  Едет здесь, а не
+    # отдельным запросом, потому что горячий путь приёма и так читает
+    # Postgres дважды, а реестр графов кешируется.
+    max_inflight: int | None = None
 
     @property
     def is_default(self) -> bool:

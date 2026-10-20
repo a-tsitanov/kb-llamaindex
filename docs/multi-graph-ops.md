@@ -142,6 +142,30 @@ Two things to know before relying on it:
 What a per-source *registry table* would add on top — default duplicate policy, priority, queue, group,
 an on/off switch and a per-source quota — is step 1.4 variant B and is deliberately not built.
 
+### 4b. Intake quota (one graph cannot flood the shared pipeline)
+
+`graphs.max_inflight` is the ceiling on **unprocessed** documents one graph may hold in the shared
+pipeline — the fairness knob of step 1.6. `NULL` (the default, and what every existing graph has)
+means no quota, so nothing changes until it is set:
+
+```bash
+curl -sX PATCH -H "X-API-Key: $ADMIN_KEY" -H 'Content-Type: application/json' \
+     -d '{"max_inflight": 500}' http://localhost:8000/admin/graphs/acme
+```
+
+| Aspect | Behaviour |
+|---|---|
+| What is counted | rows in `doc_processing` with status `pending` or `processing` — the same number `GET /intake/stats` shows as `by_status.pending + by_status.processing`. Rejected documents and repost sightings never count: they have no processing row. |
+| Refusal | `POST /ingest` answers **429** with `Retry-After` and a body naming the count and the cap. Nothing is uploaded, nothing is queued. |
+| Order | The duplicate check runs first: a repeat of a known body still gets its `409`, because a duplicate occupies no place in the pipeline and answering 429 would send the feeder back with the same body forever. |
+| Feeders | `scripts/tg_ingest.py` waits out `Retry-After` and retries (3 attempts, each wait capped at 60 s), then leaves the message for the next pass — its channel cursor does not advance. The loadtest loader does the same; `scripts/ingest_medical.py` exits with a quota message instead of an httpx traceback. |
+| Latency of a change | The graph registry is TTL-cached per process (30 s for a ready graph), so a `PATCH` takes effect within that window — it is not instant. |
+
+This is a **quota**, not scheduling fairness: it bounds what one tenant can dump on the pipeline, and
+does not interleave the work already admitted. Who gets the next worker slot is still global
+(`prefetch=K, global_=True` on the consumer channel); splitting that per graph means a queue per graph
+and a consumer recreate at deploy, and is deliberately not built.
+
 ## 5. Deploy
 
 1. Run `setup_db` first **and let it finish**: it moves `pg_trgm` to the `extensions` schema, adds

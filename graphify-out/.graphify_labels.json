@@ -1129,19 +1129,11 @@
   "1127": "test_docs_pointers.py",
   "1128": "_TaglessNode",
   "1129": "2026-10-18-tenancy-authz-design.md",
-  "1130": "diag_kg_lightrag.py",
-  "1131": "_c",
   "1132": "test_community_graphscope.py",
   "1133": "_Run",
-  "1134": "_FakeReportStore",
-  "1135": "test_ingest_group.py",
   "1136": "__init__.py",
-  "1137": "test_ingest_source_channel.py",
   "1138": "[Search R6] — 2026-05-26 — Offline community build (GDS Leiden + summaries)",
-  "1139": "test_tg_ingest_groups.py",
   "1140": "[Stage 7] — 2026-05-09 — Identifier canonicalization",
   "1141": "[Offline Models] — 2026-05-26 — Offline HF model loading + pre-download script",
-  "1142": "[Intake 1.4A] — 2026-10-19 — Ключ как источник: атрибуция и фидерный ключ",
-  "1143": "[P0] — 2026-10-19 — Гигиена границ: мёртвые каталоги и свой Telegram-бот удалены",
-  "1144": ".get"
+  "1142": "[Intake 1.4A] — 2026-10-19 — Ключ как источник: атрибуция и фидерный ключ"
 }

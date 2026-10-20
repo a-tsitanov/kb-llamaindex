@@ -760,3 +760,21 @@ class IntakeRepository:
                 (str(doc_id), limit),
             )
             return list(await cur.fetchall())
+
+    async def inflight_count(self) -> int:
+        """Сколько документов графа ещё не обработано (квота, шаг 1.6).
+
+        Считается по ``doc_processing``: в ``documents.status`` у любой
+        новой строки навсегда остаётся DEFAULT 'pending' (I8), и квота по
+        ней объявила бы необработанным весь граф.
+
+        Отклонённые приёмом и наблюдения перепоста в счёт не попадают сами
+        собой — строки обработки у них нет.
+        """
+        async with self._conn() as conn, conn.cursor() as cur:
+            await cur.execute(
+                "SELECT COUNT(*) FROM doc_processing "
+                "WHERE status IN ('pending', 'processing')"
+            )
+            row = await cur.fetchone()
+        return int(row[0]) if row else 0

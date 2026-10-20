@@ -18,7 +18,8 @@ from src.tenancy.context import (
 
 _COLS = (
     "id, owner, status, nebula_space, nebula_partition_num, chunks_collection, "
-    "er_vec_collection, report_vec_collection, pg_schema, generation, tenant_id"
+    "er_vec_collection, report_vec_collection, pg_schema, generation, tenant_id, "
+    "max_inflight"
 )
 
 
@@ -68,6 +69,12 @@ def _context_from_row(row: dict) -> GraphContext:
         # UndefinedColumn in the loader long before this runs — the migration
         # has to land before the code, see docs/DEPLOYMENT.md §5a.
         tenant_id=row.get("tenant_id") or DEFAULT_TENANT_ID,
+        # Квота приёма (шаг 1.6).  `.get` и NULL значат одно и то же —
+        # «квоты нет»: колонка nullable и у всех существующих графов пуста,
+        # а ряды тестовых фикстур её не содержат вовсе.
+        max_inflight=(
+            int(row["max_inflight"]) if row.get("max_inflight") is not None else None
+        ),
     )
 
 
