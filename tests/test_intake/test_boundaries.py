@@ -188,6 +188,53 @@ def test_intake_does_not_import_graph():
     assert not violations, "приём импортирует граф:\n" + "\n".join(violations)
 
 
+# ПРАВИЛО 4 (§7.5 карты контуров): в бакет загрузок пишет только приём.
+# Исключения — по файлу, с причиной:
+#   * `src/storage/minio.py` — сам метод, а не вызов;
+#   * `src/workflow/staging.py` — ДРУГОЙ бакет (run-scoped staging) и свой
+#     клиент minio, к бакету загрузок отношения не имеет.
+# Чтение (`fetch_source`) и удаление префикса при удалении графа
+# (`graph_lifecycle`) правилом не запрещены: запрет про запись — именно
+# она определяет, кто кладёт тела документов.
+_UPLOAD_WRITE_ALLOWED = {
+    "src/storage/minio.py",
+    "src/workflow/staging.py",
+}
+
+
+def _upload_writes(tree: ast.AST, label: str) -> list[str]:
+    """Вызовы ``…put_object(...)`` в одном разобранном модуле."""
+    return [
+        f"{label}:{node.lineno} → put_object(...)"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and _call_name(node.func) == "put_object"
+    ]
+
+
+def test_only_intake_writes_to_the_uploads_bucket():
+    """ПРАВИЛО 4: тела документов в хранилище кладёт только приём.
+
+    Ядро получает ``doc_id`` и ссылку на содержимое — не право его
+    создать.  Правило держит ту же границу, что выдача оригинала
+    (`§7`): один контур отвечает и за то, что в бакете появилось, и за
+    то, кому оно отдаётся.
+    """
+    violations: list[str] = []
+    for path in _py_files(SRC):
+        rel = _rel(path)
+        if rel.startswith(_INTAKE_PREFIX) or rel in _UPLOAD_WRITE_ALLOWED:
+            continue
+        violations += _upload_writes(_parse(path), rel)
+    assert not violations, (
+        "запись в бакет загрузок вне контура приёма:\n" + "\n".join(violations)
+    )
+
+
+def test_upload_write_allowlist_entries_exist():
+    missing = [rel for rel in sorted(_UPLOAD_WRITE_ALLOWED) if not (ROOT / rel).is_file()]
+    assert not missing, f"исключения из правила 4 не существуют: {missing}"
+
+
 def test_core_does_not_inject_async_postgres():
     """ПРАВИЛО 3: ядровой ``AsyncPostgres`` не инжектируется в ChunkRepository."""
     violations: list[str] = []

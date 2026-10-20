@@ -18,7 +18,9 @@
 - `ChunkRepository` не получает `pg=AsyncPostgres(...)` ни из одного модуля;
 - ядро не импортирует `src.watch`, кроме трёх объявленных адаптеров
   (воркер, запись журналов на ингесте, переписывание vid при слиянии);
-- `src/watch` не импортирует приём мимо `IntakeRepository` (`tests/test_watch/test_boundaries.py`).
+- `src/watch` не импортирует приём мимо `IntakeRepository` (`tests/test_watch/test_boundaries.py`);
+- в бакет загрузок пишет только `src/intake` (ядро получает `doc_id` и ссылку,
+  не право создать тело).
 
 Карта контуров и порядок работ — `docs/superpowers/plans/2026-10-17-project-boundaries.md`.
 
