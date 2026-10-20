@@ -1790,8 +1790,8 @@
     "semantic_hash": "0a580a70875ed094568f7bb752aea988"
   },
   "tests/test_api/test_documents.py": {
-    "mtime": 1792413054.1518986,
-    "ast_hash": "764ece6404bb0eaabceb504738a3d49e",
+    "mtime": 1792524807.228505,
+    "ast_hash": "f4cd82e5d8d5f5c5baba4ea6f0d7ff01",
     "semantic_hash": ""
   },
   "tests/test_api/test_documents_in_response.py": {
@@ -2810,8 +2810,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1792524321.2714424,
-    "ast_hash": "282f74fc9c8a2a0f684dba05541845ca",
+    "mtime": 1792524842.0183752,
+    "ast_hash": "a467b1ab983d56b3f72142c9dd3f674c",
     "semantic_hash": ""
   },
   "README.md": {
@@ -3000,8 +3000,8 @@
     "semantic_hash": "e3cfee7dfd27f0a86e8d9351a5f3e67d"
   },
   "docs/adr/0014-source-download-stable-endpoint.md": {
-    "mtime": 1792429618.0851526,
-    "ast_hash": "9db447959115b3ddd1f7ecb4b64e2d35",
+    "mtime": 1792524842.0176094,
+    "ast_hash": "2d61ecb3370940b34d68aac7fae9dcc2",
     "semantic_hash": ""
   },
   "docs/adr/0015-community-detection-backend-leidenalg.md": {
@@ -4510,8 +4510,8 @@
     "semantic_hash": ""
   },
   "src/storage/pg_schema.py": {
-    "mtime": 1792429400.8905604,
-    "ast_hash": "e5f0534051019a27f000ce7262055ffe",
+    "mtime": 1792524702.90462,
+    "ast_hash": "d34414298a27665f7ccbbf04f2935ad5",
     "semantic_hash": ""
   },
   "tests/test_storage/test_pg_schema.py": {
@@ -4790,8 +4790,8 @@
     "semantic_hash": ""
   },
   "src/intake/api/documents.py": {
-    "mtime": 1792413180.097776,
-    "ast_hash": "04e28fab081ccb209163e3b800468c65",
+    "mtime": 1792524755.9006124,
+    "ast_hash": "b76577fda6ad46566d483a5b35931545",
     "semantic_hash": ""
   },
   "src/intake/api/ingest.py": {
@@ -4800,8 +4800,8 @@
     "semantic_hash": ""
   },
   "src/intake/repository.py": {
-    "mtime": 1792524187.8809788,
-    "ast_hash": "ca0cb75fdf2d56c6ba897536bb67f41e",
+    "mtime": 1792524719.2078233,
+    "ast_hash": "7a7c3c70bf602ee82bda60488f8f42c5",
     "semantic_hash": ""
   },
   "src/workflow/activities/mark_skipped.py": {
@@ -4872,6 +4872,11 @@
   "docs/runbook/intake-stats.md": {
     "mtime": 1792524294.218062,
     "ast_hash": "b916979478fc828b8121b9f268d94bf7",
+    "semantic_hash": ""
+  },
+  "tests/test_api/test_download_journal.py": {
+    "mtime": 1792524796.8565638,
+    "ast_hash": "a071a079a9d9121ea12a556883fa1e94",
     "semantic_hash": ""
   }
 }

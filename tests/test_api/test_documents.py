@@ -23,6 +23,17 @@ async def _get(path, *, headers=None):
         return await ac.get(path, headers=headers)
 
 
+@pytest.fixture(autouse=True)
+def _no_journal():
+    """Выдача пишется в журнал (§7.3), и запись fail-closed — без Postgres
+    маршрут отвечал бы 503.  Здесь предмет — поток байт и заголовки,
+    поэтому запись подменяется; её собственные тесты —
+    ``tests/test_api/test_download_journal.py``."""
+    with patch("src.intake.repository.IntakeRepository.record_download",
+               new=AsyncMock()):
+        yield
+
+
 _DOC_ID = str(uuid.uuid4())
 
 

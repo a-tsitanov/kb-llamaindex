@@ -704,3 +704,59 @@ class IntakeRepository:
                 {"doc_type": r["doc_type"], "count": r["n"]} for r in doc_types
             ],
         }
+
+    async def record_download(
+        self, doc_id: uuid.UUID, variant: str, path: str,
+        principal: str = "", tenant_id: str = "",
+    ) -> None:
+        """Записать ВЫДАЧУ исходного документа (§7.3 карты контуров).
+
+        Поиск отдаёт обработанные фрагменты, а ``GET /documents/{id}`` —
+        исходный бинарник целиком: персональные данные, метаданные файла,
+        всё, что в граф не попало.  Поэтому выдача — событие, которое
+        нужно уметь перечислить: без журнала на вопрос «что утекло» при
+        компрометации ключа ответить нечем.
+
+        ``variant`` — ЭФФЕКТИВНЫЙ вариант ('original' или 'text'), а не то,
+        что прислал клиент: по умолчанию маршрут отдаёт оригинал, если он
+        есть, и текст, если нет, и запись «variant=None» не отвечала бы,
+        что именно ушло.  ``path`` — выданный объект: по нему видно тело,
+        даже если строка реестра к моменту расследования удалена (внешнего
+        ключа у журнала нет, см. DDL).
+
+        ``principal`` — ``owner`` ключа, которым пришёл запрос, то есть то
+        же имя, под которым источник пишется в ``documents.source_kind``
+        (шаг 1.4A).  Один словарь имён на приём и на выдачу.
+        """
+        async with self._conn() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "INSERT INTO document_download "
+                    "(doc_id, variant, path, principal, tenant_id) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (str(doc_id), variant, path, principal, tenant_id),
+                )
+            await conn.commit()
+
+    async def downloads_of(
+        self, doc_id: uuid.UUID, limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Кто и когда получал этот документ — для ответа на «что утекло».
+
+        Чтение журнала намеренно НЕ выставлено в HTTP: это материал
+        расследования, и выдавать его тем же правом `read`, которым
+        пользуется обычный поиск, значило бы показать подозреваемому его
+        собственный след.  Метод существует для операторского скрипта и
+        psql-сессии.
+        """
+        async with (
+            self._conn() as conn,
+            conn.cursor(row_factory=dict_row) as cur,
+        ):
+            await cur.execute(
+                "SELECT variant, path, principal, tenant_id, at "
+                "FROM document_download WHERE doc_id = %s "
+                "ORDER BY at DESC LIMIT %s",
+                (str(doc_id), limit),
+            )
+            return list(await cur.fetchall())

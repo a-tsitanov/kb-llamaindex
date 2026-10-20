@@ -144,6 +144,40 @@ CREATE INDEX IF NOT EXISTS doc_processing_status_idx
 """
 
 
+# Журнал выдач оригиналов (§7.3 карты контуров).  Поиск отдаёт обработанные
+# фрагменты, а `GET /documents/{id}` — исходный бинарник целиком, со всем,
+# что в граф не попало.  Без этой записи на вопрос «что утекло» при
+# компрометации ключа ответить нечем.
+#
+# Внешнего ключа на `documents` ЗДЕСЬ НЕТ намеренно: журнал обязан пережить
+# удаление документа и самого графа-источника, иначе `ON DELETE CASCADE`
+# стёр бы ровно те строки, ради которых его ведут.  По той же причине
+# пишется `path`: по нему виден выданный объект, даже если строка реестра
+# больше не существует.
+#
+# Таблица живёт в схеме графа, как и остальной реестр: журнал чужого
+# арендатора не должен быть виден через общую `public`.
+_DOCUMENT_DOWNLOAD_DDL = """
+CREATE TABLE IF NOT EXISTS document_download (
+    id        BIGSERIAL PRIMARY KEY,
+    doc_id    UUID        NOT NULL,
+    variant   TEXT        NOT NULL,
+    path      TEXT        NOT NULL DEFAULT '',
+    principal TEXT        NOT NULL DEFAULT '',
+    tenant_id TEXT        NOT NULL DEFAULT '',
+    at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS document_download_doc_idx
+    ON document_download (doc_id, at DESC);
+
+-- «Что выдал этот ключ» — основной запрос расследования, поэтому индекс
+-- по принципалу, а не только по документу.
+CREATE INDEX IF NOT EXISTS document_download_principal_idx
+    ON document_download (principal, at DESC);
+"""
+
+
 # Backfill source_channel for historical Telegram rows from the filename
 # embedded in `path` ({doc_id}/tg_<channel>_<msgid>.txt). Greedy .+ so
 # tg_a_b_123.txt -> channel 'a_b', msgid '123'. Only touches still-empty TG
@@ -453,6 +487,7 @@ GRAPH_DDL: list[str] = [
     # Строго после _DOCUMENTS_DDL: внешний ключ doc_processing.doc_id требует
     # уже существующей таблицы documents.
     _DOC_PROCESSING_DDL,
+    _DOCUMENT_DOWNLOAD_DDL,
     _INGEST_METRICS_DDL,
     _BACKFILL_SOURCE_CHANNEL_SQL,
     _FACT_SUPERSEDE_DDL,
