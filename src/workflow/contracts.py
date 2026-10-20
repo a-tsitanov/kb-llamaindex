@@ -21,7 +21,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.tenancy.context import DEFAULT_GRAPH_ID
 
+# Домен статуса ОБРАБОТКИ: ровно те значения, что ``finalize`` пишет в
+# ``doc_processing.status``; 'skipped' в нём намеренно отсутствует.
 GraphStatus = Literal["completed", "vector_only"]
+# Домен ВЫХОДА воркфлоу — шире на одно значение: отказ приёма
+# (``mark_skipped``) тоже доезжает до конца и возвращает ``IngestResult``.
+# Расширять ``GraphStatus`` для этого нельзя — 'skipped' упал бы на CHECK
+# таблицы обработки с бесконечным ретраем активности.
+IngestOutcome = Literal["completed", "vector_only", "skipped"]
 WikibaseStatus = Literal["ok", "skipped", "failed"]
 # "local" is the R2 plan-execute path (SearchOrchestratorWorkflow);
 # "global"/"drift" are the R7a GraphRAG routing modes (GlobalSearchWorkflow).
@@ -342,7 +349,7 @@ class MarkDirtyIn(_Frozen):
 class IngestResult(_Frozen):
     doc_id: str
     chunk_count: int
-    graph_status: GraphStatus
+    graph_status: IngestOutcome
     entities: int = 0
     relations: int = 0
     wikibase_status: WikibaseStatus = "skipped"

@@ -156,12 +156,15 @@ async def _inflight_doc_ids(graph: GraphContext) -> list[str]:
         # The schema is absent when provisioning failed before provision_pg
         # or a previous delete already ran drop_pg; with no `public` on the
         # search_path the SELECT would raise UndefinedTable on every retry.
-        await cur.execute("SELECT to_regclass('documents')")
+        # doc_processing — таблица ЯДРА (статус обработки), а не приёма,
+        # поэтому импорта src.intake здесь не возникает.
+        await cur.execute("SELECT to_regclass('doc_processing')")
         row = await cur.fetchone()
         if row is None or row[0] is None:
             return []
         await cur.execute(
-            "SELECT id::text FROM documents WHERE status IN ('pending', 'processing')",
+            "SELECT doc_id::text FROM doc_processing "
+            "WHERE status IN ('pending', 'processing')",
         )
         return [r[0] for r in await cur.fetchall()]
 

@@ -163,13 +163,19 @@ kb-llamaindex/
 ├── src/
 │   ├── config.py                # nested pydantic-settings
 │   ├── utils/logging.py         # loguru bootstrap
+│   ├── tenancy/                 # арендаторы, API-ключи, авторизация доступа
+│   │                            #   к графу, GraphContext
+│   ├── intake/                  # КОНТУР ПРИЁМА: классификатор, очередь,
+│   │                            #   submit, реестр приёма, маршруты /ingest
+│   │                            #   и выдачи оригинала
 │   ├── api/
 │   │   ├── main.py              # FastAPI app, lifespan
-│   │   └── routes/              # search_v2 (/search/*), analyze, ingest,
-│   │                            #   documents, admin, graph_admin, health
+│   │   ├── graph_dep.py         # шов авторизации всех маршрутов данных
+│   │   └── routes/              # search_v2 (/search/*), analyze, stats,
+│   │                            #   stats_data, entities, admin,
+│   │                            #   graph_admin, graphs_admin, health
 │   ├── di/providers.py          # dishka wiring
 │   ├── ingestion/               # IngestionPipeline + identifier canon
-│   ├── ingest_queue/            # RabbitMQ backlog: publisher + consumer
 │   ├── retrieval/               # vector index, atomic tools, LLMPool
 │   ├── graph/                   # NebulaGraph store, retriever, communities
 │   ├── analytics/               # 42-primitive catalog, planner, materialize,
@@ -178,9 +184,11 @@ kb-llamaindex/
 │   │                            #   wiki, monitor + worker launcher
 │   ├── mcp/                     # MCP-1 (search/analyze) + MCP-2 (atomic+graph)
 │   │                            #   + MCP-3 (exact stats, no LLM)
+│   ├── stats/                   # точные счётчики для MCP-3
 │   ├── observability/           # metrics, role map, litellm model validator
 │   ├── models/                  # Pydantic request/response shapes
-│   └── storage/                 # Postgres clients, chunk repository
+│   └── storage/                 # общая инфраструктура: Postgres, MinIO,
+│                                #   chunk repository, схема графа
 ├── tests/                       # unit + eval suites
 ├── scripts/                     # setup_db, tg_ingest, backfills, wipe_db
 ├── docker/                      # LiteLLM config

@@ -137,16 +137,40 @@ async def test_channel_message_stats_schema_has_group_by():
 
 
 @pytest.mark.asyncio
+async def test_channel_stats_tools_warn_about_cross_posts():
+    """Описание инструмента обязано называть недосчёт перепостов.
+
+    Ключ дедупа приёма — sha256 ТЕЛА в пределах графа, канал в него не
+    входит, поэтому дословный перепост во втором наблюдаемом канале своей
+    строки не заводит и в пер-канальные числа не попадает.  Описание
+    инструмента — единственная поверхность, по которой агент может это
+    узнать: иначе он отвечает на «статистика по каналам» числами, которые
+    считает полными.  Цена решения записана в
+    docs/runbook/message-stats.md и в докстринге `sync_round`
+    (scripts/tg_ingest.py).
+    """
+    from src.mcp import tools_server
+
+    tools = await tools_server.mcp._list_tools()
+    by_name = {t.name: t for t in tools}
+    for name in ("channel_message_stats", "channel_message_timeline"):
+        # Переносы строк снимаем: фраза в докстринге может быть разбита ими.
+        text = " ".join((by_name[name].description or "").lower().split())
+        assert "cross-post" in text, name
+        assert "repost in a second watched channel" in text, name
+
+
+@pytest.mark.asyncio
 async def test_channel_message_stats_maps_group_by_and_calls_pg(monkeypatch):
     from unittest.mock import AsyncMock
 
+    from src.intake.repository import IntakeRepository
     from src.mcp import tools_server
-    from src.storage.postgres import AsyncPostgres
 
     fake = [{"key": "alpha", "total": 3, "pending": 0, "processing": 0,
              "completed": 2, "vector_only": 0, "failed": 1, "skipped": 0}]
     m = AsyncMock(return_value=fake)
-    monkeypatch.setattr(AsyncPostgres, "status_counts_by", m)
+    monkeypatch.setattr(IntakeRepository, "status_counts_by", m)
 
     out = await tools_server._stats_by("group", None, None, graph=default_graph_context())
     assert out == {"group_by": "group", "rows": fake}
@@ -173,11 +197,11 @@ async def test_channel_message_timeline_stringifies_day(monkeypatch):
     from datetime import date
     from unittest.mock import AsyncMock
 
+    from src.intake.repository import IntakeRepository
     from src.mcp import tools_server
-    from src.storage.postgres import AsyncPostgres
 
     monkeypatch.setattr(
-        AsyncPostgres, "timeline_counts",
+        IntakeRepository, "timeline_counts",
         AsyncMock(return_value=[{"day": date(2026, 7, 21), "count": 5}]),
     )
     out = await tools_server._timeline(

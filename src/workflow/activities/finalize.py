@@ -1,14 +1,15 @@
 """`finalize` (success path) and `mark_failed` (workflow-level
 on-failure) — write Postgres terminal status + cleanup MinIO staging
 + remove local download dir.
+
+Вердикт отказа классификатора пишет не обработка, а приём, и живёт в
+собственном модуле — ``activities/mark_skipped.py``.
 """
 
 from __future__ import annotations
 
 import asyncio
-import shutil
 import uuid
-from pathlib import Path
 
 from loguru import logger
 from temporalio import activity
@@ -19,21 +20,8 @@ from src.storage.postgres import AsyncPostgres
 from src.tenancy.activity import resolve_graph_for_activity
 from src.tenancy.context import GraphContext, graph_scoped_id
 from src.workflow.client import get_temporal_client
-from src.workflow.contracts import (
-    FinalizeIn,
-    IngestResult,
-    MarkFailedIn,
-    SkipIn,
-)
-from src.workflow.staging import build_staging_store
-
-
-def _rmtree(path: str | None) -> None:
-    if not path:
-        return
-    p = Path(path)
-    if p.exists():
-        shutil.rmtree(p, ignore_errors=True)
+from src.workflow.contracts import FinalizeIn, IngestResult, MarkFailedIn
+from src.workflow.staging import build_staging_store, remove_local_dir
 
 
 @activity.defn
@@ -55,7 +43,7 @@ async def finalize(payload: FinalizeIn) -> IngestResult:
     await asyncio.to_thread(staging.delete_prefix, payload.ctx.workflow_run_id)
     activity.heartbeat({"stage": "staging_cleaned"})
 
-    await asyncio.to_thread(_rmtree, payload.ctx.cleanup_dir)
+    await asyncio.to_thread(remove_local_dir, payload.ctx.cleanup_dir)
     activity.heartbeat({"stage": "local_cleaned"})
 
     await _persist_ingest_metrics(payload, graph)
@@ -168,40 +156,6 @@ async def _persist_ingest_metrics(payload: FinalizeIn, graph: GraphContext) -> N
 
 
 @activity.defn
-async def mark_skipped(payload: SkipIn) -> IngestResult:
-    """Classifier said skip: write the ``skipped`` terminal status +
-    reason and clean up staging / local download — no parse/index/graph."""
-    activity.logger.info(
-        "mark_skipped start  doc=%s  reason=%s",
-        payload.ctx.doc_id, payload.reason,
-    )
-    activity.heartbeat({"stage": "init", "doc_id": payload.ctx.doc_id})
-
-    graph = await resolve_graph_for_activity(payload.graph_id)
-    pg = AsyncPostgres(graph=graph)
-    await pg.update_status(
-        uuid.UUID(payload.ctx.doc_id), status="skipped", error=payload.reason,
-    )
-
-    staging = build_staging_store()
-    await asyncio.to_thread(staging.delete_prefix, payload.ctx.workflow_run_id)
-    await asyncio.to_thread(_rmtree, payload.ctx.cleanup_dir)
-
-    logger.info(
-        "mark_skipped  doc={d}  reason={r}",
-        d=payload.ctx.doc_id, r=payload.reason,
-    )
-    return IngestResult(
-        doc_id=payload.ctx.doc_id,
-        chunk_count=0,
-        graph_status="skipped",
-        entities=0,
-        relations=0,
-        wikibase_status="skipped",
-    )
-
-
-@activity.defn
 async def mark_failed(payload: MarkFailedIn) -> None:
     doc_id = payload.ctx.doc_id if payload.ctx else payload.params.doc_id
     activity.logger.warning(
@@ -217,7 +171,7 @@ async def mark_failed(payload: MarkFailedIn) -> None:
     staging = build_staging_store()
     if payload.ctx:
         await asyncio.to_thread(staging.delete_prefix, payload.ctx.workflow_run_id)
-        await asyncio.to_thread(_rmtree, payload.ctx.cleanup_dir)
+        await asyncio.to_thread(remove_local_dir, payload.ctx.cleanup_dir)
         activity.heartbeat({"stage": "cleanup_done"})
     logger.warning(
         "mark_failed  doc={d}  error={e}", d=doc_id, e=payload.error,

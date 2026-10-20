@@ -11,7 +11,7 @@ import psycopg
 import pytest
 
 from src.config import settings
-from src.storage.postgres import AsyncPostgres
+from src.intake.repository import IntakeRepository
 from src.tenancy.context import default_graph_context
 
 
@@ -53,22 +53,30 @@ def _seed() -> None:
     with psycopg.connect(settings.postgres.dsn, autocommit=True) as conn:
         with conn.cursor() as cur:
             for ch, gr, st, dd in rows:
+                # Пост-расщеплённая форма: статус живёт в doc_processing,
+                # а documents.status остаётся при своём DEFAULT (I8).
+                doc_id = str(uuid.uuid4())
                 cur.execute(
                     "INSERT INTO documents "
-                    "(id, path, status, source_channel, source_group, doc_date) "
-                    "VALUES (%s, %s, %s, %s, %s, %s)",
-                    (str(uuid.uuid4()), f"{_TAG}/x.txt", st, ch, gr, dd),
+                    "(id, path, source_channel, source_group, doc_date) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (doc_id, f"{_TAG}/x.txt", ch, gr, dd),
+                )
+                cur.execute(
+                    "INSERT INTO doc_processing (doc_id, status) VALUES (%s, %s)",
+                    (doc_id, st),
                 )
 
 
 def _cleanup() -> None:
     with psycopg.connect(settings.postgres.dsn, autocommit=True) as conn:
         with conn.cursor() as cur:
+            # doc_processing уезжает следом по ON DELETE CASCADE.
             cur.execute("DELETE FROM documents WHERE path LIKE %s", (f"{_TAG}/%",))
 
 
 def test_status_counts_by_channel() -> None:
-    pg = AsyncPostgres(settings.postgres.dsn, graph=default_graph_context())
+    pg = IntakeRepository(settings.postgres.dsn, graph=default_graph_context())
     try:
         _seed()
         rows = asyncio.run(pg.status_counts_by("source_channel"))
@@ -86,7 +94,7 @@ def test_status_counts_by_channel() -> None:
 
 
 def test_timeline_counts_by_channel_on_doc_date() -> None:
-    pg = AsyncPostgres(settings.postgres.dsn, graph=default_graph_context())
+    pg = IntakeRepository(settings.postgres.dsn, graph=default_graph_context())
     try:
         _seed()
         buckets = asyncio.run(
@@ -102,7 +110,7 @@ def test_timeline_counts_by_channel_on_doc_date() -> None:
 
 
 def test_timeline_counts_group_by_none() -> None:
-    pg = AsyncPostgres(settings.postgres.dsn, graph=default_graph_context())
+    pg = IntakeRepository(settings.postgres.dsn, graph=default_graph_context())
     try:
         _seed()
         buckets = asyncio.run(

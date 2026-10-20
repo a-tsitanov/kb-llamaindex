@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from scripts.tg_ingest import _message_to_doc, post_ingest
+from scripts.tg_ingest import DUPLICATE, FAILED, SENT, _message_to_doc, post_ingest
 
 
 class _FakeMsg:
@@ -28,7 +28,7 @@ def test_message_to_doc_skips_empty():
 
 
 @pytest.mark.asyncio
-async def test_post_ingest_true_on_2xx():
+async def test_post_ingest_sent_on_2xx():
     sent = {}
 
     class _Resp:
@@ -39,8 +39,10 @@ async def test_post_ingest_true_on_2xx():
             sent.update(url=url, headers=headers, files=files, data=data)
             return _Resp()
 
-    ok = await post_ingest(_Client(), "http://api", "k", "f.txt", "hi", "2024-03-01", "q1")
-    assert ok is True
+    outcome = await post_ingest(
+        _Client(), "http://api", "k", "f.txt", "hi", "2024-03-01", "q1",
+    )
+    assert outcome == SENT
     assert sent["url"] == "http://api/api/v1/ingest"
     assert sent["headers"]["X-API-Key"] == "k"
     assert sent["data"]["queue"] == "q1" and sent["data"]["document_date"] == "2024-03-01"
@@ -48,12 +50,12 @@ async def test_post_ingest_true_on_2xx():
 
 
 @pytest.mark.asyncio
-async def test_post_ingest_false_on_error():
+async def test_post_ingest_failed_on_error():
     class _Client:
         async def post(self, *a, **k):
             raise RuntimeError("connection refused")
 
-    assert await post_ingest(_Client(), "http://api", "k", "f", "t", "d", "q") is False
+    assert await post_ingest(_Client(), "http://api", "k", "f", "t", "d", "q") == FAILED
 
 
 @pytest.mark.asyncio
@@ -364,11 +366,11 @@ async def test_post_ingest_includes_priority_when_set():
             sent.update(data=data)
             return _Resp()
 
-    ok = await post_ingest(
+    outcome = await post_ingest(
         _Client(), "http://api", "k", "f.txt", "hi", "2024-03-01", "q1",
         group="news", priority=0,
     )
-    assert ok is True
+    assert outcome == SENT
     assert sent["data"]["priority"] == "0"
     assert sent["data"]["group"] == "news"
 
@@ -387,3 +389,105 @@ async def test_post_ingest_omits_priority_when_none():
 
     await post_ingest(_Client(), "http://api", "k", "f.txt", "hi", "2024-03-01", "q1")
     assert "priority" not in sent["data"]
+
+
+# ── дедуп приёма: 409 — не ошибка, а «уже известное тело» ────────────
+
+
+class _CodeHTTP:
+    """Отвечает заданным кодом и запоминает отправленную форму."""
+
+    def __init__(self, status_code=202):
+        self.status_code = status_code
+        self.posted: list[dict] = []
+
+    async def post(self, url, headers=None, files=None, data=None):
+        self.posted.append(dict(data))
+        status_code = self.status_code
+
+        class _R:
+            pass
+
+        _R.status_code = status_code
+        return _R()
+
+
+@pytest.mark.asyncio
+async def test_post_ingest_counts_409_as_duplicate():
+    # 409 от дедупа приёма: документ не новый, но и не сбой — повторный
+    # проход по тому же окну обязан оставаться идемпотентным.
+    http = _CodeHTTP(409)
+    outcome = await post_ingest(
+        http, "http://api", "k", "f.txt", "hi", "2024-03-01", None,
+    )
+    assert outcome == DUPLICATE
+    assert outcome != FAILED
+
+
+@pytest.mark.asyncio
+async def test_post_ingest_still_fails_on_500():
+    http = _CodeHTTP(500)
+    outcome = await post_ingest(
+        http, "http://api", "k", "f.txt", "hi", "2024-03-01", None,
+    )
+    assert outcome == FAILED
+
+
+@pytest.mark.asyncio
+async def test_reingest_sends_on_duplicate_version():
+    """Переингест существует ровно чтобы перечитать окно канала заново:
+    с умолчанием reject он стал бы молчаливым no-op'ом."""
+    from scripts.tg_ingest import reingest_channels
+
+    tg = _SyncTG({"a": [_FakeMsg(1, "alpha", datetime(2024, 1, 1, tzinfo=UTC))]})
+    http = _CodeHTTP()
+    dialog = _sync_dialog(-100111, "a", "chan_a")
+
+    tally, errors = await reingest_channels(
+        tg, http, dialogs=[dialog], channels=["@chan_a"], spec=None,
+        group_map={}, limit=10, api_base="http://a", api_key="k",
+        queue=None, priority=0,
+    )
+
+    assert errors == [] and tally["sent"] == 1
+    assert [d.get("on_duplicate") for d in http.posted] == ["version"]
+
+
+@pytest.mark.asyncio
+async def test_sync_sends_no_on_duplicate():
+    """Обычный проход поле не шлёт — серверное умолчание (reject) и есть
+    нужная семантика: тот же текст второй раз не должен стать документом."""
+    from scripts.tg_ingest import sync_round
+
+    tg = _SyncTG({"a": [_FakeMsg(2, "alpha", datetime(2024, 1, 1, tzinfo=UTC))]})
+    http = _CodeHTTP()
+
+    await sync_round(
+        tg, http, dialogs=[_sync_dialog(10, "a", "chan_a")],
+        state={"10": {"last_id": 1, "title": "A"}}, save=lambda: None,
+        api_base="http://a", api_key="k", queue=None, bootstrap_limit=100,
+    )
+
+    assert http.posted and all("on_duplicate" not in d for d in http.posted)
+
+
+@pytest.mark.asyncio
+async def test_sync_duplicate_advances_cursor_and_is_not_failed():
+    """409 в синке — успех прохода: курсор двигается, иначе окно залипнет
+    на уже известном сообщении навсегда."""
+    from scripts.tg_ingest import sync_round
+
+    tg = _SyncTG({"a": [
+        _FakeMsg(2, "alpha", datetime(2024, 1, 1, tzinfo=UTC)),
+        _FakeMsg(3, "beta", datetime(2024, 1, 2, tzinfo=UTC)),
+    ]})
+    state = {"10": {"last_id": 1, "title": "A"}}
+
+    tally = await sync_round(
+        tg, _CodeHTTP(409), dialogs=[_sync_dialog(10, "a", "chan_a")],
+        state=state, save=lambda: None,
+        api_base="http://a", api_key="k", queue=None, bootstrap_limit=100,
+    )
+
+    assert tally["duplicate"] == 2 and tally["failed"] == 0 and tally["sent"] == 0
+    assert state["10"]["last_id"] == 3

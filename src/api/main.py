@@ -16,12 +16,10 @@ from loguru import logger
 
 from src.api.routes import (
     admin,
-    documents,
     entities,
     graph_admin,
     graphs_admin,
     health,
-    ingest,
     search_v2,
     stats,
     stats_data,
@@ -31,6 +29,15 @@ from src.api.routes import (
 )
 from src.config import settings
 from src.di.providers import build_api_container
+from src.intake.api import (
+    documents as intake_documents,
+)
+from src.intake.api import (
+    ingest as intake_ingest,
+)
+from src.intake.api import (
+    stats as intake_stats,
+)
 from src.utils.logging import configure_logging
 
 configure_logging(level=settings.api.log_level, json_output=settings.api.log_json)
@@ -89,8 +96,9 @@ setup_dishka(_container, app)
 app.include_router(health.router)
 app.include_router(search_v2.router, prefix="/api/v1")
 app.include_router(analyze_routes.router, prefix="/api/v1")
-app.include_router(ingest.router, prefix="/api/v1")
-app.include_router(documents.router, prefix="/api/v1")
+app.include_router(intake_ingest.router, prefix="/api/v1")
+app.include_router(intake_documents.router, prefix="/api/v1")
+app.include_router(intake_stats.router, prefix="/api/v1")
 app.include_router(entities.router, prefix="/api/v1")
 app.include_router(stats.router, prefix="/api/v1")
 app.include_router(stats_data.router, prefix="/api/v1")

@@ -1,4 +1,4 @@
-"""documents.original_path: row model, insert_pending, setup_db DDL. DB-free."""
+"""documents.original_path: row model, accept_document, setup_db DDL. DB-free."""
 
 from __future__ import annotations
 
@@ -9,15 +9,17 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.storage.postgres import AsyncPostgres, DocumentRow
+from src.intake.repository import DocumentRow, IntakeRepository
 from src.tenancy.context import default_graph_context
 
 
 def _row(**extra):
+    # eff_* — эффективные значения, которые считает SQL `IntakeRepository.get`.
     now = dt.datetime.now()
     return {
         "id": uuid.uuid4(), "path": "s3://b/x/a.md", "department": "",
         "doc_type": "md", "status": "pending", "error": "", "summary": "",
+        "eff_status": "pending", "eff_error": "", "eff_summary": "",
         "created_at": now, "updated_at": now, **extra,
     }
 
@@ -41,7 +43,7 @@ def _fake_pg():
     conn.cursor.return_value = cur
     conn.commit = AsyncMock()
 
-    pg = AsyncPostgres(graph=default_graph_context())
+    pg = IntakeRepository(graph=default_graph_context())
 
     @asynccontextmanager
     async def _conn():
@@ -51,22 +53,24 @@ def _fake_pg():
     return pg, cur
 
 
+# accept_document шлёт два INSERT'а (documents + doc_processing), поэтому
+# интересен ПЕРВЫЙ вызов, а не последний.
 @pytest.mark.asyncio
-async def test_insert_pending_writes_original_path():
+async def test_accept_document_writes_original_path():
     pg, cur = _fake_pg()
-    await pg.insert_pending(uuid.uuid4(), "s3://b/x/a.md",
-                            original_path="s3://b/x/original/a.docx")
-    sql, params = cur.execute.call_args.args
+    await pg.accept_document(uuid.uuid4(), "s3://b/x/a.md",
+                             original_path="s3://b/x/original/a.docx")
+    sql, params = cur.execute.call_args_list[0].args
     assert "original_path" in sql
     assert "s3://b/x/original/a.docx" in params
 
 
 @pytest.mark.asyncio
-async def test_insert_pending_omits_column_when_no_original():
+async def test_accept_document_omits_column_when_no_original():
     # Keeps the INSERT valid on a DB where setup_db hasn't added the column.
     pg, cur = _fake_pg()
-    await pg.insert_pending(uuid.uuid4(), "s3://b/x/a.md")
-    sql, _ = cur.execute.call_args.args
+    await pg.accept_document(uuid.uuid4(), "s3://b/x/a.md")
+    sql, _ = cur.execute.call_args_list[0].args
     assert "original_path" not in sql
 
 

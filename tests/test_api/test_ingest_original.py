@@ -13,10 +13,12 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from src.config import settings
+from tests.test_intake.test_dedup import no_duplicate
 
 
 def _api_key_header() -> dict[str, str]:
     return {"X-API-Key": settings.api.keys_list[0]}
+
 
 
 def _stub_storage() -> MagicMock:
@@ -33,14 +35,15 @@ def _stub_temporal_client() -> MagicMock:
 
 async def _post(files: dict, storage: MagicMock, ins: AsyncMock):
     from src.api.main import app
-    from src.storage.postgres import AsyncPostgres
+    from src.intake.repository import IntakeRepository
 
     fake_client = _stub_temporal_client()
     with (
-        patch("src.api.routes.ingest.build_minio_storage", return_value=storage),
-        patch.object(AsyncPostgres, "insert_pending", new=ins),
+        patch("src.intake.api.ingest.build_minio_storage", return_value=storage),
+        no_duplicate(),
+        patch.object(IntakeRepository, "accept_document", new=ins),
         patch(
-            "src.api.routes.ingest.get_temporal_client",
+            "src.intake.api.ingest.get_temporal_client",
             new=AsyncMock(return_value=fake_client),
         ),
     ):

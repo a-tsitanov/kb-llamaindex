@@ -19,11 +19,11 @@ def _api_key_header() -> dict[str, str]:
 @pytest.mark.asyncio
 async def test_messages_stats_shape() -> None:
     from src.api.main import app
-    from src.storage.postgres import AsyncPostgres
+    from src.intake.repository import IntakeRepository
 
     fake = [{"key": "alpha", "total": 3, "pending": 0, "processing": 0,
              "completed": 2, "vector_only": 0, "failed": 1, "skipped": 0}]
-    with patch.object(AsyncPostgres, "status_counts_by",
+    with patch.object(IntakeRepository, "status_counts_by",
                       new=AsyncMock(return_value=fake)) as m:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -66,10 +66,10 @@ async def test_messages_stats_requires_api_key() -> None:
 @pytest.mark.asyncio
 async def test_timeline_shape() -> None:
     from src.api.main import app
-    from src.storage.postgres import AsyncPostgres
+    from src.intake.repository import IntakeRepository
 
     fake = [{"day": date(2026, 7, 21), "key": "alpha", "count": 2}]
-    with patch.object(AsyncPostgres, "timeline_counts",
+    with patch.object(IntakeRepository, "timeline_counts",
                       new=AsyncMock(return_value=fake)):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:

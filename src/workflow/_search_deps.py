@@ -123,8 +123,11 @@ async def _build_graph_retriever_once(graph: GraphContext, embed_model, llm):
 
 async def _build_chunk_repo_once(graph: GraphContext):
     from src.storage.chunk_repository import ChunkRepository
-    from src.storage.postgres import AsyncPostgres
-    return ChunkRepository(graph=graph, pg=AsyncPostgres(graph=graph))
+    # Без ``pg=``: умолчание конструктора — IntakeRepository, и ядро не
+    # инжектирует сюда класс чужого контура (гарды — правило 3 arch-теста
+    # tests/test_intake/test_boundaries.py и рантайм-проверка
+    # tests/test_storage/test_chunk_repository.py::test_default_pg_is_intake_repository).
+    return ChunkRepository(graph=graph)
 
 
 async def _build_synthesizer_once(llm):

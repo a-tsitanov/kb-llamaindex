@@ -111,6 +111,37 @@ a local stdio client, not for a server on a network port. See [`runbook/mcp.md` 
 
 If clients hold keys, restricting `/admin/*` at the reverse proxy is still a sensible second layer.
 
+### 4a. Feeder keys (one key = one source)
+
+A feeder — anything that posts documents on its own schedule (`scripts/tg_ingest.py`, a scraper, a
+client-specific importer) — gets its **own** key, narrowed to one graph and to writing:
+
+```bash
+uv run python -m scripts.tenant_admin key --tenant acme --owner tg:acme-news \
+    --scopes write --graphs acme_news
+```
+
+What that buys, with no new table: the key registry IS the source registry (step 1.4 variant A of
+[`plans/2026-10-17-project-boundaries.md`](superpowers/plans/2026-10-17-project-boundaries.md)).
+
+| Property | Effect |
+|---|---|
+| Attribution | `documents.source_kind` records the key's `owner`, so every row says who brought it. Rows written before this shipped keep `'upload'` — that is what "ingested before the registry" looks like, and there is nothing to backfill them from. |
+| Target graph | With exactly one `graph_ids` entry, `X-Graph` may be omitted — the key's own graph is the default. Named explicitly, the header still wins, so a foreign graph gets the honest 404 instead of a silent substitution. Two or more ids: no substitution, the caller must name one. |
+| Blast radius | `scopes={write}` means the key cannot search, cannot read a job status and cannot fetch originals. A leaked feeder key buys an attacker the ability to add documents to one graph — not to read the corpus. |
+| Revocation | One feeder is revoked by its own hash; the others keep running. |
+
+Two things to know before relying on it:
+
+* Under `AUTHZ_MODE=log` none of this refuses anything — the decision is only logged. Feeder isolation
+  starts at `enforce`.
+* `read` is one action covering both "poll my own job" and "search the corpus". A feeder that needs
+  `GET /ingest/{job_id}` (e.g. `scripts/ingest_medical.py`) must be given `read`, and then it can search
+  too. Splitting the two is a new action in the model, not a setting.
+
+What a per-source *registry table* would add on top — default duplicate policy, priority, queue, group,
+an on/off switch and a per-source quota — is step 1.4 variant B and is deliberately not built.
+
 ## 5. Deploy
 
 1. Run `setup_db` first **and let it finish**: it moves `pg_trgm` to the `extensions` schema, adds

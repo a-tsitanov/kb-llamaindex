@@ -1,5 +1,6 @@
-"""insert_pending persists source_channel/source_group. Integration —
-skipped when Postgres is unreachable."""
+"""accept_document persists source_channel/source_group and pairs the row
+with its doc_processing row. Integration — skipped when Postgres is
+unreachable."""
 
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ import psycopg
 import pytest
 
 from src.config import settings
-from src.storage.postgres import AsyncPostgres
+from src.intake.repository import IntakeRepository
 from src.tenancy.context import default_graph_context
 
 
@@ -36,12 +37,12 @@ def _bounded_pg_sessions(monkeypatch):
     monkeypatch.setenv("PGOPTIONS", "-c lock_timeout=5s -c statement_timeout=30s")
 
 
-def test_insert_pending_writes_source_columns() -> None:
+def test_accept_document_writes_source_columns() -> None:
     doc_id = uuid.uuid4()
-    pg = AsyncPostgres(settings.postgres.dsn, graph=default_graph_context())
+    pg = IntakeRepository(settings.postgres.dsn, graph=default_graph_context())
 
     async def go():
-        await pg.insert_pending(
+        await pg.accept_document(
             doc_id, f"{doc_id}/tg_chan_1.txt",
             source_channel="chan", source_group="news",
         )
@@ -54,7 +55,14 @@ def test_insert_pending_writes_source_columns() -> None:
                 (str(doc_id),),
             )
             assert cur.fetchone() == ("chan", "news")
+            # Приём — один акт: строка обработки заводится вместе с документом.
+            cur.execute(
+                "SELECT status FROM doc_processing WHERE doc_id = %s",
+                (str(doc_id),),
+            )
+            assert cur.fetchone() == ("pending",)
     finally:
         with psycopg.connect(settings.postgres.dsn, autocommit=True) as conn:
             with conn.cursor() as cur:
+                # doc_processing уезжает следом по ON DELETE CASCADE.
                 cur.execute("DELETE FROM documents WHERE id = %s", (str(doc_id),))

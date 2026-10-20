@@ -14,10 +14,12 @@ from httpx import ASGITransport, AsyncClient
 
 from src.config import settings
 from src.storage.minio import S3Error
+from tests.test_intake.test_dedup import no_duplicate
 
 
 def _api_key_header() -> dict[str, str]:
     return {"X-API-Key": settings.api.keys_list[0]}
+
 
 
 def _stub_minio(return_uri: str = "s3://test/abc/test.txt") -> MagicMock:
@@ -36,19 +38,20 @@ def _stub_temporal_client() -> MagicMock:
 @pytest.mark.asyncio
 async def test_ingest_uploads_to_minio_and_inserts_s3_uri() -> None:
     from src.api.main import app
-    from src.storage.postgres import AsyncPostgres
+    from src.intake.repository import IntakeRepository
 
     stub_storage = _stub_minio("s3://kb-uploads/abc/file.txt")
     fake_client = _stub_temporal_client()
 
     with (
         patch(
-            "src.api.routes.ingest.build_minio_storage",
+            "src.intake.api.ingest.build_minio_storage",
             return_value=stub_storage,
         ),
-        patch.object(AsyncPostgres, "insert_pending", new=AsyncMock()) as ins,
+        no_duplicate(),
+        patch.object(IntakeRepository, "accept_document", new=AsyncMock()) as ins,
         patch(
-            "src.api.routes.ingest.get_temporal_client",
+            "src.intake.api.ingest.get_temporal_client",
             new=AsyncMock(return_value=fake_client),
         ),
     ):
@@ -103,7 +106,7 @@ async def test_ingest_uploads_to_minio_and_inserts_s3_uri() -> None:
 @pytest.mark.asyncio
 async def test_ingest_returns_503_when_minio_fails() -> None:
     from src.api.main import app
-    from src.storage.postgres import AsyncPostgres
+    from src.intake.repository import IntakeRepository
 
     stub_storage = MagicMock()
     stub_storage.put_object.side_effect = S3Error(
@@ -118,12 +121,13 @@ async def test_ingest_returns_503_when_minio_fails() -> None:
 
     with (
         patch(
-            "src.api.routes.ingest.build_minio_storage",
+            "src.intake.api.ingest.build_minio_storage",
             return_value=stub_storage,
         ),
-        patch.object(AsyncPostgres, "insert_pending", new=AsyncMock()) as ins,
+        no_duplicate(),
+        patch.object(IntakeRepository, "accept_document", new=AsyncMock()) as ins,
         patch(
-            "src.api.routes.ingest.get_temporal_client",
+            "src.intake.api.ingest.get_temporal_client",
             new=AsyncMock(return_value=fake_client),
         ),
     ):
@@ -149,7 +153,7 @@ async def test_ingest_returns_503_when_minio_unreachable() -> None:
     from urllib3.exceptions import MaxRetryError
 
     from src.api.main import app
-    from src.storage.postgres import AsyncPostgres
+    from src.intake.repository import IntakeRepository
 
     stub_storage = MagicMock()
     stub_storage.put_object.side_effect = MaxRetryError(
@@ -160,12 +164,13 @@ async def test_ingest_returns_503_when_minio_unreachable() -> None:
 
     with (
         patch(
-            "src.api.routes.ingest.build_minio_storage",
+            "src.intake.api.ingest.build_minio_storage",
             return_value=stub_storage,
         ),
-        patch.object(AsyncPostgres, "insert_pending", new=AsyncMock()) as ins,
+        no_duplicate(),
+        patch.object(IntakeRepository, "accept_document", new=AsyncMock()) as ins,
         patch(
-            "src.api.routes.ingest.get_temporal_client",
+            "src.intake.api.ingest.get_temporal_client",
             new=AsyncMock(return_value=fake_client),
         ),
     ):
@@ -180,52 +185,6 @@ async def test_ingest_returns_503_when_minio_unreachable() -> None:
     assert resp.status_code == 503, resp.text
     ins.assert_not_awaited()
     fake_client.start_workflow.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_ingest_returns_409_when_workflow_already_started() -> None:
-    """Reuse policy on the Temporal side raises
-    ``WorkflowAlreadyStartedError`` when a workflow with the same
-    id already exists.  API should map that to 409 Conflict instead
-    of letting it propagate as a 500."""
-    from temporalio.exceptions import WorkflowAlreadyStartedError
-
-    from src.api.main import app
-    from src.storage.postgres import AsyncPostgres
-
-    stub_storage = _stub_minio("s3://kb-uploads/abc/file.txt")
-    fake_client = MagicMock()
-    fake_client.start_workflow = AsyncMock(
-        side_effect=WorkflowAlreadyStartedError(
-            workflow_id="ingest-deadbeef",
-            workflow_type="DocumentIngestWorkflow",
-            run_id="run-abc",
-        ),
-    )
-
-    with (
-        patch(
-            "src.api.routes.ingest.build_minio_storage",
-            return_value=stub_storage,
-        ),
-        patch.object(AsyncPostgres, "insert_pending", new=AsyncMock()),
-        patch(
-            "src.api.routes.ingest.get_temporal_client",
-            new=AsyncMock(return_value=fake_client),
-        ),
-    ):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            resp = await ac.post(
-                "/api/v1/ingest",
-                headers=_api_key_header(),
-                files={"file": ("file.txt", b"hello", "text/plain")},
-            )
-
-    assert resp.status_code == 409, resp.text
-    body = resp.json()
-    assert body["detail"]["workflow_id"] == "ingest-deadbeef"
-    assert body["detail"]["run_id"] == "run-abc"
 
 
 @pytest.mark.asyncio
@@ -250,19 +209,20 @@ async def test_ingest_always_starts_scheduler() -> None:
     IngestSchedulerWorkflow (id='ingest-scheduler', signal='submit').
     There is no fallback direct-start path any more."""
     from src.api.main import app
-    from src.storage.postgres import AsyncPostgres
+    from src.intake.repository import IntakeRepository
 
     stub_storage = _stub_minio("s3://kb-uploads/abc/report.pdf")
     fake_client = _stub_temporal_client()
 
     with (
         patch(
-            "src.api.routes.ingest.build_minio_storage",
+            "src.intake.api.ingest.build_minio_storage",
             return_value=stub_storage,
         ),
-        patch.object(AsyncPostgres, "insert_pending", new=AsyncMock()),
+        no_duplicate(),
+        patch.object(IntakeRepository, "accept_document", new=AsyncMock()),
         patch(
-            "src.api.routes.ingest.get_temporal_client",
+            "src.intake.api.ingest.get_temporal_client",
             new=AsyncMock(return_value=fake_client),
         ),
     ):
@@ -296,20 +256,21 @@ async def test_ingest_document_date_propagates_epochs() -> None:
     """A valid `document_date` is converted to epoch-days and snapshotted
     onto IngestParams; the ISO date is written to documents.doc_date."""
     from src.api.main import app
+    from src.intake.repository import IntakeRepository
     from src.retrieval.date_filters import iso_to_epoch_days
-    from src.storage.postgres import AsyncPostgres
 
     stub_storage = _stub_minio("s3://kb-uploads/abc/file.txt")
     fake_client = _stub_temporal_client()
 
     with (
         patch(
-            "src.api.routes.ingest.build_minio_storage",
+            "src.intake.api.ingest.build_minio_storage",
             return_value=stub_storage,
         ),
-        patch.object(AsyncPostgres, "insert_pending", new=AsyncMock()) as ins,
+        no_duplicate(),
+        patch.object(IntakeRepository, "accept_document", new=AsyncMock()) as ins,
         patch(
-            "src.api.routes.ingest.get_temporal_client",
+            "src.intake.api.ingest.get_temporal_client",
             new=AsyncMock(return_value=fake_client),
         ),
     ):
@@ -337,19 +298,20 @@ async def test_ingest_bad_document_date_422() -> None:
     """A malformed `document_date` is rejected with 422 before any
     upload / Postgres / Temporal work happens."""
     from src.api.main import app
-    from src.storage.postgres import AsyncPostgres
+    from src.intake.repository import IntakeRepository
 
     stub_storage = _stub_minio()
     fake_client = _stub_temporal_client()
 
     with (
         patch(
-            "src.api.routes.ingest.build_minio_storage",
+            "src.intake.api.ingest.build_minio_storage",
             return_value=stub_storage,
         ),
-        patch.object(AsyncPostgres, "insert_pending", new=AsyncMock()) as ins,
+        no_duplicate(),
+        patch.object(IntakeRepository, "accept_document", new=AsyncMock()) as ins,
         patch(
-            "src.api.routes.ingest.get_temporal_client",
+            "src.intake.api.ingest.get_temporal_client",
             new=AsyncMock(return_value=fake_client),
         ),
     ):
@@ -375,15 +337,16 @@ async def test_ingest_unknown_queue_422(monkeypatch) -> None:
     before any upload/enqueue."""
     from src.api.main import app
     from src.config import settings
-    from src.storage.postgres import AsyncPostgres
+    from src.intake.repository import IntakeRepository
 
     monkeypatch.setattr(settings.ingest_admission, "backend", "rabbitmq")
     monkeypatch.setattr(settings.rabbitmq, "queues", ["ingest.pending"])
     stub_storage = _stub_minio()
 
     with (
-        patch("src.api.routes.ingest.build_minio_storage", return_value=stub_storage),
-        patch.object(AsyncPostgres, "insert_pending", new=AsyncMock()) as ins,
+        patch("src.intake.api.ingest.build_minio_storage", return_value=stub_storage),
+        no_duplicate(),
+        patch.object(IntakeRepository, "accept_document", new=AsyncMock()) as ins,
     ):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -404,7 +367,7 @@ async def test_ingest_valid_queue_forwarded(monkeypatch) -> None:
     """rabbitmq backend: a configured `queue` is passed to submit_document."""
     from src.api.main import app
     from src.config import settings
-    from src.storage.postgres import AsyncPostgres
+    from src.intake.repository import IntakeRepository
 
     monkeypatch.setattr(settings.ingest_admission, "backend", "rabbitmq")
     monkeypatch.setattr(settings.rabbitmq, "queues", ["ingest.pending", "ingest.bulk"])
@@ -412,10 +375,11 @@ async def test_ingest_valid_queue_forwarded(monkeypatch) -> None:
     submit = AsyncMock()
 
     with (
-        patch("src.api.routes.ingest.build_minio_storage", return_value=stub_storage),
-        patch.object(AsyncPostgres, "insert_pending", new=AsyncMock()),
-        patch("src.api.routes.ingest.get_temporal_client", new=AsyncMock()),
-        patch("src.api.routes.ingest.submit_document", submit),
+        patch("src.intake.api.ingest.build_minio_storage", return_value=stub_storage),
+        no_duplicate(),
+        patch.object(IntakeRepository, "accept_document", new=AsyncMock()),
+        patch("src.intake.api.ingest.get_temporal_client", new=AsyncMock()),
+        patch("src.intake.api.ingest.submit_document", submit),
     ):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:

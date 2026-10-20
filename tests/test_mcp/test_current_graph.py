@@ -4,7 +4,7 @@ from fastmcp.exceptions import ToolError
 import src.mcp._shared as sh
 from src.config import settings
 from src.tenancy.api_keys import ApiKeyRecord
-from src.tenancy.authz import ALL_ACTIONS
+from src.tenancy.authz import ALL_ACTIONS, Action
 from src.tenancy.context import default_graph_context, new_graph_context
 
 
@@ -96,6 +96,38 @@ async def test_current_graph_http_without_header_uses_configured_graph(monkeypat
     monkeypatch.setattr(sh, "get_http_headers", lambda **kw: {})
     assert (await sh.current_graph()).id == "default"
     monkeypatch.setenv("KB_MCP_GRAPH", "acme")
+    assert (await sh.current_graph()).id == "acme"
+
+
+async def test_narrowed_key_without_header_binds_to_its_own_graph(monkeypatch):
+    """Фидерный ключ в MCP ведёт себя как в HTTP: один граф — он и выбран.
+
+    Без этого ``KB_MCP_GRAPH`` увёл бы такой ключ в чужой граф, и отказ
+    пришёл бы там, где клиент ничего не выбирал.
+    """
+    monkeypatch.setenv("KB_MCP_GRAPH", "default")
+    monkeypatch.setattr(settings.authz, "mode", "enforce")
+    monkeypatch.setattr(sh, "get_graph_registry", lambda: _Reg())
+    monkeypatch.setattr(sh, "get_http_headers", lambda **kw: {})
+    rec = ApiKeyRecord(
+        owner="feeder", tenant_id="default",
+        scopes=frozenset({"write"}), graph_ids=("acme_hr",),
+    )
+    tok = await mint_token(monkeypatch, rec)
+    monkeypatch.setattr(sh, "get_access_token", lambda: tok)
+    assert (await sh.current_graph(Action.WRITE)).id == "acme_hr"
+
+
+async def test_multi_graph_key_without_header_still_uses_configured_graph(monkeypatch):
+    monkeypatch.setenv("KB_MCP_GRAPH", "acme")
+    monkeypatch.setattr(sh, "get_graph_registry", lambda: _Reg())
+    monkeypatch.setattr(sh, "get_http_headers", lambda **kw: {})
+    rec = ApiKeyRecord(
+        owner="two", tenant_id="default",
+        scopes=frozenset({"read"}), graph_ids=("acme", "beta"),
+    )
+    tok = await mint_token(monkeypatch, rec)
+    monkeypatch.setattr(sh, "get_access_token", lambda: tok)
     assert (await sh.current_graph()).id == "acme"
 
 
@@ -211,11 +243,11 @@ async def test_stats_tool_builds_repository_for_bound_graph(monkeypatch):
 async def test_tools_server_tool_uses_bound_graph(monkeypatch):
     from unittest.mock import AsyncMock
 
+    from src.intake.repository import IntakeRepository
     from src.mcp import tools_server
-    from src.storage.postgres import AsyncPostgres
 
     seen = {}
-    orig_init = AsyncPostgres.__init__
+    orig_init = IntakeRepository.__init__
 
     def _spy(self, *a, graph=None, **kw):
         seen["graph"] = graph.id
@@ -224,7 +256,7 @@ async def test_tools_server_tool_uses_bound_graph(monkeypatch):
     async def _acme():
         return new_graph_context("acme")
     monkeypatch.setattr(tools_server, "current_graph", _acme)
-    monkeypatch.setattr(AsyncPostgres, "__init__", _spy)
-    monkeypatch.setattr(AsyncPostgres, "status_counts_by", AsyncMock(return_value=[]))
+    monkeypatch.setattr(IntakeRepository, "__init__", _spy)
+    monkeypatch.setattr(IntakeRepository, "status_counts_by", AsyncMock(return_value=[]))
     await tools_server.channel_message_stats()
     assert seen["graph"] == "acme"

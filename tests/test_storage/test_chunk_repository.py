@@ -13,12 +13,12 @@ from pathlib import Path
 
 import pytest
 
+from src.intake.repository import DocumentRow, IntakeRepository
 from src.storage.chunk_repository import (
     ChunkRepository,
     _normalise_chunk_row,
     _read_file_capped,
 )
-from src.storage.postgres import DocumentRow
 from src.tenancy.context import default_graph_context
 
 # ── stubs ────────────────────────────────────────────────────────────
@@ -137,6 +137,16 @@ def test_read_file_capped_handles_non_utf8(tmp_path: Path) -> None:
 
 
 # ── ChunkRepository integration ─────────────────────────────────────
+
+
+def test_default_pg_is_intake_repository() -> None:
+    """Без явного ``pg=`` репозиторий сам берёт реестр приёма: оба
+    вызывающих места (MCP и воркер) перестали инжектировать AsyncPostgres,
+    у которого метода ``get`` больше нет."""
+    repo = ChunkRepository(
+        graph=default_graph_context(), milvus_client=_StubMilvus(rows=[]),
+    )
+    assert isinstance(repo._pg, IntakeRepository)
 
 
 @pytest.mark.asyncio

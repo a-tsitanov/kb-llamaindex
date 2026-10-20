@@ -5,6 +5,9 @@ nodes, KG entity/relation lists) to MinIO under
 ``s3://{bucket}/{workflow_run_id}/{stage}.pkl`` and pass only the URI
 to the next activity.  ``finalize`` (and the failure path) removes
 the whole ``{workflow_run_id}/`` prefix so we don't accrete blobs.
+Вторая половина той же уборки — локальный каталог скачивания
+(``remove_local_dir`` ниже): оба следа принадлежат одному прогону,
+поэтому снимаются из одного места.
 
 Pickle is fine here because:
   * the producer and consumer share the same Python image,
@@ -17,7 +20,9 @@ from __future__ import annotations
 
 import io
 import pickle
+import shutil
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -118,6 +123,25 @@ class StagingStore:
             )
             self.delete_prefix(run_id)
         return orphans
+
+
+def remove_local_dir(path: str | None) -> None:
+    """Снести локальный каталог прогона, если он ещё есть.
+
+    Вторая половина уборки за прогоном: каталог скачивания — такой же
+    временный след одного ``workflow_run_id``, как и префикс в MinIO,
+    поэтому живёт рядом с ``delete_prefix``, а не копией в каждой
+    активности (``finalize``, ``mark_failed``, ``mark_skipped``).
+
+    Блокирующий вызов — звать через ``asyncio.to_thread``.
+    ``ignore_errors``: каталога может уже не быть (повтор активности после
+    успешной уборки), и падать на этом уборке нечего.
+    """
+    if not path:
+        return
+    p = Path(path)
+    if p.exists():
+        shutil.rmtree(p, ignore_errors=True)
 
 
 def _parse_uri(uri: str) -> tuple[str, str]:

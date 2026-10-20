@@ -646,6 +646,12 @@ curl -fsS -X POST http://localhost:8000/api/v1/ingest \
 # → {"job_id": "abc-...uuid..."}
 ```
 
+**Повторная заливка того же тела** в тот же граф отвечает `409 {"message":
+"duplicate", "doc_id": …}` — приём дедуплицирует по sha256 тела, и умолчание
+политики `reject`. Чтобы перезалить осознанно, добавьте
+`-F "on_duplicate=version"` (или `-F "backfill=true"`, у него то же
+умолчание): получится второй документ со ссылкой `duplicate_of` на первый.
+
 Поллинг статуса:
 
 ```bash
@@ -663,6 +669,12 @@ uv run python -m scripts.ingest_medical
 
 Конвертирует `tests/eval/corpora/medical/medical.json` → корпус-файл,
 загружает его через `/api/v1/ingest` и поллит, пока не завершится.
+
+Прогон повторяемый: тело каждый раз одно и то же, поэтому второй прогон
+получает на заливке `409` и дальше поллит документ, названный в теле 409
+(`doc_id`), а не заводит вторую копию корпуса — она удвоила бы чанки под
+каждым вопросом eval'а. Нужен честный переингест — заливайте руками с
+`on_duplicate=version` (§8a).
 
 ---
 
@@ -829,6 +841,7 @@ uv run python -m scripts.wipe_db --yes --keep-files --keep-temporal --keep-wiki
 | Поменять LLM / embedding-модель | `docs/MODELS.md` |
 | Инспектировать workflow'ы / ретраи | Temporal Web UI на `http://localhost:8080` |
 | Диагностировать KG-извлечение | `scripts/diag_kg.py`, `scripts/diag_kg_medical.py` |
-| Инспектировать состояние ingest-пайплайна | `docker exec kb-llamaindex-postgres-1 psql -U postgres -d kb_llamaindex -c "SELECT id, status, error FROM documents ORDER BY created_at DESC LIMIT 10;"` |
+| Понять, почему документов в графе меньше, чем залито | `GET /api/v1/intake/stats` — лестница сверки «строк залито против документов принято», застрявшие, причины отказов приёма (`docs/runbook/intake-stats.md`) |
+| Инспектировать состояние ingest-пайплайна | `uv run python -m scripts.check_ingestion` (разбивка по эффективному статусу) · `GET /api/v1/stats/messages?group_by=channel` (по каналам). Запись расщеплена: статус и ошибка обработки живут в `doc_processing`, причина отказа приёма — в `documents.intake_reason`, а в `documents.status` у принятого документа навсегда 'pending' |
 | Инспектировать сущности графа | NebulaGraph Studio на `http://localhost:7001` (graphd `:9669`, space `kb`, root/nebula) |
 | Инспектировать чанки Milvus | `pymilvus` REPL: `MilvusClient('http://localhost:19530').query(collection_name='kb_llamaindex', filter='doc_id=="..."', output_fields=["*"])` |

@@ -60,6 +60,6 @@ MinIO), `Content-Disposition` — прежний санитизированны�
 
 ## Ссылки
 
-- `src/api/routes/documents.py`, `src/workflow/wiki/article.py` (`_fmt_sources`,
+- `src/intake/api/documents.py`, `src/workflow/wiki/article.py` (`_fmt_sources`,
   `render_bot_section`), `src/storage/minio.py`, `src/storage/postgres.py`
 - CONCEPTS.md → «Source download & provenance links»

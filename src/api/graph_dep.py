@@ -24,13 +24,37 @@ from src.tenancy.registry import GraphNotFound, GraphNotReady, get_graph_registr
 GRAPH_NOT_FOUND_DETAIL = "graph not found"
 
 
-def choose_graph_id(x_graph: str | None) -> str:
-    """Graph selection is by ``X-Graph`` only (absent -> ``default``).
+def choose_graph_id(
+    x_graph: str | None,
+    key: ApiKeyRecord | None = None,
+    *,
+    default: str = DEFAULT_GRAPH_ID,
+) -> str:
+    """Graph selection: ``X-Graph`` if given, else the key's own graph when it
+    has exactly one, else ``default``.
 
-    No access decision here: this is also MCP's entry point
-    (``src/mcp/_shared.py``), which authorizes on its own seam."""
+    ``default`` — то, чем кончается выбор, когда ни заголовка, ни сужения
+    нет.  Шов MCP передаёт сюда ``KB_MCP_GRAPH``, чтобы правило выбора
+    существовало в одном месте, а не в двух похожих.
+
+    Про фидерный ключ.  Ключ, сужённый до ОДНОГО графа
+    (``api_keys.graph_ids``), без заголовка попадал бы на ``default``,
+    которого в его списке нет, и получал бы отказ на ровном месте — грабли
+    на каждый новый фидер.  Поэтому единственный граф ключа и есть его
+    умолчание.  Двух графов это не касается: подставлять один из них было
+    бы догадкой за клиента.
+
+    Это умолчание, а НЕ ограничение: названный заголовком граф не
+    подменяется никогда, иначе ключ не смог бы получить честный отказ по
+    чужому графу, и 404 с 403 перестали бы различаться.  Решение о доступе
+    по-прежнему принимает ``authz.guard`` — здесь его нет, потому что ту же
+    функцию зовёт шов MCP (``src/mcp/_shared.py``) со своим способом
+    отвечать об ошибке.
+    """
     if x_graph is None:
-        return DEFAULT_GRAPH_ID
+        if key is not None and key.graph_ids is not None and len(key.graph_ids) == 1:
+            return key.graph_ids[0]
+        return default
     try:
         validate_graph_id(x_graph)
     except InvalidGraphId:
@@ -52,7 +76,7 @@ def graph_for(action: Action) -> Callable[..., Awaitable[GraphContext]]:
         key: ApiKeyRecord = Depends(require_api_key),
         x_graph: str | None = Header(default=None, alias="X-Graph"),
     ) -> GraphContext:
-        gid = choose_graph_id(x_graph)
+        gid = choose_graph_id(x_graph, key)
         ctx: GraphContext | None = None
         tenant: str | None = None
         deferred: HTTPException | None = None

@@ -106,7 +106,6 @@ async def _init(graph: GraphContext) -> dict[str, Any]:
             build_vector_store,
         )
         from src.storage.chunk_repository import ChunkRepository
-        from src.storage.postgres import AsyncPostgres
 
         deps = {}
         if "model" not in _embed:
@@ -141,7 +140,7 @@ async def _init(graph: GraphContext) -> dict[str, Any]:
             deps["graph"] = None
             deps["graph_store"] = None
 
-        deps["chunks"] = ChunkRepository(graph=graph, pg=AsyncPostgres(graph=graph))
+        deps["chunks"] = ChunkRepository(graph=graph)
         # Publish only once fully built so a lock-free reader never sees a
         # half-populated dict.
         _deps_by_graph[graph.cache_key] = deps
@@ -651,7 +650,7 @@ async def graph_stats() -> dict[str, Any]:
 # NOT retrieval and NOT graph: a direct read over the `documents` table's
 # per-channel / per-group processing state.  Deliberately BYPASSES _init()
 # (no retriever/graph bootstrap needed for a plain Postgres aggregate) and
-# calls AsyncPostgres — the SAME aggregation methods the /api/v1/stats REST
+# calls IntakeRepository — the SAME aggregation methods the /api/v1/stats REST
 # routes and the message_stats CLI use, so all three surfaces report identical
 # numbers.  The thin `_stats_by` / `_timeline` helpers hold the validation so
 # they stay unit-testable without FastMCP tool-invocation internals.
@@ -663,7 +662,7 @@ async def _stats_by(
 ) -> dict[str, Any]:
     from datetime import date
 
-    from src.storage.postgres import GROUP_BY_COLUMN, AsyncPostgres
+    from src.intake.repository import GROUP_BY_COLUMN, IntakeRepository
 
     dimension = GROUP_BY_COLUMN.get(group_by)
     if dimension is None:
@@ -673,7 +672,7 @@ async def _stats_by(
         u = date.fromisoformat(until) if until else None
     except ValueError as exc:
         return {"error": f"since/until must be ISO YYYY-MM-DD: {exc}"}
-    rows = await AsyncPostgres(graph=graph).status_counts_by(
+    rows = await IntakeRepository(graph=graph).status_counts_by(
         dimension, since=s, until=u,
     )
     return {"group_by": group_by, "rows": rows}
@@ -686,7 +685,7 @@ async def _timeline(
 ) -> dict[str, Any]:
     from datetime import date
 
-    from src.storage.postgres import GROUP_BY_COLUMN, AsyncPostgres
+    from src.intake.repository import GROUP_BY_COLUMN, IntakeRepository
 
     if date_field not in ("created_at", "doc_date"):
         return {"error": "date_field must be 'created_at' or 'doc_date'"}
@@ -697,7 +696,7 @@ async def _timeline(
         u = date.fromisoformat(until) if until else None
     except ValueError as exc:
         return {"error": f"since/until must be ISO YYYY-MM-DD: {exc}"}
-    buckets = await AsyncPostgres(graph=graph).timeline_counts(
+    buckets = await IntakeRepository(graph=graph).timeline_counts(
         date_field=date_field, group_by=group_by,
         channel=channel, group=group, since=s, until=u,
     )
@@ -821,7 +820,14 @@ async def channel_message_stats(
     processing backlog). `group_by="channel"` (default) for per-channel;
     `group_by="group"` for per folder-group (news / analytics / …). Optional
     `since` / `until` are ISO `YYYY-MM-DD` bounds on ingest time (created_at).
-    Documents with no channel tag are excluded.
+    Documents with no channel tag are excluded. `total` counts ACCEPTED
+    documents; re-ingested copies of a body already known (the `version`
+    policy) are reported separately in `versions` = {status: count}.
+    UNDERCOUNTS CROSS-POSTS: intake dedup keys on the sha256 of the BODY
+    (the channel is not part of the key), so a verbatim repost in a second
+    watched channel is a duplicate and gets no row of its own — it is
+    counted only for whichever channel was read first. Read a per-channel
+    total as "bodies first seen here", not "posts published here".
     NOT FOR: message CONTENT / semantic search (use `vector_search`) or graph
     entities. NEXT STEP: for daily dynamics call `channel_message_timeline`."""
     graph = await current_graph()
@@ -846,6 +852,9 @@ async def channel_message_timeline(
     `group_by="channel"|"group"`, and/or filter to a single `channel` /
     `group`. `since` / `until` are ISO `YYYY-MM-DD` bounds. Returns
     `{date_field, buckets:[{day, count[, key]}]}`, ordered by day.
+    Undercounts cross-posts the same way `channel_message_stats` does: a
+    verbatim repost in a second watched channel is deduped away by body
+    hash and never becomes a bucket of that channel's series.
     NOT FOR: per-channel status totals (use `channel_message_stats`)."""
     graph = await current_graph()
     return await _timeline(

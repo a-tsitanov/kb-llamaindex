@@ -21,6 +21,7 @@ import asyncio
 import psycopg
 
 from src.config import settings
+from src.intake.repository import EFFECTIVE_STATUS
 
 _SEP = "─" * 70
 
@@ -33,8 +34,24 @@ async def check_postgres() -> None:
         async with await psycopg.AsyncConnection.connect(
             settings.postgres.dsn, connect_timeout=5,
         ) as conn, conn.cursor() as cur:
+            # Запись расщеплена: статус обработки живёт в `doc_processing`,
+            # а в `documents.status` остаётся дорасщеплённое значение (I8),
+            # поэтому голый `GROUP BY status` показывал бы одни 'pending'.
+            # Выражение берём из реестра приёма, чтобы диагностика и
+            # отчётность не разъехались.  GROUP BY повторяет ВЫРАЖЕНИЕ, а не
+            # псевдоним: имя `status` есть в обеих таблицах, и Postgres
+            # разрешил бы его в пользу входной колонки.
+            #
+            # Предиката `duplicate_of IS NULL` здесь НЕТ намеренно: это
+            # построчная диагностика «что лежит в Postgres», а не отчёт
+            # «сколько документов принято», поэтому версии того же тела
+            # (политика on_duplicate=version) считаются как отдельные строки —
+            # у каждой свой комплект чанков.
             await cur.execute(
-                "SELECT status, COUNT(*) FROM documents GROUP BY status"
+                f"SELECT {EFFECTIVE_STATUS} AS status, COUNT(*) "
+                f"FROM documents d "
+                f"LEFT JOIN doc_processing p ON p.doc_id = d.id "
+                f"GROUP BY {EFFECTIVE_STATUS}"
             )
             rows = await cur.fetchall()
         if not rows:

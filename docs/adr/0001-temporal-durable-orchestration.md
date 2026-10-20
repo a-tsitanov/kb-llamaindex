@@ -48,6 +48,6 @@ best-effort (`graph_status='vector_only'` при исчерпании); сбой
 ## Ссылки
 
 - `src/workflow/document_ingest.py`, `src/workflow/worker.py`,
-  `src/workflow/client.py`, `src/api/routes/ingest.py`
+  `src/workflow/client.py`, `src/intake/api/ingest.py`
 - Коммит `6ea90b5` («remove taskiq + RabbitMQ now that ingest runs on Temporal»)
 - `docs/ARCHITECTURE.md`; CONCEPTS.md → «Durable orchestration with Temporal»

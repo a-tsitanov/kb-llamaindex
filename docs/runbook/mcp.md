@@ -290,11 +290,12 @@ uv run python -m src.mcp.stats_server --transport http --port 9003
 
 Каждый вызов тула привязан ровно к одному графу — `current_graph()` в [`src/mcp/_shared.py`](../../src/mcp/_shared.py). Тихого фолбэка на `default` нет: любой отказ — `ToolError`.
 
-- Граф = заголовок `X-Graph`, если он есть (валидация slug — `choose_graph_id`, [`src/api/graph_dep.py`](../../src/api/graph_dep.py); невалидный → «invalid X-Graph»). Одинаково для HTTP/SSE с токеном и без (`KB_MCP_REQUIRE_AUTH=false`); токен на выбор графа не влияет.
-- Без заголовка (и всегда в stdio — там нет HTTP-запроса) — env `KB_MCP_GRAPH` (обычная env-переменная процесса, не поле settings; по умолчанию `default`).
+- Граф = заголовок `X-Graph`, если он есть (валидация slug — `choose_graph_id`, [`src/api/graph_dep.py`](../../src/api/graph_dep.py); невалидный → «invalid X-Graph»). Одинаково для HTTP/SSE с токеном и без (`KB_MCP_REQUIRE_AUTH=false`).
+- Без заголовка, но ключ сужен до ОДНОГО графа (`api_keys.graph_ids`) — берётся он. Это умолчание фидерного ключа, а не ограничение: названный заголовком граф не подменяется никогда, и чужой по-прежнему получает отказ. Два графа и больше — подстановки нет, выбирать за клиента нечего.
+- Без заголовка и без сужения (и всегда в stdio — там нет HTTP-запроса) — env `KB_MCP_GRAPH` (обычная env-переменная процесса, не поле settings; по умолчанию `default`).
 - Выбранный id всегда резолвится через реестр графов (`public.graphs`): неизвестный граф → `graph not found` (без slug'а, см. §6.2 — тот же текст отдаётся на чужой граф), граф не в статусе `ready` → `graph '<id>' is <status>`.
 
-Без `X-Graph` вызов идёт в `KB_MCP_GRAPH` (обычно `default`), поэтому существующим клиентам заголовок не нужен. Создание/удаление графов — `/admin/graphs*` у FastAPI; выдача ключей — только CLI `scripts/tenant_admin.py`.
+Без `X-Graph` вызов идёт в единственный граф ключа, если ключ сужен, иначе в `KB_MCP_GRAPH` (обычно `default`) — поэтому существующим клиентам заголовок не нужен. Создание/удаление графов — `/admin/graphs*` у FastAPI; выдача ключей — только CLI `scripts/tenant_admin.py`.
 
 ```bash
 # Development без auth:

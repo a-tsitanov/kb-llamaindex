@@ -222,7 +222,7 @@ payload-ам Temporal едут только небольшие контракт�
 
 **Опциональный классификатор:** между `fetch_source` и `parse_and_chunk`
 может стоять шаг `classify_document` (opt-in `CLASSIFIER_ENABLED`,
-`src/ingestion/classifier.py`) — детерминированные правила + LLM-гейт
+`src/intake/classifier.py`) — детерминированные правила + LLM-гейт
 отсеивают мусор; документ-мусор завершается новым статусом `skipped`
 вместо прохода через конвейер. `force=true` на `/ingest` обходит правила
 и форсирует приём.

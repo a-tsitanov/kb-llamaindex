@@ -269,7 +269,6 @@ async def test_warm_up_model_in_deps_does_not_skip_init(monkeypatch):
     import src.retrieval.llm_pool as pool
     import src.retrieval.vector_index as vi
     import src.storage.chunk_repository as cr
-    import src.storage.postgres as pg
     from src.mcp import tools_server as ts
 
     class _Index:
@@ -291,8 +290,7 @@ async def test_warm_up_model_in_deps_does_not_skip_init(monkeypatch):
     monkeypatch.setattr(vi, "build_vector_index", lambda store, embed: _Index())
     monkeypatch.setattr(pool, "get_llm_pool", lambda: _Pool())
     monkeypatch.setattr(gstore, "build_graph_store", no_graph)
-    monkeypatch.setattr(cr, "ChunkRepository", lambda *, graph, pg: "chunks")
-    monkeypatch.setattr(pg, "AsyncPostgres", lambda *, graph: None)
+    monkeypatch.setattr(cr, "ChunkRepository", lambda *, graph: "chunks")
     monkeypatch.setattr(ts, "_deps", {"cross_encoder": object()})  # warm-up finished first
     monkeypatch.setattr(ts, "_deps_by_graph", {})
     monkeypatch.setattr(ts, "_embed", {})

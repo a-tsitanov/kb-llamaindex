@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
+from pydantic import ValidationError
+
 from src.workflow.contracts import (
     Ctx,
     FinalizeIn,
@@ -58,6 +61,25 @@ def test_finalize_in_carries_graph_status() -> None:
 def test_ingest_result_shape() -> None:
     r = IngestResult(doc_id="d", chunk_count=2, graph_status="completed")
     assert IngestResult.model_validate_json(r.model_dump_json()) == r
+
+
+def test_ingest_result_accepts_skipped() -> None:
+    # Выход воркфлоу и статус обработки — разные домены: отказ приёма
+    # (``mark_skipped``) доезжает до конца как 'skipped', поэтому
+    # ``IngestResult.graph_status`` объявлен ``IngestOutcome``, а не
+    # ``GraphStatus``.
+    r = IngestResult(doc_id="d", chunk_count=0, graph_status="skipped")
+    assert IngestResult.model_validate_json(r.model_dump_json()) == r
+
+
+def test_finalize_in_rejects_skipped() -> None:
+    # Обратная сторона: сужение домена ОБРАБОТКИ намеренное.  ``finalize``
+    # пишет свой ``graph_status`` в ``doc_processing.status``, CHECK которой
+    # 'skipped' не содержит, — значение обязано отлетать на контракте, а не
+    # на SQL с бесконечным ретраем активности.
+    ctx = Ctx(doc_id="d", local_path="/tmp/f", cleanup_dir=None, workflow_run_id="r")
+    with pytest.raises(ValidationError):
+        FinalizeIn(ctx=ctx, indexed=Indexed(node_ids=[], count=0), graph_status="skipped")
 
 
 def test_mark_failed_in_optional_ctx() -> None:

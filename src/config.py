@@ -18,7 +18,6 @@ from loguru import logger
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-from src.ingest_queue.priorities import PRIO_LIVE
 from src.stats.align import GRANULARITIES
 
 # Two physical model tiers operators actually manage:
@@ -1117,9 +1116,14 @@ class RabbitMQSettings(BaseSettings):
     # nothing waiting. Immutable per queue: changing it needs a delete +
     # redeclare of the queue (see docs/runbook/reingest-and-priority.md).
     # Floor is PRIO_LIVE: a max below the live priority would fail the
-    # route's ``0 <= PRIO_LIVE <= max_priority`` check and 422 all live
-    # ingest.
-    max_priority: int = Field(default=10, ge=PRIO_LIVE, le=255)
+    # route's ``0 <= PRIO_LIVE <= max_priority`` check and 422 all live ingest.
+    # Литерал, а не импорт ``src.intake.queue.priorities``: ``src.config``
+    # импортируют ВСЕ, в том числе ядро, и такой импорт протаскивал бы приём
+    # в ядро транзитивно — ровно то, что запрещает
+    # tests/test_intake/test_boundaries.py (там же src/config.py в списке
+    # проверяемых файлов). Расхождение литерала с PRIO_LIVE сторожит
+    # tests/test_config/test_ingest_priorities.py.
+    max_priority: int = Field(default=10, ge=5, le=255)
 
     @field_validator("queues", mode="before")
     @classmethod
@@ -1153,74 +1157,6 @@ _PREFLIGHT_PLACEHOLDER_SECRETS: frozenset[str] = frozenset(
         "sk-litellm-stub",
     }
 )
-
-
-class BotSettings(BaseSettings):
-    """Telegram Q&A bot (src/bot). Answers ONLY from the KB via the search API."""
-
-    model_config = SettingsConfigDict(env_prefix="BOT_", env_file=".env", extra="ignore")
-
-    token: str = Field(default="", description="Telegram bot token from @BotFather (BOT_TOKEN).")
-    allowed_users: str = Field(
-        default="",
-        description="SUPERSEDED by the `bot_user` table — kept for the pre-database "
-        "path only. Access is granted with /approve, not here.",
-    )
-    admin_ids: str = Field(
-        default="",
-        description="Comma-separated Telegram user ids seeded as active admins on "
-        "startup. Without at least one there is NOBODY who can approve anybody, and "
-        "the bot is unusable by design (it fails closed).",
-    )
-    max_concurrent: int = Field(
-        default=2, ge=0,
-        description="Simultaneous /ask searches allowed. A search takes ~90s and is "
-        "felt by the rest of the host; over the cap the user is refused, not queued. "
-        "0 = unlimited.",
-    )
-    default_daily_quota: int = Field(
-        default=20, ge=0,
-        description="Requests per user per day for newly created users. Counted over "
-        "every attempt, refusals included. 0 = unlimited.",
-    )
-    api_base: str = Field(
-        default="http://api:8000",
-        description="Base URL of the search API the bot calls (compose-internal by default).",
-    )
-    api_key: str = Field(
-        default="", description="X-API-Key for the search API. Empty → falls back to API_KEYS[0].",
-    )
-    graph: str = Field(
-        default="default",
-        description="Graph id the bot queries (BOT_GRAPH): sent as X-Graph on every "
-        "API call. The API key must be allowed this graph.",
-    )
-    search_mode: str = Field(
-        default="local",
-        description="Primary search mode: auto | local | global | drift. `local` is "
-        "the default because `auto` was measured routing to `global`, which answered "
-        "'Empty Response' with 0 sources where `local` returned 10 sources and a real "
-        "answer for the same question (2026-08-17).",
-    )
-    fallback_mode: str = Field(
-        default="drift",
-        description="Fallback mode when the primary returns empty/errors "
-        "(auto|local|global|drift). Empty string = no fallback.",
-    )
-    max_messages: int = Field(
-        default=8, ge=1, description="Rolling conversation window kept per chat.",
-    )
-    agent_base: str = Field(
-        default="http://openclaw:18789",
-        description="openclaw gateway base URL for the /agent bridge (its OpenAI-compatible "
-        "/v1/chat/completions). Empty disables the /agent command.",
-    )
-    agent_token: str = Field(
-        default="", description="Bearer for the openclaw gateway. Empty → falls back to API key.",
-    )
-    search_timeout_s: float = Field(
-        default=180.0, description="Per-search HTTP timeout (fallback modes are slower).",
-    )
 
 
 class StatsSettings(BaseSettings):
@@ -1356,9 +1292,6 @@ class Settings(BaseSettings):
     def monitor(self) -> MonitorSettings:
         return MonitorSettings()
 
-    @cached_property
-    def bot(self) -> BotSettings:
-        return BotSettings()
 
     @cached_property
     def stats(self) -> StatsSettings:

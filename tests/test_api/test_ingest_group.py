@@ -14,25 +14,28 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from src.config import settings
+from tests.test_intake.test_dedup import no_duplicate
 
 
 def _api_key_header() -> dict[str, str]:
     return {"X-API-Key": settings.api.keys_list[0]}
 
 
+
 @pytest.mark.asyncio
 async def test_ingest_unknown_group_422() -> None:
     from src.api.main import app
-    from src.storage.postgres import AsyncPostgres
+    from src.intake.repository import IntakeRepository
 
     stub_storage = MagicMock()
 
     with (
         patch(
-            "src.api.routes.ingest.build_minio_storage",
+            "src.intake.api.ingest.build_minio_storage",
             return_value=stub_storage,
         ),
-        patch.object(AsyncPostgres, "insert_pending", new=AsyncMock()) as ins,
+        no_duplicate(),
+        patch.object(IntakeRepository, "accept_document", new=AsyncMock()) as ins,
     ):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:

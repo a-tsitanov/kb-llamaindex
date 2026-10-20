@@ -1,5 +1,6 @@
 # OpenClaw agent gateway as ONE extra container, layered on the production stack.
-# Extension of docker-compose.prod.yml — replaces the self-written src/bot as the
+# Extension of docker-compose.prod.yml — the Telegram surface of the KB (the
+# self-written src/bot it replaced was removed from the repo on 2026-10-19) as the
 # Telegram-facing agentic layer. OpenClaw talks to the KB's three MCP servers
 # (kb-search :9001, kb-tools :9002, kb-stats :9003) over streamable-http + Bearer,
 # runs an agentic tool-use loop on the local litellm LLM, and speaks Telegram

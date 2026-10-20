@@ -164,14 +164,17 @@ async def current_graph(action: Action = Action.READ) -> GraphContext:
     Every refusal (invalid slug, unknown graph, not ready, not authorized)
     raises ``ToolError`` — there is no silent fallback to the default graph
     (R-A4)."""
+    # Токен читается ДО выбора графа: ключ, сужённый до одного графа
+    # (фидер), задаёт его сам — тем же правилом, что и HTTP-шов.  Иначе
+    # ``KB_MCP_GRAPH`` увёл бы такой ключ в чужой граф и дал бы отказ там,
+    # где клиент ничего не выбирал.
+    token = get_access_token()
+    key = _record_from_token(token) if token is not None else None
     x_graph = get_http_headers(include={"x-graph"}).get("x-graph")
-    if x_graph is None:
-        gid = _configured_mcp_graph()
-    else:
-        try:
-            gid = choose_graph_id(x_graph)
-        except HTTPException as exc:
-            raise ToolError(str(exc.detail)) from None
+    try:
+        gid = choose_graph_id(x_graph, key, default=_configured_mcp_graph())
+    except HTTPException as exc:
+        raise ToolError(str(exc.detail)) from None
     ctx: GraphContext | None = None
     tenant: str | None = None
     deferred: ToolError | None = None
@@ -184,7 +187,6 @@ async def current_graph(action: Action = Action.READ) -> GraphContext:
         deferred = ToolError(f"graph {gid!r} is {exc.status}")
     else:
         tenant = ctx.tenant_id
-    token = get_access_token()
     if token is None:
         # No token at all: stdio (no HTTP request) or HTTP with
         # KB_MCP_REQUIRE_AUTH=false.  There is no key to decide about, and
@@ -192,7 +194,7 @@ async def current_graph(action: Action = Action.READ) -> GraphContext:
         # proceeds exactly as before this feature (spec §3.2).
         _warn_unauthenticated_once()
     else:
-        decision = authz.guard(_record_from_token(token), gid, tenant, action)
+        decision = authz.guard(key, gid, tenant, action)
         if not decision.allowed:
             if decision.reason in ("scope", "graph"):
                 # The graph is the key's own; only the right is missing.

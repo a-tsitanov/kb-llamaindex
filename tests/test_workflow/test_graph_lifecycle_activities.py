@@ -172,18 +172,18 @@ async def test_terminate_graph_ingests_tolerates_visibility_without_starts_with(
 
 
 class _PgCur:
-    def __init__(self, has_documents):
-        self.has_documents, self.sql = has_documents, []
+    def __init__(self, has_processing):
+        self.has_processing, self.sql = has_processing, []
 
     async def execute(self, q, params=None):
         self.sql.append(q)
-        if "FROM documents" in q and not self.has_documents:
+        if "FROM doc_processing" in q and not self.has_processing:
             import psycopg
 
-            raise psycopg.errors.UndefinedTable('relation "documents" does not exist')
+            raise psycopg.errors.UndefinedTable('relation "doc_processing" does not exist')
 
     async def fetchone(self):
-        return ("documents",) if self.has_documents else (None,)
+        return ("doc_processing",) if self.has_processing else (None,)
 
     async def fetchall(self):
         return [("d1",), ("d2",)]
@@ -202,13 +202,13 @@ def _fake_graph_connection(cur):
     return graph_connection
 
 
-@pytest.mark.parametrize("has_documents, expected", [(False, []), (True, ["d1", "d2"])])
-async def test_inflight_doc_ids_tolerates_missing_schema(monkeypatch, has_documents, expected):
+@pytest.mark.parametrize("has_processing, expected", [(False, []), (True, ["d1", "d2"])])
+async def test_inflight_doc_ids_tolerates_missing_schema(monkeypatch, has_processing, expected):
     # Delete retried after drop_pg, or of a graph whose provisioning failed
     # before provision_pg: no g_<id> schema, no `public` fallback (R-P5).
     from src.storage import pg_scope
 
-    cur = _PgCur(has_documents)
+    cur = _PgCur(has_processing)
     monkeypatch.setattr(pg_scope, "graph_connection", _fake_graph_connection(cur))
     assert await A._inflight_doc_ids(ACME) == expected
 

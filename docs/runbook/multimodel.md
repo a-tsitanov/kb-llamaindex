@@ -309,7 +309,7 @@ llm_worker = Worker(
 | [`src/workflow/activities/__init__.py`](../../src/workflow/activities/__init__.py) | `build_property_graph` зарегистрирована в обоих пулах |
 | [`src/workflow/activities/{extract_kg,parse_and_chunk,merge_and_resolve}.py`](../../src/workflow/activities/) | Переключены на role-specific фабрики |
 | [`src/workflow/activities/finalize.py`](../../src/workflow/activities/finalize.py) | `_persist_ingest_metrics` теперь fetch'ит историю parent + child |
-| [`src/api/routes/ingest.py`](../../src/api/routes/ingest.py) | Snapshot per-role моделей + 3 новых Search Attributes |
+| [`src/intake/api/ingest.py`](../../src/intake/api/ingest.py) | Snapshot per-role моделей + 3 новых Search Attributes |
 | [`src/observability/ingest_metrics_extractor.py`](../../src/observability/ingest_metrics_extractor.py) | kwarg `models_per_role` + lookup по role-map |
 | [`scripts/setup_db.py`](../../scripts/setup_db.py) | Регистрация Search Attributes `ExtractionModel/JudgeModel/SearchModel` |
 | [`infra/grafana/dashboards/02-version-compare.json`](../../infra/grafana/dashboards/02-version-compare.json) | колонки `model_A/model_B` + панель "Per-stage model usage" |
@@ -322,12 +322,12 @@ llm_worker = Worker(
 
 ### Шаг 1: HTTP-приём в API
 
-[`src/api/routes/ingest.py:58-180`](../../src/api/routes/ingest.py) — `upload_document`:
+[`src/intake/api/ingest.py`](../../src/intake/api/ingest.py) — `upload_document`:
 
 1. Auth: `X-API-Key` → `require_api_key` middleware
 2. Multipart валидация (filename, content-type)
 3. Upload в MinIO bucket `kb-uploads` (`storage.put_object` ← `src/storage/minio.py`)
-4. `pg.insert_pending(doc_id, s3_uri, ...)` — insert строки в Postgres `documents` со status='pending' ([`src/storage/postgres.py`](../../src/storage/postgres.py))
+4. `intake.accept_document(doc_id, s3_uri, ...)` — одной транзакцией вставляет строку в Postgres `documents` и строку её обработки в `doc_processing` (status='pending') ([`src/intake/repository.py`](../../src/intake/repository.py))
 5. **Snapshot per-role моделей** (это новое):
    ```python
    cfg = settings.litellm
@@ -373,7 +373,7 @@ Child возвращает `GraphBuildResult(merged=..., built=...)` обрат�
 
 - `push_wikibase` ([push_wikibase.py](../../src/workflow/activities/push_wikibase.py)) — только если `graph_status=="completed"` И wikibase включён. См. [`wikibase.md`](wikibase.md).
 - **`finalize`** ([finalize.py](../../src/workflow/activities/finalize.py)):
-  1. UPDATE `documents.status`
+  1. UPDATE `doc_processing.status` (в `documents.status` после расщепления записи никто не пишет)
   2. Очистка staging-blob'ов из MinIO
   3. Rmtree локального temp dir
   4. **`_persist_ingest_metrics(payload)`** ← см. [§ 7](#7-ingest_metrics--модель-на-активность)

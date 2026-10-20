@@ -26,6 +26,17 @@ CREATE TABLE IF NOT EXISTS documents (
     source_channel TEXT NOT NULL DEFAULT '',
     source_group   TEXT NOT NULL DEFAULT '',
     original_path  TEXT,
+    content_sha256 TEXT,
+    intake_status  TEXT NOT NULL DEFAULT 'accepted',
+    intake_reason  TEXT NOT NULL DEFAULT '',
+    -- ON DELETE SET NULL, в отличие от doc_processing.doc_id (CASCADE):
+    -- удаление документа не должно ни упираться во внешний ключ со стороны
+    -- его версий, ни утаскивать их за собой — осиротевшая версия просто
+    -- перестаёт быть версией. Канонической она при этом НЕ становится:
+    -- хеша у неё нет (см. предикат documents_sha_idx ниже), то есть владельца
+    -- тела у осиротевших версий не остаётся вовсе.
+    duplicate_of   UUID REFERENCES documents(id) ON DELETE SET NULL,
+    source_kind    TEXT NOT NULL DEFAULT 'upload',
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -38,6 +49,55 @@ ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_group   TEXT NOT NULL DEFA
 -- s3:// URI of the uploaded original (e.g. .docx) when `path` holds the
 -- converted text; NULL = only the text was uploaded (download falls back).
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS original_path TEXT;
+
+-- Колонки контура приёма (intake). Историческим строкам хеш не считается
+-- (это потребовало бы скачать из MinIO весь корпус), поэтому они просто не
+-- участвуют в дедупе.
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_sha256 TEXT;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS intake_status  TEXT NOT NULL DEFAULT 'accepted';
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS intake_reason  TEXT NOT NULL DEFAULT '';
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS duplicate_of   UUID
+    REFERENCES documents(id) ON DELETE SET NULL;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_kind    TEXT NOT NULL DEFAULT 'upload';
+
+-- 'duplicate' в домене ЗАРЕЗЕРВИРОВАНО: политика on_duplicate=replace пока не
+-- реализуется (вытеснённую копию нечем убрать из Milvus и из графа), никто это
+-- значение не пишет. Оно стоит в CHECK заранее, чтобы будущий шаг не требовал
+-- миграции схемы.
+ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_intake_status_check;
+ALTER TABLE documents ADD CONSTRAINT documents_intake_status_check
+    CHECK (intake_status IN ('accepted', 'duplicate', 'rejected'));
+
+-- Хеш — собственность КАНОНИЧЕСКОЙ строки: версия того же тела (политика
+-- on_duplicate=version) пишется с content_sha256 IS NULL, поэтому в индекс не
+-- входит и политику version не ломает (инвариант держит единственная точка
+-- записи — IntakeRepository.accept_document). Нормализация ниже приводит к
+-- этому инварианту строки, записанные до его появления: без неё
+-- CREATE UNIQUE INDEX упал бы на дубле «канон + его версия».
+UPDATE documents SET content_sha256 = NULL
+ WHERE duplicate_of IS NOT NULL AND content_sha256 IS NOT NULL;
+
+-- Предикат смотрит ТОЛЬКО на сам хеш — и это не упрощение, а требование
+-- совместимости с ON DELETE SET NULL выше: предикат вида
+-- `... AND duplicate_of IS NULL` сделал бы удаление канонического документа с
+-- ДВУМЯ и более версиями невозможным. FK обнуляет duplicate_of у всех версий
+-- ОДНИМ UPDATE'ом, после чего они одновременно входили бы в индекс с
+-- одинаковым хешем, и DELETE падал бы нарушением уникальности — ровно тем,
+-- чего ON DELETE SET NULL и должен был избежать.
+-- Отклонённый классификатором документ остаётся в индексе (предикат не
+-- смотрит на intake_status): он владелец тела, и 409 отдаёт его вердикт.
+-- Уникальность действует в пределах схемы графа: глобальный индекс был бы
+-- утечкой между арендаторами.
+-- DROP + CREATE, а не IF NOT EXISTS: индекс с прежним предикатом
+-- (`AND duplicate_of IS NULL`) уже мог быть создан, и IF NOT EXISTS оставил бы
+-- его как есть. Тот же идемпотентный шаблон, что у CHECK-ограничений выше.
+DROP INDEX IF EXISTS documents_sha_idx;
+CREATE UNIQUE INDEX documents_sha_idx
+    ON documents (content_sha256)
+    WHERE content_sha256 IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS documents_intake_status_idx
+    ON documents (intake_status);
 
 -- Widen the status domain to include 'skipped' (classifier skip, written by
 -- finalize.mark_skipped) on already-created tables. The inline CHECK above is
@@ -61,6 +121,26 @@ CREATE INDEX IF NOT EXISTS documents_source_channel_idx
 
 CREATE INDEX IF NOT EXISTS documents_source_group_idx
     ON documents (source_group);
+"""
+
+
+# Статус обработки — владение ЯДРА, в отличие от реестра приёма (documents).
+# Домен без 'skipped': отказ классификатора — это решение приёма
+# (documents.intake_status='rejected'), а не состояние обработки.
+# ON DELETE CASCADE: удаление документа уносит и его обработку.
+_DOC_PROCESSING_DDL = """
+CREATE TABLE IF NOT EXISTS doc_processing (
+    doc_id     UUID PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+    status     TEXT NOT NULL DEFAULT 'pending'
+               CHECK (status IN ('pending', 'processing', 'completed',
+                                 'vector_only', 'failed')),
+    error      TEXT DEFAULT '',
+    summary    TEXT DEFAULT '',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS doc_processing_status_idx
+    ON doc_processing (status);
 """
 
 
@@ -370,6 +450,9 @@ CREATE INDEX IF NOT EXISTS stat_indicator_question_trgm_idx
 
 GRAPH_DDL: list[str] = [
     _DOCUMENTS_DDL,
+    # Строго после _DOCUMENTS_DDL: внешний ключ doc_processing.doc_id требует
+    # уже существующей таблицы documents.
+    _DOC_PROCESSING_DDL,
     _INGEST_METRICS_DDL,
     _BACKFILL_SOURCE_CHANNEL_SQL,
     _FACT_SUPERSEDE_DDL,
@@ -386,6 +469,76 @@ GRAPH_DDL: list[str] = [
 ]
 
 
+# Одноразовый перенос исторических строк из `documents` в `doc_processing`.
+# Маркер ПОСХЕМНЫЙ: `public.schema_migration.name` — один глобальный PRIMARY
+# KEY, а расщепление обязано отработать в КАЖДОЙ схеме графа.  Голое имя
+# мигрировало бы ровно один граф — тот, что `_ready_graphs` (scripts/setup_db.py)
+# вернёт первым в своём `ORDER BY id`, — и молча пропустило бы остальные.
+# Прецедент `authz_grandfather_v1` (там же) глобален по своей природе — он
+# правит общую `public.api_keys` — и на посхемные шаги НЕ обобщается.
+_INTAKE_SPLIT_MARKER = "intake_split_v1"
+
+
+def _intake_split(cur, graph: GraphContext) -> None:
+    """Расщепить дорасщеплённые строки по двум таблицам: статус обработки
+    уезжает в `doc_processing`, вердикт классификатора остаётся в `documents`
+    как `intake_status='rejected'`.
+
+    Вызывается из `migrate_graph_schema` один раз на схему графа.  Оба
+    оператора идемпотентны ПО СУЩЕСТВУ, маркер — лишь оптимизация, поэтому он
+    пишется ПОСЛЕДНИМ: соединение в autocommit, атомарности нет, падение между
+    операторами чинится обычным повтором, а маркер, записанный первым,
+    навсегда заблокировал бы недоделанную миграцию.
+    """
+    marker = f"{_INTAKE_SPLIT_MARKER}:{graph.pg_schema}"
+    # Префикс `public.` обязателен: search_path указывает на схему графа, и
+    # `public` в него не входит (src.storage.pg_scope.search_path_sql).
+    cur.execute("SELECT 1 FROM public.schema_migration WHERE name = %s", (marker,))
+    if cur.fetchall():  # не больше одной строки; пусто = ещё не прогоняли
+        return
+    # Предикат жёстче спеки (§1.3), и два добавочных условия — не украшение.
+    # После расщепления в `documents.status` никто не пишет, и у принятого
+    # документа там навсегда 'pending' (колонка с DEFAULT), а отказ приёма
+    # (`IntakeRepository.reject`) УДАЛЯЕТ строку обработки.  Голый предикат
+    # спеки при повторном прогоне вставил бы таким документам строку 'pending'
+    # и перевернул бы их статус во всех поверхностях отчётности.
+    cur.execute(
+        """
+        INSERT INTO doc_processing (doc_id, status, error, summary, updated_at)
+        SELECT d.id, d.status, d.error, d.summary, d.updated_at
+          FROM documents d
+         WHERE d.status <> 'skipped'
+           AND d.intake_status <> 'rejected'
+           AND NOT EXISTS (SELECT 1 FROM doc_processing p WHERE p.doc_id = d.id)
+        """
+    )
+    # `intake_reason` берётся из `documents.error`, а литерал — только
+    # фолбэк: до расщепления причину отказа писал туда `mark_skipped`
+    # (UPDATE documents SET status='skipped', error=<причина>), и голый
+    # литерал затёр бы её НАВСЕГДА для всех исторических строк.  Строки
+    # обработки у отклонённого документа нет (её не вставляет INSERT выше и
+    # удаляет `IntakeRepository.reject`), поэтому выражение eff_error
+    # вырождается в `intake_reason` — то есть и `error`, и `intake_reason`
+    # в ответе API отдавали бы заглушку вместо причины, вопреки инварианту
+    # «отклонённый документ отвечает error=<причина отказа> ровно как до
+    # расщепления».  Идемпотентность сохраняется: предикат
+    # `intake_status <> 'rejected'` не пускает второй прогон, а сама
+    # колонка `documents.error` не трогается.
+    cur.execute(
+        """
+        UPDATE documents
+           SET intake_status = 'rejected',
+               intake_reason = COALESCE(NULLIF(error, ''), 'classifier (pre-split)')
+         WHERE status = 'skipped'
+           AND intake_status <> 'rejected'
+        """
+    )
+    cur.execute(
+        "INSERT INTO public.schema_migration (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
+        (marker,),
+    )
+
+
 def migrate_graph_schema(cur, graph: GraphContext) -> None:
     """Create (idempotently) one graph's tables in its own schema."""
     from src.storage.pg_scope import search_path_sql
@@ -397,6 +550,9 @@ def migrate_graph_schema(cur, graph: GraphContext) -> None:
     cur.execute(search_path_sql(graph))
     for stmt in GRAPH_DDL:
         cur.execute(stmt)
+    # Строго после GRAPH_DDL (обеим таблицам надо существовать) и до RESET
+    # (запросы без префикса схемы опираются на search_path графа).
+    _intake_split(cur, graph)
     cur.execute("RESET search_path")
 
 

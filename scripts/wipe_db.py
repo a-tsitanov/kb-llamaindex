@@ -3,8 +3,10 @@
 Drops:
   * Temporal   — terminate running + delete every workflow execution.
   * RabbitMQ   — purge every configured ingest queue + the DLQ.
-  * Postgres   — TRUNCATE app tables (`documents`, `ingest_metrics`, entity-watch
-                 journals/events; `watch` subscriptions are kept).
+  * Postgres   — TRUNCATE app tables (`doc_processing`, `documents`,
+                 `ingest_metrics`, entity-watch journals/events; `watch`
+                 subscriptions are kept).  Каждый TRUNCATE идёт с CASCADE —
+                 см. комментарий у цикла.
   * Milvus     — drop EVERY collection (chunks, community, ER, any `_bak*`).
   * Graph      — Nebula: DROP SPACE.
   * MinIO      — empty the upload bucket + the workflow staging bucket.
@@ -87,8 +89,12 @@ def _parse_args() -> argparse.Namespace:
 # Entity-watch journals/events go with the documents they describe; `watch`
 # (the subscriptions) is kept — its vid is a hash of the name, so it stays
 # valid across a re-ingest.
+#
+# `doc_processing` (обработка принятого документа) стоит ПЕРЕД `documents`
+# намеренно: дочерняя таблица чистится раньше родительской, и лог wipe'а
+# читается в том же порядке, в каком Postgres снимает строки.
 _PG_TABLES = (
-    "documents", "ingest_metrics",
+    "doc_processing", "documents", "ingest_metrics",
     "entity_mention", "edge_new", "watch_event", "watch_seen",
     "monitor_cursor", "risk_snapshot",
 )
@@ -105,7 +111,16 @@ def wipe_postgres() -> None:
     ) as conn, conn.cursor() as cur:
         for table in _PG_TABLES:
             try:
-                cur.execute(f"TRUNCATE TABLE {table}")
+                # CASCADE обязателен, а не для подстраховки: Postgres отказывает
+                # в TRUNCATE по самому НАЛИЧИЮ внешнего ключа на таблицу
+                # (`doc_processing.doc_id` → `documents(id)`), а не по строкам,
+                # так что предварительной чистки дочерней таблицы мало —
+                # `TRUNCATE documents` без CASCADE упал бы FeatureNotSupported
+                # (который этот except не ловит, то есть унёс бы весь wipe).
+                # Безопасен: входящих ключей нет ни у одной другой таблицы
+                # списка — `stat_observation.source_doc_id` и
+                # `entity_mention.doc_id` намеренно объявлены без FK.
+                cur.execute(f"TRUNCATE TABLE {table} CASCADE")
                 logger.info("postgres  TRUNCATE {t}  ok", t=table)
             except psycopg.errors.UndefinedTable:
                 logger.info("postgres  {t} table absent — nothing to wipe",

@@ -75,7 +75,7 @@ export ANALYTICS_DEFAULT_VERSION_TAG=llama-3.3-baseline
 В Postgres `ingest_metrics` поле `model` snapshot'ится из конфига LiteLLM **на
 момент сабмита**: глобальный default берётся из `settings.litellm.effective_base`,
 а per-role значения (`extraction` / `judge` / `search`) — из
-`settings.litellm.model_for(role)` (см. `src/api/routes/ingest.py`). Поэтому смена
+`settings.litellm.model_for(role)` (см. `src/intake/api/ingest.py`). Поэтому смена
 модели в env автоматически отражается в данных. Per-activity разбивка — в §6a.
 
 `env` — это `ANALYTICS_ENV_NAME` (default `dev-local`). Используется для разделения dev / staging / prod в одной БД, если нужно.
@@ -130,7 +130,7 @@ open http://localhost:3001/d/kb-ingest-version-compare/
 | `merge_and_resolve` | judge | snapshot LITELLM_JUDGE_MODEL |
 | `fetch_source` / `index_vector` / `inject_canonical` / `build_property_graph` / `push_wikibase` / `finalize` | — | `NULL` (LLM не звался) |
 
-Snapshot моделей делает API в момент `/ingest` (см. `src/api/routes/ingest.py`), значения летят в `IngestParams` → `FinalizeIn` → `parse_activity_timings(..., models_per_role={...})`. Поэтому смена `LITELLM_*_MODEL` в env **между** ingest'ами немедленно отражается на новых строках, а старые сохраняют исторический model.
+Snapshot моделей делает API в момент `/ingest` (см. `src/intake/api/ingest.py`), значения летят в `IngestParams` → `FinalizeIn` → `parse_activity_timings(..., models_per_role={...})`. Поэтому смена `LITELLM_*_MODEL` в env **между** ingest'ами немедленно отражается на новых строках, а старые сохраняют исторический model.
 
 Compare-дашборд (`/d/kb-ingest-version-compare/`) теперь показывает `model_A` / `model_B` в delta-таблице (отдельный JSON-update Stage 5) и отдельную таблицу `Per-stage model usage` для side-by-side debug'а.
 

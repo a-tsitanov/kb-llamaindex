@@ -5,7 +5,7 @@ the ReAct agent tools `get_chunks_by_doc_id` and `read_full_document`:
 
 * **Milvus** — the chunk store.  Filter-query by `doc_id` metadata
   returns every chunk of one document in deterministic order.
-* **Postgres** — the document-status table (`documents`).  Maps a
+* **Postgres** — реестр приёма (`documents`) контура intake.  Maps a
   `doc_id` UUID to the on-disk `path` that the worker saved.
 * **Filesystem** — the API upload directory (`API_UPLOAD_DIR`).
   Streams the source file back when the agent asks for the full
@@ -27,7 +27,7 @@ from loguru import logger
 from pymilvus import MilvusClient
 
 from src.config import settings
-from src.storage.postgres import AsyncPostgres
+from src.intake.repository import IntakeRepository
 from src.tenancy.context import GraphContext
 
 if TYPE_CHECKING:
@@ -61,7 +61,7 @@ class ChunkRepository:
         graph: GraphContext,
         milvus_client: MilvusClient | None = None,
         collection: str | None = None,
-        pg: AsyncPostgres | None = None,
+        pg: IntakeRepository | None = None,
         minio: MinioStorage | None = None,
     ) -> None:
         self._collection = collection or graph.chunks_collection
@@ -69,7 +69,7 @@ class ChunkRepository:
             uri=settings.milvus.uri,
             timeout=settings.milvus.timeout_s,
         )
-        self._pg = pg or AsyncPostgres(graph=graph)
+        self._pg = pg or IntakeRepository(graph=graph)
         # Lazily resolved on first s3:// read so tests / Milvus-only
         # callers don't pay for a MinIO client + bucket bootstrap.
         self._minio = minio
@@ -181,7 +181,7 @@ class ChunkRepository:
             return None
         # documents.path is normally an ``s3://`` URI (MinIO); legacy
         # rows may hold a local filesystem path.  Mirror the download
-        # route (api/routes/documents.py) instead of stat-ing the URI
+        # route (intake/api/documents.py) instead of stat-ing the URI
         # as if it were a local file.
         if path_str.startswith("s3://"):
             return await asyncio.to_thread(

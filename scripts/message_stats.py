@@ -1,5 +1,5 @@
 """CLI for processed-message statistics — a thin wrapper over the same
-AsyncPostgres aggregation methods the /stats endpoints use.
+IntakeRepository aggregation methods the /stats endpoints use.
 
 Usage::
 
@@ -19,10 +19,25 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.config import settings
-from src.storage.postgres import DOC_STATUSES, AsyncPostgres
+from src.intake.repository import DOC_STATUSES, IntakeRepository
 from src.tenancy.context import cli_graph_context
 
-_COLS = ("key", "total", *DOC_STATUSES)
+_COLS = ("key", "total", *DOC_STATUSES, "versions")
+
+
+def _cell(row: dict, col: str) -> str:
+    """Значение одной клетки таблицы.
+
+    ``versions`` приезжает словарём ``{статус: сколько}`` (неканонические
+    строки, политика ``on_duplicate=version``) — в таблице он сворачивается
+    в ``status:n``, чтобы колонка оставалась одной колонкой.  Пустой словарь
+    печатается пустой клеткой, а не ``{}``: у подавляющего большинства
+    каналов версий нет вовсе.
+    """
+    if col == "versions":
+        versions = row.get("versions") or {}
+        return " ".join(f"{s}:{n}" for s, n in sorted(versions.items()))
+    return str(row.get(col, ""))
 
 
 def format_status_rows(rows: list[dict]) -> str:
@@ -30,11 +45,11 @@ def format_status_rows(rows: list[dict]) -> str:
     widths = {c: len(c) for c in _COLS}
     for r in rows:
         for c in _COLS:
-            widths[c] = max(widths[c], len(str(r.get(c, ""))))
+            widths[c] = max(widths[c], len(_cell(r, c)))
     header = "  ".join(c.ljust(widths[c]) for c in _COLS)
     lines = [header, "  ".join("-" * widths[c] for c in _COLS)]
     for r in rows:
-        lines.append("  ".join(str(r.get(c, "")).ljust(widths[c]) for c in _COLS))
+        lines.append("  ".join(_cell(r, c).ljust(widths[c]) for c in _COLS))
     return "\n".join(lines)
 
 
@@ -45,7 +60,7 @@ def format_timeline(buckets: list[dict]) -> str:
 
 
 async def _run(args: argparse.Namespace) -> None:
-    pg = AsyncPostgres(settings.postgres.dsn, graph=cli_graph_context(args.graph))
+    pg = IntakeRepository(settings.postgres.dsn, graph=cli_graph_context(args.graph))
     if args.cmd == "channels":
         rows = await pg.status_counts_by(
             "source_channel", since=args.since, until=args.until,

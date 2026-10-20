@@ -9,7 +9,7 @@
 ## Как работает
 
 - Берёт карту `file_path → doc_id` из таблицы Postgres `documents`
-  (`AsyncPostgres.list_id_path`).
+  (`IntakeRepository.list_id_path`, `src/intake/repository.py`).
 - Стримит все строки коллекции Milvus батчами (`query_iterator`, чтобы
   обойти лимит окна offset-paging в 16 384).
 - Для каждой строки **реконструирует ноду** из `_node_content`, возвращая

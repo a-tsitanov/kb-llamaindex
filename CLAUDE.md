@@ -1,3 +1,24 @@
+## Контуры
+
+Проект разделён на контуры; граница — пакет, не репозиторий.
+
+| Контур | Где | Отвечает за |
+|---|---|---|
+| Приём | `src/intake/` | входная группа: классификатор, дедуп по телу, реестр приёма (`documents`), очередь, маршруты `/ingest` и выдача оригинала |
+| Ядро | `src/workflow/`, `src/graph/`, `src/retrieval/`, `src/analytics/` | документы в граф и чтение графа; статус обработки — `doc_processing` |
+| Наблюдение | `src/workflow/monitor/`, `watch_journal` | новые сущности и подписки (в свой пакет ещё не вынесено) |
+| Доступ | `src/tenancy/`, `src/api/graph_dep.py`, `src/mcp/_shared.py` | арендаторы, права ключа, выбор графа; шва три, других нет |
+| Инфраструктура | `src/storage/` | Postgres, MinIO, схема графа — НИЖЕ контуров, импортировать её можно всем |
+
+Правила границы (исполняются тестом `tests/test_intake/test_boundaries.py`):
+
+- `src/graph`, `src/retrieval`, `src/workflow` не импортируют `src.intake`,
+  кроме объявленных воркерных адаптеров;
+- `src/intake` не импортирует `src.graph`;
+- `ChunkRepository` не получает `pg=AsyncPostgres(...)` ни из одного модуля.
+
+Карта контуров и порядок работ — `docs/superpowers/plans/2026-10-17-project-boundaries.md`.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.

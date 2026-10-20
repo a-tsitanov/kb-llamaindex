@@ -92,9 +92,9 @@ async def _call(headers):
 
 async def _call_ok(headers):
     """Same call with the handler's aggregation mocked out, so a pass shows as 200."""
-    from src.storage.postgres import AsyncPostgres
+    from src.intake.repository import IntakeRepository
 
-    with patch.object(AsyncPostgres, "status_counts_by", new=AsyncMock(return_value=[])):
+    with patch.object(IntakeRepository, "status_counts_by", new=AsyncMock(return_value=[])):
         return await _call(headers)
 
 

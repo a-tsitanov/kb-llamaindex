@@ -52,6 +52,6 @@ def test_scheduler_started_on_scheduler_queue():
     # producer dispatcher (Track B: submit_document routes temporal vs
     # rabbitmq). The isolation invariant — scheduler on its OWN queue —
     # now lives in _submit_to_scheduler.
-    from src.workflow.ingest_submit import _submit_to_scheduler
+    from src.intake.submit import _submit_to_scheduler
     src = inspect.getsource(_submit_to_scheduler)
     assert "task_queue=settings.temporal.scheduler_task_queue" in src

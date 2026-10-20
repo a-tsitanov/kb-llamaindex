@@ -418,19 +418,6 @@ _ENV_DESCRIPTIONS: dict[str, str] = {
     "WIKIBASE_ENABLED": "Включить push в Wikibase после успешного graph build (canonical-сущности + связи + identifier-statements). По умолчанию off.",
     "WIKIBASE_LANGUAGE": "Язык лейблов/описаний в Wikibase (по умолчанию ru).",
     "WIKIBASE_TIMEOUT_S": "Таймаут обращений к Wikibase API в секундах.",
-    # ── BotSettings (BOT_*) — Telegram Q&A-бот (src/bot) ──────────────
-    "BOT_ALLOWED_USERS": "УСТАРЕЛО: доступ теперь в таблице bot_user, выдаётся командой /approve. Оставлено для пути без БД.",
-    "BOT_ADMIN_IDS": "Telegram user id через запятую — их бот заводит активными админами при старте. Без хотя бы одного одобрять заявки НЕКОМУ, и бот бесполезен (он fail-closed).",
-    "BOT_MAX_CONCURRENT": "Сколько поисков /ask выполняется одновременно. Поиск идёт ~90 с и заметен остальному хосту; сверх потолка — отказ, без очереди. 0 = без ограничений.",
-    "BOT_DEFAULT_DAILY_QUOTA": "Запросов в сутки на нового пользователя. Считаются все попытки, включая отказы. 0 = без ограничений.",
-    "BOT_API_BASE": "Base URL поискового API, который дёргает бот (по умолчанию compose-internal http://api:8000).",
-    "BOT_API_KEY": "X-API-Key для поискового API от лица бота. Пусто → берётся первый ключ из API_KEYS.",
-    "BOT_GRAPH": "Граф, к которому обращается бот: уходит заголовком X-Graph в каждом запросе к API. Ключ бота должен иметь доступ к этому графу. По умолчанию default.",
-    "BOT_FALLBACK_MODE": "Fallback-режим поиска, если основной вернул пусто/ошибку (auto|local|global|drift). Пустая строка = без fallback.",
-    "BOT_MAX_MESSAGES": "Сколько последних сообщений чата держать в скользящем окне разговора бота. >= 1.",
-    "BOT_SEARCH_MODE": "Основной режим поиска бота: auto | local | global | drift.",
-    "BOT_SEARCH_TIMEOUT_S": "HTTP-таймаут одного поискового запроса бота, сек (fallback-режимы медленнее основного).",
-    "BOT_TOKEN": "Токен Telegram-бота, выданный @BotFather.",
     # ── StatsSettings (STATS_*) — подсистема внешней статистики (MCP-3) ──
     "STATS_DEFAULT_GRANULARITY": "Гранулярность периода по умолчанию для запросов статистики "
     "(day|week|month|quarter|year).",

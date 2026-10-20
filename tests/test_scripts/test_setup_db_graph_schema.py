@@ -3,21 +3,37 @@ from src.tenancy.context import default_graph_context, new_graph_context
 
 
 class _Cur:
+    """Маркера `intake_split_v1` нет, поэтому одноразовое расщепление
+    отрабатывает — утверждения ниже смотрят только на блок GRAPH_DDL и на
+    последний оператор, и от добавочных операторов не зависят."""
+
     def __init__(self):
         self.sql = []
 
     def execute(self, q, params=None):
         self.sql.append(q.as_string(None) if hasattr(q, "as_string") else str(q))
 
+    def fetchall(self):
+        return []
+
+    def fetchone(self):
+        return None
+
 
 def test_graph_ddl_contains_every_graph_table_and_no_global_one():
     joined = "\n".join(setup_db.GRAPH_DDL)
     for t in (
-        "documents", "ingest_metrics", "fact_supersede", "stat_indicator",
-        "stat_observation", "er_verdict", "entity",
+        "documents",
+        "doc_processing",
+        "ingest_metrics",
+        "fact_supersede",
+        "stat_indicator",
+        "stat_observation",
+        "er_verdict",
+        "entity",
     ):
         assert f"CREATE TABLE IF NOT EXISTS {t}" in joined, t
-    for t in ("bot_user", "bot_request", "graphs", "api_keys"):
+    for t in ("graphs", "api_keys"):
         assert t not in joined
 
 

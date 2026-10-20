@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from src.ingestion.classifier import apply_rules
+from src.intake.classifier import apply_rules
 
 _MAX_MB = 25.0
 _MIN_BYTES = 1

@@ -7,8 +7,10 @@ Two modes:
   discovers all dialogs of the account, keeps channels + groups (personal
   chats are ALWAYS excluded), catches up on new messages every
   --poll-interval seconds. Restart-safe: per-dialog ``last_id`` lives in
-  --state (JSON), so stopping/starting NEVER re-ingests old messages —
-  the API does NOT dedup (every POST mints a new doc_id), dedup lives here.
+  --state (JSON), so stopping/starting NEVER re-ingests old messages.
+  Дедуп двухслойный: курсор отсекает уже прочитанные СООБЩЕНИЯ, а приём
+  отвечает 409 на уже известное ТЕЛО (политика по умолчанию `reject`) —
+  в синке это успех прохода, а не ошибка.
   A never-seen dialog is bootstrapped with its newest --bootstrap-limit
   messages (0 = full history). --once does a single catch-up round and exits.
   ``--folders "Имя1,Имя2"`` scopes the sync to the account's Telegram
@@ -19,12 +21,16 @@ Two modes:
   sync without restart. Личные чаты не синкаются даже из папки.
 
 * **Backfill (--channels @a,@b).** Legacy one-shot: last --limit messages
-  per named channel, no state, may create duplicates if repeated.
+  per named channel, no state; повторный прогон по тому же окну новых
+  документов не заводит — приём отвечает 409 (счётчик `duplicate`).
 
 * **Reingest (--reingest @a,@b).** Manual re-read: newest --reingest-limit
   messages per channel, posted at LOW priority (drains only when the live
   lane is idle). The channel must be in a --folders folder; each doc is
   tagged with that folder's group. Does NOT touch the sync --state cursor.
+  Шлёт ``on_duplicate=version``: режим существует ровно затем, чтобы
+  перечитать и переотправить окно заново, и с умолчанием `reject` был бы
+  молчаливым no-op'ом.
 
 DATE SEMANTICS: ``document_date`` sent to /ingest = the message's ORIGINAL
 POST date (``msg.date``, UTC) — so doc-date filters and the analytics
@@ -53,12 +59,20 @@ from typing import Any
 
 from loguru import logger
 
-from src.ingest_queue.priorities import PRIO_BACKFILL
+from src.intake.queue.priorities import PRIO_BACKFILL
 from src.retrieval.groups import GROUP_SET, pick_priority
 
 # How many chars of each message body to echo in the per-message "sent" log
 # (visibility into WHAT news is ingested each round). Override via TG_LOG_PREVIEW_CHARS.
 _PREVIEW_CHARS = int(os.environ.get("TG_LOG_PREVIEW_CHARS", "200"))
+
+# Исходы одной попытки приёма.  Три, а не bool: после включения дедупа 409 —
+# не новый документ, но и не сбой («приём уже знает это тело»), и счётчики
+# обязаны их различать, иначе идемпотентный повторный проход читался бы как
+# сплошные ошибки.  Значения совпадают с ключами tally.
+SENT = "sent"
+DUPLICATE = "duplicate"
+FAILED = "failed"
 
 
 def _message_to_doc(msg: Any, channel: str) -> tuple[str, str, str] | None:
@@ -106,8 +120,15 @@ async def post_ingest(
     group: str = "",
     priority: int | None = None,
     channel: str = "",
-) -> bool:
-    """POST one document to /api/v1/ingest (multipart). True on 2xx; fail-soft."""
+    on_duplicate: str = "",
+) -> str:
+    """POST one document to /api/v1/ingest (multipart); fail-soft.
+
+    Исход: ``SENT`` на 2xx, ``DUPLICATE`` на 409 (приём уже знает это тело),
+    ``FAILED`` на любом другом коде и на сетевом сбое.  ``on_duplicate``
+    уходит в форму только когда задан — пустое значение оставляет серверное
+    умолчание (`reject` для обычного POST).
+    """
     data: dict[str, str] = {"document_date": document_date}
     if queue:
         data["queue"] = queue
@@ -117,6 +138,8 @@ async def post_ingest(
         data["priority"] = str(priority)
     if channel:
         data["channel"] = channel
+    if on_duplicate:
+        data["on_duplicate"] = on_duplicate
     try:
         resp = await http.post(
             f"{api_base}/api/v1/ingest",
@@ -124,10 +147,18 @@ async def post_ingest(
             files={"file": (filename, text.encode("utf-8"), "text/plain")},
             data=data,
         )
-        return 200 <= resp.status_code < 300
     except Exception as exc:
         logger.warning("post_ingest failed file={f}: {e}", f=filename, e=exc)
-        return False
+        return FAILED
+    if 200 <= resp.status_code < 300:
+        return SENT
+    if resp.status_code == 409:
+        logger.info("post_ingest duplicate file={f} — приём уже знает это тело",
+                    f=filename)
+        return DUPLICATE
+    logger.warning("post_ingest failed file={f} status={s}",
+                   f=filename, s=resp.status_code)
+    return FAILED
 
 
 async def read_and_enqueue(
@@ -140,7 +171,11 @@ async def read_and_enqueue(
     api_key: str,
     queue: str | None,
 ) -> Counter:
-    """Backfill: read last-`limit` messages per channel (oldest→newest) and enqueue."""
+    """Backfill: read last-`limit` messages per channel (oldest→newest) and enqueue.
+
+    Политику повтора не шлёт: умолчание приёма (`reject`) и есть нужная
+    семантика — повторный прогон по тому же окну идемпотентен, 409 попадает
+    в счётчик `duplicate`, а не в `failed`."""
     tally: Counter = Counter()
     for channel in channels:
         async for msg in tg_client.iter_messages(channel, limit=limit, reverse=True):
@@ -149,11 +184,11 @@ async def read_and_enqueue(
                 tally["skipped"] += 1
                 continue
             filename, text, document_date = doc
-            ok = await post_ingest(
+            outcome = await post_ingest(
                 http, api_base, api_key, filename, text, document_date, queue,
                 channel=channel.lstrip("@"),
             )
-            tally["sent" if ok else "failed"] += 1
+            tally[outcome] += 1
     logger.info("tg_ingest tally: {t}", t=dict(tally))
     return tally
 
@@ -179,7 +214,13 @@ async def reingest_channels(
     messages are posted). Each posted doc is tagged with the channel's folder
     group. The live sync cursor (``--state``) is never read or written here.
     Returns ``(tally, errors)``; a non-empty ``errors`` means the caller should
-    exit non-zero."""
+    exit non-zero.
+
+    Каждый POST идёт с ``on_duplicate=version``: смысл режима — перечитать и
+    переотправить окно заново, и с умолчанием `reject` неизменённое сообщение
+    получило бы 409, то есть режим стал бы молчаливым no-op'ом.  `version`
+    воспроизводит дорасщепленческое поведение дословно (новый doc_id, новый
+    комплект чанков) плюс ссылка ``duplicate_of`` на первый документ."""
     by_slug = {dialog_slug(d).lstrip("@").casefold(): d for d in dialogs}
     by_id = {str(d.id): d for d in dialogs}
     tally: Counter = Counter()
@@ -200,11 +241,12 @@ async def reingest_channels(
                 tally["skipped"] += 1
                 continue
             filename, text, document_date = doc
-            ok = await post_ingest(
+            outcome = await post_ingest(
                 http, api_base, api_key, filename, text, document_date, queue,
                 group=group, priority=priority, channel=slug.lstrip("@"),
+                on_duplicate="version",
             )
-            tally["sent" if ok else "failed"] += 1
+            tally[outcome] += 1
     logger.info("tg_ingest reingest tally: {t}", t=dict(tally))
     return tally, errors
 
@@ -363,7 +405,24 @@ async def sync_round(
     WITHOUT advancing (the message is retried next round); empty messages
     advance the cursor (nothing to send — never retry them). ``group_map``
     (dialog_id → channel group, from ``resolve_group_map``) tags each
-    posted doc with its group when the dialog has one."""
+    posted doc with its group when the dialog has one.
+
+    Политику повтора синк не шлёт (умолчание приёма — `reject`): 409 здесь
+    означает «это тело приём уже знает» и считается успехом прохода —
+    курсор двигается, иначе окно залипло бы на известном сообщении.
+
+    Ключ дедупа — sha256 ТЕЛА в пределах графа, канал в него не входит
+    (``src/intake/api/ingest.py``), поэтому дословный перепост в другом
+    наблюдаемом канале тоже получает 409: второй копии тела в графе не
+    появляется, и это решение, а не недоработка.  Атрибуцию канала 409 при
+    этом не теряет — приём записывает НАБЛЮДЕНИЕ
+    (``IntakeRepository.record_duplicate_sighting``): лёгкая строка со
+    ссылкой на владельца тела и тот же объект в MinIO, без строки
+    обработки.  Поэтому канал-получатель остаётся в ``/stats/messages``
+    (в поле ``versions`` как ``duplicate``) и в ленте, а ``total``
+    по-прежнему означает «документов принято».  Повторная попытка ничего
+    не изменила бы (тело то же), поэтому курсор двигается наравне с
+    отправленным.  Подробно — docs/runbook/message-stats.md."""
     group_map = group_map or {}
     tally: Counter = Counter()
     for dialog in dialogs:
@@ -399,23 +458,31 @@ async def sync_round(
                 save()
                 continue
             filename, text, document_date = doc
-            ok = await post_ingest(
+            outcome = await post_ingest(
                 http, api_base, api_key, filename, text, document_date, queue,
                 group=group, channel=slug.lstrip("@"),
             )
-            if not ok:
+            if outcome == FAILED:
                 tally["failed"] += 1
                 break  # retry from this message next round
-            tally["sent"] += 1
-            # Visibility into WHAT was ingested: channel · original post time ·
-            # message preview (newlines flattened, first _PREVIEW_CHARS chars).
-            logger.info(
-                "tg_ingest sent: channel={c!r} time={ts} msg_id={mid} text={p!r}",
-                c=entry.get("title") or slug,
-                ts=getattr(msg, "date", None),
-                mid=msg.id,
-                p=" ".join(text.split())[:_PREVIEW_CHARS],
-            )
+            tally[outcome] += 1
+            if outcome == SENT:
+                # Visibility into WHAT was ingested: channel · original post time ·
+                # message preview (newlines flattened, first _PREVIEW_CHARS chars).
+                logger.info(
+                    "tg_ingest sent: channel={c!r} time={ts} msg_id={mid} text={p!r}",
+                    c=entry.get("title") or slug,
+                    ts=getattr(msg, "date", None),
+                    mid=msg.id,
+                    p=" ".join(text.split())[:_PREVIEW_CHARS],
+                )
+            else:
+                # Документом не стало — тело уже принято раньше; превью не
+                # печатаем, но курсор двигаем наравне с отправленным.
+                logger.info(
+                    "tg_ingest duplicate: channel={c!r} msg_id={mid}",
+                    c=entry.get("title") or slug, mid=msg.id,
+                )
             entry["last_id"] = max(int(entry["last_id"]), msg.id)
             save()
     return tally

@@ -48,7 +48,7 @@ STORAGE_ACTIVITY_INPUTS: tuple[type, ...] = (
     KGExtracted,                    # merge_and_resolve: graph + entity vec + ER cache
     Merged,                         # build_property_graph (graph + PG), push_wikibase (graph)
     FinalizeIn,                     # finalize: AsyncPostgres + ingest_metrics
-    SkipIn,                         # mark_skipped: AsyncPostgres
+    SkipIn,                         # mark_skipped: IntakeRepository.reject + staging
     MarkFailedIn,                   # mark_failed: AsyncPostgres
     MarkDirtyIn,                    # mark_entities_dirty: graph
     # search

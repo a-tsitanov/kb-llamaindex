@@ -33,6 +33,7 @@ EXPECTED: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/search/auto"): "read",
     ("POST", "/api/v1/analyze"): "read",
     ("GET", "/api/v1/entities"): "read",
+    ("GET", "/api/v1/intake/stats"): "read",
     ("GET", "/api/v1/stats/messages"): "read",
     ("GET", "/api/v1/stats/timeline"): "read",
     ("POST", "/api/v1/statistics/load"): "write",

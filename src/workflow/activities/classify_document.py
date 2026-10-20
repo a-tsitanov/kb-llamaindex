@@ -13,7 +13,10 @@ from pathlib import Path
 from temporalio import activity
 
 from src.config import settings
-from src.ingestion.classifier import apply_rules, classify_with_llm, read_preview
+
+# Объявленное исключение §3.2: LLM-гейт нельзя держать синхронно в
+# HTTP-запросе (I6) — решение принимает приём, исполняет его воркер.
+from src.intake.classifier import apply_rules, classify_with_llm, read_preview
 from src.workflow.contracts import ClassifyIn, ClassifyResult
 
 

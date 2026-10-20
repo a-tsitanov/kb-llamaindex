@@ -6,6 +6,11 @@ SimpleDirectoryReader would treat the JSON braces as content) into
 a plain `.txt` file, uploads it, then polls the job status until
 completed or failed.
 
+The run is repeatable: the body is byte-identical every time, so intake
+dedup answers the second upload with `409` (default policy `reject`).
+That is not a failure — the script reads the first document's id out of
+the 409 body and polls that one instead of ingesting a second copy.
+
 Usage::
 
     uv run python -m scripts.ingest_medical
@@ -53,22 +58,62 @@ def prepare_txt() -> Path:
     return target
 
 
+def enqueue(client: httpx.Client, args: argparse.Namespace, txt_path: Path) -> str | None:
+    """Залить корпус и вернуть job_id документа, за которым дальше следим.
+
+    Прогон документирован как повторяемый (docs/DEPLOYMENT.md §8b), а тело
+    получается байт-в-байт тем же: `prepare_txt` пишет `context` из
+    фиксированного JSON.  Приём дедуплицирует по sha256 тела, и умолчание
+    политики — `reject`, поэтому ВТОРОЙ прогон отвечает 409, а не 202.  Это
+    не сбой прогона: корпус уже принят, и поллить надо ТОТ документ.
+
+    `on_duplicate=version` здесь сознательно НЕ шлётся: это бенчмарк-корпус,
+    и вторая его копия удвоила бы чанки под каждым вопросом eval'а.  Кому
+    нужен честный переингест — заливает с `on_duplicate=version` руками
+    (docs/DEPLOYMENT.md §8a).
+
+    None — приём назвал дубль, но `doc_id` в теле не раскрыл: идентификаторы
+    в теле 409 отдаются только ключу со scope `read` (src/intake/api/
+    ingest.py::_duplicate_detail).  Поллить такой ключ всё равно не смог бы —
+    `GET /api/v1/ingest/{job_id}` требует того же `read`.
+    """
+    with txt_path.open("rb") as fh:
+        resp = client.post(
+            "/api/v1/ingest",
+            headers={"X-API-Key": args.api_key},
+            files={"file": (txt_path.name, fh, "text/plain")},
+            data={"department": args.department},
+        )
+    if resp.status_code == httpx.codes.CONFLICT:
+        detail = resp.json().get("detail") or {}
+        job_id = detail.get("doc_id")
+        if not job_id:
+            print(
+                "corpus already ingested, but the 409 named no doc_id "
+                "(key without the `read` scope) — nothing to poll",
+                file=sys.stderr,
+            )
+            return None
+        print(
+            f"already ingested job_id={job_id}  "
+            f"intake_status={detail.get('intake_status', '?')}"
+        )
+        return str(job_id)
+    resp.raise_for_status()
+    job_id = str(resp.json()["job_id"])
+    print(f"enqueued job_id={job_id}")
+    return job_id
+
+
 def main() -> int:
     args = _parse_args()
     txt_path = prepare_txt()
 
     with httpx.Client(base_url=args.api_url, timeout=60.0) as client:
         # ── upload ────────────────────────────────────────────────
-        with txt_path.open("rb") as fh:
-            resp = client.post(
-                "/api/v1/ingest",
-                headers={"X-API-Key": args.api_key},
-                files={"file": (txt_path.name, fh, "text/plain")},
-                data={"department": args.department},
-            )
-        resp.raise_for_status()
-        job_id = resp.json()["job_id"]
-        print(f"enqueued job_id={job_id}")
+        job_id = enqueue(client, args, txt_path)
+        if job_id is None:
+            return 1
 
         # ── poll ─────────────────────────────────────────────────
         t0 = time.monotonic()

@@ -39,9 +39,9 @@ def _storage():
 
 @pytest.mark.asyncio
 async def test_download_streams_original():
-    with patch("src.storage.postgres.AsyncPostgres.get",
+    with patch("src.intake.repository.IntakeRepository.get",
                new=AsyncMock(return_value=_row(f"s3://b/{_DOC_ID}/report.pdf"))), \
-         patch("src.api.routes.documents.build_minio_storage",
+         patch("src.intake.api.documents.build_minio_storage",
                return_value=_storage()):
         resp = await _get(f"/api/v1/documents/{_DOC_ID}", headers=_key())
     assert resp.status_code == 200, resp.text
@@ -52,7 +52,7 @@ async def test_download_streams_original():
 
 @pytest.mark.asyncio
 async def test_download_unknown_doc_404():
-    with patch("src.storage.postgres.AsyncPostgres.get",
+    with patch("src.intake.repository.IntakeRepository.get",
                new=AsyncMock(return_value=None)):
         resp = await _get(f"/api/v1/documents/{_DOC_ID}", headers=_key())
     assert resp.status_code == 404
@@ -70,9 +70,9 @@ async def test_download_sanitizes_filename_header():
     # crafted filename with a quote and a space
     storage.stat_object.return_value = ('e"vil report.pdf', 5, "application/pdf")
     storage.stream_object.return_value = iter([b"hello"])
-    with patch("src.storage.postgres.AsyncPostgres.get",
+    with patch("src.intake.repository.IntakeRepository.get",
                new=AsyncMock(return_value=_row(f"s3://b/{_DOC_ID}/x.pdf"))), \
-         patch("src.api.routes.documents.build_minio_storage",
+         patch("src.intake.api.documents.build_minio_storage",
                return_value=storage):
         resp = await _get(f"/api/v1/documents/{_DOC_ID}", headers=_key())
     assert resp.status_code == 200, resp.text
@@ -106,9 +106,9 @@ _ORIG = f"s3://b/{_DOC_ID}/original/report.docx"
 
 
 async def _get_variant(row, query=""):
-    with patch("src.storage.postgres.AsyncPostgres.get",
+    with patch("src.intake.repository.IntakeRepository.get",
                new=AsyncMock(return_value=row)), \
-         patch("src.api.routes.documents.build_minio_storage",
+         patch("src.intake.api.documents.build_minio_storage",
                return_value=_storage_by_uri()):
         return await _get(f"/api/v1/documents/{_DOC_ID}{query}", headers=_key())
 

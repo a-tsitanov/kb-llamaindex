@@ -37,6 +37,7 @@ from loguru import logger
 from pymilvus import MilvusClient
 
 from src.config import settings
+from src.intake.repository import IntakeRepository
 from src.retrieval.vector_index import build_vector_store
 from src.storage.backfill import (
     BackfillStats,
@@ -44,7 +45,6 @@ from src.storage.backfill import (
     plan_doc_id_backfill,
     row_to_node,
 )
-from src.storage.postgres import AsyncPostgres
 from src.tenancy.context import GraphContext, cli_graph_context
 from src.utils.logging import configure_logging
 
@@ -73,7 +73,7 @@ def _iter_rows(client: MilvusClient, collection: str, batch_size: int):
 
 
 async def _load_path_index(graph: GraphContext) -> dict[str, str]:
-    pg = AsyncPostgres(graph=graph)
+    pg = IntakeRepository(graph=graph)
     rows = await pg.list_id_path()
     return build_path_index(rows)
 

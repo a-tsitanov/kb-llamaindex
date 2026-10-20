@@ -414,7 +414,7 @@ $C up -d api worker ingest-consumer mcp-search mcp-tools mcp-stats
 
 | Задача | Как |
 |---|---|
-| Статус ingest | webui; `/kb-status` в agent-web; SQL `select status,count(*) from documents group by 1` в Postgres srv01 |
+| Статус ingest | webui; `/kb-status` в agent-web; `$C run --rm --no-deps init python -m scripts.check_ingestion` (srv02) — разбивка по ЭФФЕКТИВНОМУ статусу. Голый `select status, count(*) from documents` больше не диагностика: статус обработки живёт в `doc_processing`, в `documents.status` у принятого документа навсегда 'pending' |
 | Очередь | `docker exec kb-rabbitmq-1 rabbitmqctl list_queues name messages_ready messages_unacknowledged` |
 | Сменить модель | править `litellm_config.offline.yaml` на srv02 → `docker restart kb-litellm-1` (приложение не трогать) |
 | Полная очистка данных | остановить `worker`, `ingest-consumer` (srv02) и `worker-llm` (srv03), затем `$C run --rm --no-deps init python -m scripts.wipe_db --yes --keep-wiki` (srv02), затем запустить их обратно |

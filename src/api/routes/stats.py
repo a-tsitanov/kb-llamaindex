@@ -4,7 +4,7 @@ Two read-only endpoints, both API-key gated:
   * GET /stats/messages  — per-channel or per-group × status breakdown
   * GET /stats/timeline  — daily message counts (created_at or doc_date)
 
-All aggregation SQL lives in AsyncPostgres.status_counts_by /
+All aggregation SQL lives in IntakeRepository.status_counts_by /
 timeline_counts so the CLI (scripts/message_stats.py) shares it verbatim.
 """
 
@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from src.api.graph_dep import resolve_graph
-from src.storage.postgres import GROUP_BY_COLUMN, AsyncPostgres
+from src.intake.repository import GROUP_BY_COLUMN, IntakeRepository
 from src.tenancy.context import GraphContext
 
 # No router-level graph dependency: every handler declares the action it
@@ -36,6 +36,13 @@ class StatRow(BaseModel):
     vector_only: int
     failed: int
     skipped: int
+    # Неканонические строки (версии того же тела, политика
+    # ``on_duplicate=version``) — ``{статус: сколько}`` без нулей.  В `total`
+    # и в разбивку выше они не входят: «документов принято» и «строк залито»
+    # — разные числа (``IntakeRepository.status_counts_by``).  Поле
+    # добавочное и с умолчанием: ответ остаётся совместимым со клиентами,
+    # которые о версиях не знают.
+    versions: dict[str, int] = {}
 
 
 class MessagesStatsResponse(BaseModel):
@@ -62,7 +69,7 @@ async def messages_stats(
     until: date | None = None,
     graph: GraphContext = Depends(resolve_graph),
 ) -> MessagesStatsResponse:
-    pg = AsyncPostgres(graph=graph)
+    pg = IntakeRepository(graph=graph)
     dimension = GROUP_BY_COLUMN.get(group_by)
     if dimension is None:
         raise HTTPException(
@@ -84,7 +91,7 @@ async def timeline_stats(
     until: date | None = None,
     graph: GraphContext = Depends(resolve_graph),
 ) -> TimelineResponse:
-    pg = AsyncPostgres(graph=graph)
+    pg = IntakeRepository(graph=graph)
     if date_field not in _DATE_FIELDS:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,

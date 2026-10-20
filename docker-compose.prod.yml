@@ -186,7 +186,7 @@ services:
   # when INGEST_QUEUE_BACKEND=rabbitmq).
   ingest-consumer:
     <<: [*app-build]
-    command: ["python", "-m", "src.ingest_queue.consumer"]
+    command: ["python", "-m", "src.intake.queue.consumer"]
     environment: *app-env
     depends_on:
       temporal: {condition: service_started}

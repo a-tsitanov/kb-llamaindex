@@ -4,8 +4,8 @@
 работу на parse/embed/extract. Реализован как активность
 `classify_document` (между `fetch_source` и `parse_and_chunk`).
 
-- Код: `src/ingestion/classifier.py`, `src/workflow/activities/classify_document.py`,
-  `mark_skipped` в `src/workflow/activities/finalize.py`.
+- Код: `src/intake/classifier.py`, `src/workflow/activities/classify_document.py`,
+  `src/workflow/activities/mark_skipped.py`.
 - Конфиг: `CLASSIFIER_*` (см. `.env.example`).
 
 ## Как работает
@@ -20,8 +20,10 @@
    `astructured_predict` по превью первых `CLASSIFIER_PREVIEW_CHARS` символов →
    `{ingest, reason, doc_type}`.
 
-На skip → активность `mark_skipped` пишет терминальный статус **`skipped`** +
-reason в Postgres и чистит staging; parse/index/graph не выполняются.
+На skip → активность `mark_skipped` пишет вердикт приёма
+`intake_status='rejected'` + reason и удаляет строку `doc_processing`, затем
+чистит staging; наружу документ по-прежнему виден как **`skipped`** (выражение
+эффективного статуса). Parse/index/graph не выполняются.
 
 **Fail-soft:** любая ошибка классификатора → **ingest** (ложный скип теряет
 хороший документ — самая дорогая ошибка). Поэтому целься в высокий recall на

@@ -20,7 +20,7 @@ flowchart TD
     WF --> S1["1. fetch_source<br/>download/cache; status=processing"]
     S1 --> CLS{"classify_document<br/>(опц., CLASSIFIER_ENABLED)<br/>rules + LLM-гейт по превью"}
     CLS -- "ingest (или fail-soft)" --> S2["2. parse_and_chunk<br/>read→split→identifier-canon→(translate)<br/>→ parsed.pkl"]
-    CLS -- "skip (force обходит rules)" --> SK["mark_skipped<br/>status=skipped + причина,<br/>чистка staging, без parse/index/graph"]
+    CLS -- "skip (force обходит rules)" --> SK["mark_skipped<br/>intake_status=rejected + причина,<br/>чистка staging, без parse/index/graph"]
     S2 --> S3["3. index_vector<br/>embed + insert → Milvus"]
     S2 --> S4["4. inject_canonical<br/>upsert identifier entities → NebulaGraph"]
     S2 --> S5["5. extract_kg<br/>LightRAG: entities+relations per chunk<br/>(queue: kb-ingest-llm) → kg.pkl"]
@@ -60,7 +60,7 @@ sequenceDiagram
 
     U->>API: POST file
     API->>MinIO: put_object(file)
-    API->>PG: insert_pending(doc_id)
+    API->>PG: accept_document(doc_id) — documents + doc_processing, одна транзакция
     API->>T: start DocumentIngestWorkflow(IngestParams + model snapshots)
     T->>MinIO: fetch_source (download/cache)
     T->>PG: status = processing
@@ -85,7 +85,7 @@ sequenceDiagram
 | # | Активность | Очередь | Что делает | Вход → Выход | Файл |
 |---|---|---|---|---|---|
 | 1 | `fetch_source` | kb-ingest | Идемпотентная загрузка из MinIO (кэширует локально); Postgres → `processing` | `IngestParams` → `Ctx` | `activities/fetch_source.py` |
-| 1.5 | `classify_document` | kb-ingest | **Opt-in** (`CLASSIFIER_ENABLED`, по умолч. false). Два слоя: (a) детерминированные правила — расширение / размер / пустой файл (`classifier.py::apply_rules`), которые обходит флаг `force`; (b) LLM-гейт по ограниченному превью файла (`classify_with_llm`, `astructured_predict`, small-уровень). Любая ошибка → fail-soft в ingest (ложный skip дороже). При skip воркфлоу замыкается на `mark_skipped` | `Ctx` → решение ingest/skip | `activities/classify_document.py`, `ingestion/classifier.py` |
+| 1.5 | `classify_document` | kb-ingest | **Opt-in** (`CLASSIFIER_ENABLED`, по умолч. false). Два слоя: (a) детерминированные правила — расширение / размер / пустой файл (`classifier.py::apply_rules`), которые обходит флаг `force`; (b) LLM-гейт по ограниченному превью файла (`classify_with_llm`, `astructured_predict`, small-уровень). Любая ошибка → fail-soft в ingest (ложный skip дороже). При skip воркфлоу замыкается на `mark_skipped` | `Ctx` → решение ingest/skip | `activities/classify_document.py`, `intake/classifier.py` |
 | 2 | `parse_and_chunk` | kb-ingest | Чтение → разбиение (`chunk_size`/`overlap`) → **канонизация идентификаторов** (телефоны→E.164, ИНН/ОГРН…) → опциональный перевод; вычистка метаданных перевода; pickle нод | `Ctx` → `Parsed` (`nodes_uri`) | `activities/parse_and_chunk.py` |
 | 3 | `index_vector` | kb-ingest | Срезает метаданные сверх лимита Milvus → embed → вставка в **Milvus**; восстанавливает метаданные на нодах в памяти | `Parsed` → `Indexed` | `activities/index_vector.py` |
 | 4 | `inject_canonical` | kb-ingest | Upsert одной вершины `Entity` на каждый `(type, canonical)` идентификатор в **NebulaGraph** ДО LLM-экстракции (чтобы дословные упоминания от LLM всё равно дедуплицировались) | `Parsed` → `Injected` | `activities/inject_canonical.py` |
@@ -95,7 +95,7 @@ sequenceDiagram
 | 7 | `mark_entities_dirty` | kb-ingest | Best-effort: помечает имена объединённых сущностей для непрерывного wiki-редактора (Project A) | `MarkDirtyIn` → count | `activities/mark_dirty.py` |
 | 8 | `push_wikibase` | kb-ingest | Best-effort (только если граф `completed`): проецирует сущности/связи в локальный якорь Wikibase | `Merged` → `WikibasePushed` | `activities/push_wikibase.py` |
 | 9 | `finalize` | kb-ingest | Финальный статус в Postgres; удаление staging-префикса + локальной директории; запись `ingest_metrics` по каждой активности (длительности + теги моделей по ролям) | `FinalizeIn` → `IngestResult` | `activities/finalize.py` |
-| — | `mark_skipped` | kb-ingest | **Opt-in** (срабатывает только при `classify_document` → skip): пишет терминальный статус `skipped` + причину, чистит staging; парсинг/индексация/граф не выполняются | `MarkSkippedIn` | `activities/finalize.py` |
+| — | `mark_skipped` | kb-ingest | **Opt-in** (срабатывает только при `classify_document` → skip): пишет вердикт приёма `intake_status='rejected'` + причину и удаляет строку `doc_processing` (наружу документ по-прежнему виден как `skipped` — через выражение эффективного статуса), чистит staging; парсинг/индексация/граф не выполняются | `SkipIn` | `activities/mark_skipped.py` |
 | — | `mark_failed` | kb-ingest | При падении векторной половины: статус `failed`, очистка, повторный проброс | `MarkFailedIn` | `activities/finalize.py` |
 
 `6a`/`6b` выполняются внутри **дочернего воркфлоу `GraphBuildWorkflow`** (`graph_build.py`), так что медленная LLM-работа по графу имеет свои собственные retry/timeout и метрики и может быть отменена без перезапуска векторной половины.
@@ -111,13 +111,13 @@ sequenceDiagram
 
 **Track 2**, включается через env `CLASSIFIER_ENABLED` (по умолчанию false). Когда включён, между `fetch_source` (шаг 1) и `parse_and_chunk` (шаг 2) на очереди `kb-ingest` выполняется активность `classify_document`, решающая, стоит ли вообще пускать документ в дорогостоящий конвейер.
 
-- **Два слоя.** (a) Детерминированные правила (`ingestion/classifier.py::apply_rules`) — проверки по расширению файла, размеру, пустоте. (b) LLM-гейт по ограниченному превью файла (`classify_with_llm`, `astructured_predict`, small-уровень).
+- **Два слоя.** (a) Детерминированные правила (`intake/classifier.py::apply_rules`) — проверки по расширению файла, размеру, пустоте. (b) LLM-гейт по ограниченному превью файла (`classify_with_llm`, `astructured_predict`, small-уровень).
 - **Флаг `force`.** `Form`-параметр `force=true` на `POST /ingest`, снимаемый в `IngestParams.force`, **обходит детерминированные правила** — чтобы оператор мог протолкнуть документ, который правила иначе бы отсеяли.
-- **Skip → `mark_skipped`.** При решении skip воркфлоу коротко замыкается на новую активность `mark_skipped` (`activities/finalize.py`): пишется новый терминальный статус Postgres `skipped` + причина, чистится staging; парсинг/индексация/граф **не выполняются**.
+- **Skip → `mark_skipped`.** При решении skip воркфлоу коротко замыкается на новую активность `mark_skipped` (`activities/mark_skipped.py`): пишется вердикт приёма `intake_status='rejected'` + причина, строка `doc_processing` удаляется (наружу документ по-прежнему виден как `skipped` — через выражение эффективного статуса), чистится staging; парсинг/индексация/граф **не выполняются**.
 - **Fail-soft.** Любая ошибка классификатора по умолчанию трактуется как ingest (ложный skip теряет хороший документ — это дорогая ошибка).
 - **Детерминизм Temporal.** Флаг классификатора снимается в `IngestParams` в момент сабмита (как wiki-флаг); воркфлоу ветвится на `params.classifier_enabled` и никогда не читает settings напрямую.
 
-Файлы: `workflow/activities/classify_document.py`, `ingestion/classifier.py`, `workflow/activities/finalize.py` (`mark_skipped`).
+Файлы: `workflow/activities/classify_document.py`, `intake/classifier.py`, `workflow/activities/mark_skipped.py`.
 
 ## Допуск документов (admission control)
 
@@ -160,4 +160,4 @@ sequenceDiagram
 
 ## Снимки мультимодели
 
-Имена моделей по ролям (`extraction`/`judge`/`search`) снимаются в момент `POST /ingest` и протягиваются `IngestParams → FinalizeIn`, так что `ingest_metrics` записывает точную модель, выполнявшую каждую активность, даже если модели меняются между сабмитами — пересборка не нужна. (`api/routes/ingest.py`, `activities/finalize.py`; runbook [`runbook/multimodel.md`](runbook/multimodel.md))
+Имена моделей по ролям (`extraction`/`judge`/`search`) снимаются в момент `POST /ingest` и протягиваются `IngestParams → FinalizeIn`, так что `ingest_metrics` записывает точную модель, выполнявшую каждую активность, даже если модели меняются между сабмитами — пересборка не нужна. (`intake/api/ingest.py`, `activities/finalize.py`; runbook [`runbook/multimodel.md`](runbook/multimodel.md))

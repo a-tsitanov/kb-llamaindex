@@ -63,8 +63,13 @@ async def test_full_pipeline_happy_path(monkeypatch):
             cur.execute("SET lock_timeout = '5s'")
             cur.execute("SET statement_timeout = '30s'")
             cur.execute(
-                "INSERT INTO documents (id, path, status) VALUES (%s, %s, 'pending')",
+                "INSERT INTO documents (id, path) VALUES (%s, %s)",
                 (str(doc_id), str(fixture)),
+            )
+            # Статус обработки — отдельная таблица; без этой строки
+            # update_status воркера молча никуда не попадёт.
+            cur.execute(
+                "INSERT INTO doc_processing (doc_id) VALUES (%s)", (str(doc_id),),
             )
         conn.commit()
 
@@ -112,10 +117,12 @@ async def test_full_pipeline_happy_path(monkeypatch):
     assert result.graph_status in ("completed", "vector_only")
     assert result.chunk_count > 0
 
-    # Verify Postgres terminal state.
+    # Verify Postgres terminal state.  Статус обработки живёт в
+    # doc_processing: documents.status после расщепления навсегда остаётся
+    # 'pending' (колонка с DEFAULT, в неё не пишут).
     with psycopg.connect(settings.postgres.dsn) as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT status FROM documents WHERE id = %s", (str(doc_id),),
+            "SELECT status FROM doc_processing WHERE doc_id = %s", (str(doc_id),),
         )
         (status,) = cur.fetchone()
     assert status in ("completed", "vector_only")

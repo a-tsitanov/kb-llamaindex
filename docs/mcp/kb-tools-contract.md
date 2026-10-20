@@ -6,7 +6,7 @@ contract change: update Lens (`tests/fixtures/lens_eval` pins recorded payloads)
 
 ## Row shapes
 
-Lens finds rows generically (`src/lens_agent/rows.py`):
+Lens finds rows generically (`rows.py` в проекте `lens` — он выехал из этого репозитория, здесь остался только контракт):
 - **entity row** — a dict with `entity_name` (or `id` / `name`), optional `entity_type`,
   `description`, `relevance` (cross-encoder sigmoid 0..1), `match` (`strong|weak|none`);
 - **relation row** — a dict with `src_id` and `tgt_id` (entity names) and `label` (the KB
@@ -39,6 +39,6 @@ canonical key); `word`, `tword`, `prefix`, `trigram` are guesses (no redirect).
 
 ## Board-key normalization
 
-`src/utils/names.norm_name` here and `src/lens_common/names.norm_name` in Lens are the same
+`src/utils/names.norm_name` here and `lens_common/names.norm_name` in the `lens` project are the same
 function; both are pinned by the same case list (`tests/test_utils/test_names.py` here,
 `tests/test_lens_common/test_names.py` there).

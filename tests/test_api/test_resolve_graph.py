@@ -26,6 +26,48 @@ def test_choose_graph_ok(hdr, expected):
     assert graph_dep.choose_graph_id(hdr) == expected
 
 
+# ── привязка фидерного ключа к своему графу ──────────────────────────
+#
+# Ключ, сужённый до ОДНОГО графа, без заголовка попадал бы на `default`,
+# которого нет в его списке, и получал бы отказ на ровном месте.  Поэтому
+# единственный граф ключа и есть его умолчание.  Правило живёт здесь, а не
+# в зависимости, потому что тот же выбор делает шов MCP.
+
+
+def _narrow(*graphs: str) -> ApiKeyRecord:
+    return ApiKeyRecord(
+        owner="feeder", tenant_id="default",
+        scopes=frozenset({"write"}), graph_ids=tuple(graphs),
+    )
+
+
+def test_single_graph_key_without_header_binds_to_its_graph():
+    assert graph_dep.choose_graph_id(None, _narrow("acme")) == "acme"
+
+
+def test_multi_graph_key_without_header_stays_on_default():
+    """Два графа — выбирать за клиента нечего, подстановка была бы догадкой."""
+    assert graph_dep.choose_graph_id(None, _narrow("acme", "beta")) == "default"
+
+
+def test_unnarrowed_key_without_header_stays_on_default():
+    assert graph_dep.choose_graph_id(None, ApiKeyRecord.full("a")) == "default"
+
+
+def test_explicit_header_always_wins():
+    """Привязка — умолчание, а не ограничение: названный граф не подменяется.
+
+    Отказ по чужому графу остаётся работой `authorize`, иначе 404 и 403
+    перестали бы различаться на этом шве.
+    """
+    assert graph_dep.choose_graph_id("beta", _narrow("acme")) == "beta"
+
+
+def test_key_is_optional():
+    """Старые вызовы без ключа работают как раньше."""
+    assert graph_dep.choose_graph_id(None) == "default"
+
+
 @pytest.mark.parametrize("hdr", ["Bad;Id", "", "UPPER", "../x"])
 def test_choose_graph_invalid_slug_is_400(hdr):
     with pytest.raises(HTTPException) as ei:

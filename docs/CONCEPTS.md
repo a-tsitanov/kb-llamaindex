@@ -92,7 +92,7 @@
 - `src/workflow/graph_build.py` — дочерний `GraphBuildWorkflow` (merge + сборка property-графа).
 - `src/workflow/worker.py` — процесс воркера, хостящий все пулы Worker.
 - `src/workflow/client.py` — синглтон Temporal-клиента на весь процесс (заметьте: он предписывает `pydantic_data_converter`, так как наши payload'ы — это Pydantic v2 модели).
-- `src/api/routes/ingest.py` (≈строки 127–159) — разрешение-в-момент-отправки снапшотов модели в `IngestParams`.
+- `src/intake/api/ingest.py` — разрешение-в-момент-отправки снапшотов модели в `IngestParams`.
 
 ---
 
@@ -794,7 +794,7 @@ NebulaGraph — распределённая графовая база на эт
 
 **В нашем коде.**
 - `src/config.py` — `LITELLM_MODEL_SMALL` / `LITELLM_MODEL_LARGE`, `_DEFAULT_ROLE_TIERS`, merge-валидатор `LITELLM_ROLE_TIERS` и `LiteLLMSettings.model_for(role)` / `tier_for(role)`.
-- `src/api/routes/ingest.py` — захватывает пер-ролевые снапшоты при отправке (`extraction_model` / `judge_model` / `search_model` через `cfg.model_for(...)`) и `version_tag`.
+- `src/intake/api/ingest.py` — захватывает пер-ролевые снапшоты при отправке (`extraction_model` / `judge_model` / `search_model` через `cfg.model_for(...)`) и `version_tag`.
 - `src/workflow/activities/finalize.py` — строит `models_per_role` из заснапшоченных полей и питает им экстрактор таймингов.
 - `src/storage/ingest_metrics.py` — схема `MetricRow` и writer; `model` — один из записанных столбцов (с `version_tag`, `env`).
 - Кросс-линк: `docs/MODELS.md`.

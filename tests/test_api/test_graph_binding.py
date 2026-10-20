@@ -11,6 +11,7 @@ from src.api import auth, graph_dep
 from src.config import settings
 from src.tenancy.api_keys import ApiKeyRecord
 from src.tenancy.context import default_graph_context, new_graph_context
+from tests.test_intake.test_dedup import no_duplicate
 
 # These tests are about BINDING — which graph a route works in — so the key
 # is deliberately one no route's action can refuse: `full` carries all four
@@ -48,6 +49,7 @@ async def _post(path, **kw):
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         return await ac.post(path, **kw)
+
 
 
 async def test_admin_routes_require_key():
@@ -136,17 +138,18 @@ async def test_graph_admin_uses_request_graph(as_key):
 
 
 async def test_ingest_carries_graph_id_and_prefixed_object_key(as_key):
-    from src.storage.postgres import AsyncPostgres
+    from src.intake.repository import IntakeRepository
 
     as_key(USER)
     storage = MagicMock()
     storage.put_object.return_value = "s3://b/acme/x/f.txt"
     submit = AsyncMock()
     with (
-        patch("src.api.routes.ingest.build_minio_storage", return_value=storage),
-        patch.object(AsyncPostgres, "insert_pending", new=AsyncMock()),
-        patch("src.api.routes.ingest.get_temporal_client", new=AsyncMock(return_value=MagicMock())),
-        patch("src.api.routes.ingest.submit_document", submit),
+        patch("src.intake.api.ingest.build_minio_storage", return_value=storage),
+        no_duplicate(),
+        patch.object(IntakeRepository, "accept_document", new=AsyncMock()),
+        patch("src.intake.api.ingest.get_temporal_client", new=AsyncMock(return_value=MagicMock())),
+        patch("src.intake.api.ingest.submit_document", submit),
     ):
         r = await _post(
             "/api/v1/ingest", headers={"X-API-Key": "k", "X-Graph": "acme"},
@@ -160,16 +163,17 @@ async def test_ingest_carries_graph_id_and_prefixed_object_key(as_key):
 
 
 async def _graph_seen_by_ingest(headers):
-    from src.storage.postgres import AsyncPostgres
+    from src.intake.repository import IntakeRepository
 
     submit = AsyncMock()
     storage = MagicMock()
     storage.put_object.side_effect = lambda key, *_a, **_k: f"s3://b/{key}"
     with (
-        patch("src.api.routes.ingest.build_minio_storage", return_value=storage),
-        patch.object(AsyncPostgres, "insert_pending", new=AsyncMock()),
-        patch("src.api.routes.ingest.get_temporal_client", new=AsyncMock(return_value=MagicMock())),
-        patch("src.api.routes.ingest.submit_document", submit),
+        patch("src.intake.api.ingest.build_minio_storage", return_value=storage),
+        no_duplicate(),
+        patch.object(IntakeRepository, "accept_document", new=AsyncMock()),
+        patch("src.intake.api.ingest.get_temporal_client", new=AsyncMock(return_value=MagicMock())),
+        patch("src.intake.api.ingest.submit_document", submit),
     ):
         r = await _post("/api/v1/ingest", headers=headers,
                         files={"file": ("f.txt", b"hi", "text/plain")})
@@ -202,16 +206,17 @@ async def test_invalid_x_graph_is_400(as_key):
 
 
 async def test_ingest_original_object_key_is_graph_prefixed(as_key):
-    from src.storage.postgres import AsyncPostgres
+    from src.intake.repository import IntakeRepository
 
     as_key(USER)
     storage = MagicMock()
     storage.put_object.side_effect = lambda key, *_a, **_k: f"s3://b/{key}"
     with (
-        patch("src.api.routes.ingest.build_minio_storage", return_value=storage),
-        patch.object(AsyncPostgres, "insert_pending", new=AsyncMock()),
-        patch("src.api.routes.ingest.get_temporal_client", new=AsyncMock(return_value=MagicMock())),
-        patch("src.api.routes.ingest.submit_document", AsyncMock()),
+        patch("src.intake.api.ingest.build_minio_storage", return_value=storage),
+        no_duplicate(),
+        patch.object(IntakeRepository, "accept_document", new=AsyncMock()),
+        patch("src.intake.api.ingest.get_temporal_client", new=AsyncMock(return_value=MagicMock())),
+        patch("src.intake.api.ingest.submit_document", AsyncMock()),
     ):
         r = await _post(
             "/api/v1/ingest", headers={"X-API-Key": "k", "X-Graph": "acme"},
@@ -250,13 +255,13 @@ async def test_route_action_refuses_a_read_only_key(as_key, monkeypatch, method,
 
 
 async def test_read_only_key_still_reads(as_key, monkeypatch):
-    from src.storage.postgres import AsyncPostgres
+    from src.intake.repository import IntakeRepository
 
     as_key(READER)
     monkeypatch.setattr(settings.authz, "mode", "enforce")
     from src.api.main import app
 
-    with patch.object(AsyncPostgres, "status_counts_by", new=AsyncMock(return_value=[])):
+    with patch.object(IntakeRepository, "status_counts_by", new=AsyncMock(return_value=[])):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             r = await ac.get("/api/v1/stats/messages", headers={"X-API-Key": "k"})
     assert r.status_code == 200, r.text
