@@ -28,13 +28,13 @@ from src.config import settings
 from src.graph.alerts import upsert_alert
 from src.graph.store import build_graph_store
 from src.retrieval.date_filters import today_epoch_days
-from src.storage.watch import WatchRepository
 from src.tenancy import graph_repo
 from src.tenancy.activity import resolve_graph_for_activity
 from src.tenancy.context import GraphContext, default_graph_context
+from src.watch.delivery import post_alert
+from src.watch.repository import WatchRepository
+from src.watch.sweep import run_watch_sweep
 from src.workflow.heartbeat import heartbeat_every
-from src.workflow.monitor.delivery import post_alert
-from src.workflow.monitor.watch_sweep import run_watch_sweep
 
 # Maximum rows per sweep pass — keeps a single sweep bounded even on large graphs.
 _TOP_N = 200

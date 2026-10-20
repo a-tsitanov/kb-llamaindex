@@ -197,7 +197,7 @@ link-prediction + risk и пишет обратно в граф (`src/analytics/
 
 > ⚠️ **Известные пробелы на NebulaGraph.**
 > - **Webhook-доставка не работает.** Если задан `MONITOR_WEBHOOK_URL`,
->   активность `deliver_alerts` (`src/workflow/monitor/activities.py`) шлёт
+>   активность `deliver_alerts` (`src/watch/activities.py`) шлёт
 >   Cypher (`MATCH (a:Alert) … LIMIT $cap`) с `param_map`, который
 >   `NebulaGraphStore.structured_query` отвергает (`NotImplementedError`) —
 >   активность ловит исключение и **всегда** возвращает `DeliverResult` с

@@ -5,7 +5,7 @@ from datetime import date
 from types import SimpleNamespace
 
 from src.graph.nebula_store import entity_vid
-from src.graph.watch_journal import (
+from src.watch.journal import (
     edge_rows,
     epoch_days_to_date,
     mention_rows,

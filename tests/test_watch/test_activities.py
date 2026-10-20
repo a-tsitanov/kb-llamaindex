@@ -9,7 +9,7 @@ from src.graph.nebula_store import _q, entity_vid
 from src.retrieval.date_filters import today_epoch_days
 
 # Import the module under test — will fail until activities.py exists.
-from src.workflow.monitor import activities as ma
+from src.watch import activities as ma
 
 # nebula has no MERGE: a new :Alert is an INSERT VERTEX (after a FETCH miss).
 _ALERT_INSERT = "INSERT VERTEX `Alert` "
@@ -92,7 +92,7 @@ async def test_detect_alerts_writes_both_kinds(monkeypatch: pytest.MonkeyPatch) 
         "directions, so an edge whose endpoints are both watched is read twice "
         "(out from src + REVERSELY from tgt) and counted 4x, not 2x "
         "(upsert dedups the Alert vertices by key; the count does not). "
-        "src/workflow/monitor/activities.py _read_watched_edges"
+        "src/watch/activities.py _read_watched_edges"
     ),
 )
 @pytest.mark.asyncio
@@ -173,7 +173,7 @@ class _NebulaBurstStore:
     reason=(
         "nebula gap: watched_only burst detection is not ported — "
         "_read_burst returns [] under nebula without issuing any query "
-        "(src/workflow/monitor/activities.py _read_burst), so no burst alert "
+        "(src/watch/activities.py _read_burst), so no burst alert "
         "is raised even when gated on.  The fake answers the burst row to ANY "
         "non-watched/risk/Alert statement, so porting the read flips this to XPASS"
     ),
@@ -211,7 +211,7 @@ async def _default_only():
 
 @pytest.mark.asyncio
 async def test_sweep_watch_tallies_events(monkeypatch):
-    import src.workflow.monitor.activities as acts
+    import src.watch.activities as acts
 
     async def _run(repo, **kw):
         return {"new_mention": 2, "new_identifier": 1}
@@ -226,7 +226,7 @@ async def test_sweep_watch_tallies_events(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_sweep_watch_never_raises(monkeypatch):
-    import src.workflow.monitor.activities as acts
+    import src.watch.activities as acts
 
     async def _boom(repo, **kw):
         raise RuntimeError("pg down")

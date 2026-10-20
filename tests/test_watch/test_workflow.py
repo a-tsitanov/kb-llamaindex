@@ -23,7 +23,7 @@ from src.analytics.contracts import (
     MonitorResult,
     WatchSweepResult,
 )
-from src.workflow.monitor.workflow import MonitorSweepWorkflow
+from src.watch.workflow import MonitorSweepWorkflow
 
 
 @activity.defn(name="detect_alerts")

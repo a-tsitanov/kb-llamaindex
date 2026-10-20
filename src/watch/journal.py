@@ -3,7 +3,7 @@
 Pure row builders + one fail-open writer called by ``build_property_graph``
 after the graph write. Rows are written for EVERY entity of the document;
 which of them anyone watches is the sweep's business
-(``src/workflow/monitor/watch_sweep.py``).
+(``src/watch/sweep.py``).
 """
 
 from __future__ import annotations

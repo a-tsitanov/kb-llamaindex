@@ -6,7 +6,7 @@
 |---|---|---|
 | Приём | `src/intake/` | входная группа: классификатор, дедуп по телу, реестр приёма (`documents`), очередь, маршруты `/ingest` и выдача оригинала |
 | Ядро | `src/workflow/`, `src/graph/`, `src/retrieval/`, `src/analytics/` | документы в граф и чтение графа; статус обработки — `doc_processing` |
-| Наблюдение | `src/workflow/monitor/`, `watch_journal` | новые сущности и подписки (в свой пакет ещё не вынесено) |
+| Наблюдение | `src/watch/` | подписки на сущности, детекторы событий, доставка |
 | Доступ | `src/tenancy/`, `src/api/graph_dep.py`, `src/mcp/_shared.py` | арендаторы, права ключа, выбор графа; шва три, других нет |
 | Инфраструктура | `src/storage/` | Postgres, MinIO, схема графа — НИЖЕ контуров, импортировать её можно всем |
 
@@ -15,7 +15,10 @@
 - `src/graph`, `src/retrieval`, `src/workflow` не импортируют `src.intake`,
   кроме объявленных воркерных адаптеров;
 - `src/intake` не импортирует `src.graph`;
-- `ChunkRepository` не получает `pg=AsyncPostgres(...)` ни из одного модуля.
+- `ChunkRepository` не получает `pg=AsyncPostgres(...)` ни из одного модуля;
+- ядро не импортирует `src.watch`, кроме трёх объявленных адаптеров
+  (воркер, запись журналов на ингесте, переписывание vid при слиянии);
+- `src/watch` не импортирует приём мимо `IntakeRepository` (`tests/test_watch/test_boundaries.py`).
 
 Карта контуров и порядок работ — `docs/superpowers/plans/2026-10-17-project-boundaries.md`.
 

@@ -962,7 +962,7 @@ def _entity_search(graph: GraphContext):
 
 
 def _watch_repo(graph: GraphContext):
-    from src.storage.watch import WatchRepository
+    from src.watch.repository import WatchRepository
 
     return WatchRepository(graph=graph)
 

@@ -9,8 +9,8 @@ from loguru import logger
 from temporalio import activity
 
 from src.graph.store import build_graph_store
-from src.graph.watch_journal import record_watch_journals
 from src.tenancy.activity import resolve_graph_for_activity
+from src.watch.journal import record_watch_journals
 from src.workflow.contracts import GraphBuilt, Merged
 from src.workflow.heartbeat import heartbeat_every
 from src.workflow.staging import build_staging_store
@@ -146,7 +146,7 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
         # the write just created (every graph; the monitor sweeps them all).
         # Fail-open inside — never fails the build.
         ctx = merged.kg.parsed.ctx
-        from src.storage.watch import WatchRepository
+        from src.watch.repository import WatchRepository
 
         await record_watch_journals(
             WatchRepository(graph=graph), entities, relations, created_pairs,

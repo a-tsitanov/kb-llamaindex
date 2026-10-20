@@ -1,6 +1,6 @@
 import pytest
 
-from src.workflow.monitor import delivery
+from src.watch import delivery
 
 
 @pytest.mark.asyncio
@@ -48,7 +48,7 @@ async def test_post_alert_false_on_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_deliver_alerts_pushes_unpushed_and_marks(monkeypatch):
     from src.analytics.contracts import DeliverIn
-    from src.workflow.monitor import activities as act
+    from src.watch import activities as act
 
     class _Store:
         def __init__(self):
@@ -80,7 +80,7 @@ async def test_deliver_alerts_pushes_unpushed_and_marks(monkeypatch):
 @pytest.mark.asyncio
 async def test_deliver_alerts_noop_when_no_url(monkeypatch):
     from src.analytics.contracts import DeliverIn
-    from src.workflow.monitor import activities as act
+    from src.watch import activities as act
 
     monkeypatch.setattr(act.settings.monitor, "webhook_url", "", raising=False)
     res = await act.deliver_alerts(DeliverIn())

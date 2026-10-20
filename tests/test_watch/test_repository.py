@@ -8,9 +8,9 @@ from datetime import date
 from psycopg.rows import dict_row
 
 from src.storage import pg_scope
-from src.storage import watch as watch_mod
-from src.storage.watch import WatchRepository
 from src.tenancy.context import default_graph_context, new_graph_context
+from src.watch import repository as watch_mod
+from src.watch.repository import WatchRepository
 
 
 @dataclass

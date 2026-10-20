@@ -19,8 +19,8 @@ from temporalio.client import (
 )
 
 from src.config import settings
+from src.watch.workflow import MonitorSweepWorkflow
 from src.workflow.client import get_temporal_client
-from src.workflow.monitor.workflow import MonitorSweepWorkflow
 
 _SCHEDULE_ID = "monitor-sweep"
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date
 
 from src.graph.nebula_store import entity_vid
-from src.workflow.monitor.watch_sweep import (
+from src.watch.sweep import (
     detect_contradictions,
     detect_edges,
     detect_mentions,

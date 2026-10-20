@@ -12,8 +12,8 @@ from src.graph.alerts import mark_watched
 from src.graph.store import build_graph_store
 from src.graph.wiki_graph_ops import build_wiki_graph_ops
 from src.tenancy.context import GraphContext
+from src.watch.workflow import MonitorSweepWorkflow
 from src.workflow.client import get_temporal_client
-from src.workflow.monitor.workflow import MonitorSweepWorkflow
 from src.workflow.wiki.wiki_sweep import WikiSweepWorkflow
 
 router = APIRouter(

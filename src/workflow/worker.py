@@ -49,6 +49,8 @@ from temporalio.worker import Worker
 
 from src.config import settings
 from src.utils.logging import configure_logging
+from src.watch.activities import MONITOR_ACTIVITIES
+from src.watch.workflow import MonitorSweepWorkflow
 from src.workflow.activities import (
     EXTRACT_ACTIVITIES,
     MAIN_ACTIVITIES,
@@ -64,8 +66,6 @@ from src.workflow.graph_build import GraphBuildWorkflow
 from src.workflow.graph_lifecycle.activities import LIFECYCLE_ACTIVITIES
 from src.workflow.graph_lifecycle.workflows import DeleteGraphWorkflow, ProvisionGraphWorkflow
 from src.workflow.ingest_scheduler import IngestSchedulerWorkflow
-from src.workflow.monitor.activities import MONITOR_ACTIVITIES
-from src.workflow.monitor.workflow import MonitorSweepWorkflow
 from src.workflow.search.activities import (
     GRAPH_BUILD_ACTIVITIES,
     SEARCH_V2_ACTIVITIES,

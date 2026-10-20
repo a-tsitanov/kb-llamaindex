@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 
 from src.tenancy.context import default_graph_context, new_graph_context
-from src.workflow.monitor import activities as M
+from src.watch import activities as M
 
 
 async def test_sweep_watch_covers_all_ready_graphs(monkeypatch):

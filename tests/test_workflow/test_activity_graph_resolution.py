@@ -67,7 +67,7 @@ async def test_documents_for_communities_uses_input_graph(monkeypatch):
 
 
 async def test_detect_alerts_unavailable_graph_is_not_swallowed(missing_graph):
-    from src.workflow.monitor import activities as ma
+    from src.watch import activities as ma
 
     with pytest.raises(ApplicationError) as ei:
         await ma.detect_alerts(MonitorIn(graph_id="gone"))
@@ -76,7 +76,7 @@ async def test_detect_alerts_unavailable_graph_is_not_swallowed(missing_graph):
 
 
 async def test_deliver_alerts_unavailable_graph_is_not_swallowed(missing_graph, monkeypatch):
-    from src.workflow.monitor import activities as ma
+    from src.watch import activities as ma
 
     monkeypatch.setattr(ma.settings.monitor, "webhook_url", "http://hook", raising=False)
     with pytest.raises(ApplicationError) as ei:

@@ -1222,7 +1222,7 @@ async def _rewrite_watch_vid(graph: Any, loser_name: str, canon_name: str) -> No
     a stale vid only costs the watcher events until the next merge of the
     same pair."""
     from src.graph.nebula_store import entity_vid
-    from src.storage.watch import WatchRepository
+    from src.watch.repository import WatchRepository
 
     try:
         await WatchRepository(graph=graph).rewrite_vid(

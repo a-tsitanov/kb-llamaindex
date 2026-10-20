@@ -5,9 +5,9 @@ Module-level inspection only — no Temporal server connection, no network.
 
 from __future__ import annotations
 
+from src.watch.activities import MONITOR_ACTIVITIES, detect_alerts
+from src.watch.workflow import MonitorSweepWorkflow
 from src.workflow import worker as w
-from src.workflow.monitor.activities import MONITOR_ACTIVITIES, detect_alerts
-from src.workflow.monitor.workflow import MonitorSweepWorkflow
 
 
 def test_monitor_in_worker_groups():
@@ -23,7 +23,7 @@ def test_monitor_sweep_workflow_importable():
 
 
 def test_sweep_watch_in_monitor_activities():
-    from src.workflow.monitor.activities import sweep_watch
+    from src.watch.activities import sweep_watch
 
     assert sweep_watch in MONITOR_ACTIVITIES
 

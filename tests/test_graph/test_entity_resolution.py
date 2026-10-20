@@ -863,7 +863,7 @@ async def test_watch_rewrite_follows_each_successful_merge_only(monkeypatch):
 @pytest.mark.asyncio
 async def test_watch_rewrite_maps_names_to_vids_and_never_raises(monkeypatch):
     import src.graph.entity_resolution as er
-    import src.storage.watch as watch_mod
+    import src.watch.repository as watch_mod
     from src.graph.nebula_store import entity_vid
 
     calls: list[tuple] = []
