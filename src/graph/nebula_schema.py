@@ -68,10 +68,12 @@ SCHEMA_DDL: list[str] = [
     "eigenvector double DEFAULT 0.0, risk_score double DEFAULT 0.0, "
     "risk_band string DEFAULT '', risk_components string DEFAULT '', "
     "completeness_score double DEFAULT 0.0, "
-    # Arc-2 monitor: watchlist flag (mark_watched, user-set) + prior risk_score
-    # for the risk-rise delta (written by the risk materialize before it
-    # overwrites risk_score).
-    "watched bool DEFAULT false, risk_score_prev double DEFAULT 0.0);",
+    # Прежнее значение риска для детектора роста (пишется материализацией
+    # риска перед тем, как перезаписать risk_score).  Флага подписки здесь
+    # больше нет: подписки живут в Postgres (таблица `watch`), а дуга
+    # `:Alert` со своим флагом `watched` выведена вместе с P2 — колонка
+    # остаётся в уже созданных пространствах мусором, ронять её незачем.
+    "risk_score_prev double DEFAULT 0.0);",
     # valid_from/valid_to are OPAQUE ISO date strings (or '') — what
     # src/graph/merge.py emits. They were
     # originally (mistakenly) declared int, which crashed the write path on the

@@ -1,8 +1,11 @@
-"""Arc 2 monitoring sweep — one-shot MonitorSweepWorkflow.
+"""Свип наблюдения — одноразовый ``MonitorSweepWorkflow``.
 
-Builds MonitorIn from settings, delegates to the detect_alerts activity,
-and returns the alert tally.  Designed to be scheduled via a Temporal
-Schedule (see settings.monitor.sweep_interval_minutes).
+Имя класса сохранено намеренно: по нему работает Temporal-расписание
+(``scripts/setup_monitor_schedule.py``), и переименование означало бы
+ручную пересборку расписания на каждом стенде.
+
+Содержимое после вывода дуги `:Alert` — один шаг: свип журналов и роста
+риска.  Доставка добавляется отдельной активностью (S4 плана P2).
 """
 
 from __future__ import annotations
@@ -13,15 +16,7 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
-    from src.analytics.contracts import (
-        DeliverIn,
-        DeliverResult,
-        MonitorIn,
-        MonitorResult,
-        SweepResult,
-        WatchSweepResult,
-    )
-    from src.config import settings
+    from src.analytics.contracts import SweepResult, WatchSweepResult
 
 _RETRY = RetryPolicy(
     maximum_attempts=2,
@@ -32,13 +27,10 @@ _RETRY = RetryPolicy(
 
 @workflow.defn
 class MonitorSweepWorkflow:
-    """One-shot sweep: entity-watch events, then new-connection + risk-rise alerts."""
+    """Один проход наблюдения: журналы и рост риска → ``watch_event``."""
 
     @workflow.run
     async def run(self) -> SweepResult:
-        # Entity watch (Postgres journals -> watch_event). Runs first: it is
-        # the per-document feed; the Nebula-flag checks below are the legacy
-        # Arc-2 path (risk-rise / burst) and stay as they were.
         watch = await workflow.execute_activity(
             "sweep_watch",
             result_type=WatchSweepResult,
@@ -47,36 +39,8 @@ class MonitorSweepWorkflow:
             heartbeat_timeout=timedelta(minutes=2),
             retry_policy=_RETRY,
         )
-        monitor_in = MonitorIn(
-            window_days=settings.monitor.new_window_days,
-            risk_rise_delta=settings.monitor.risk_rise_delta,
-        )
-        result = await workflow.execute_activity(
-            "detect_alerts",
-            monitor_in,
-            result_type=MonitorResult,
-            start_to_close_timeout=timedelta(minutes=5),
-            schedule_to_close_timeout=timedelta(minutes=15),
-            heartbeat_timeout=timedelta(minutes=2),
-            retry_policy=_RETRY,
-        )
-        deliver = await workflow.execute_activity(
-            "deliver_alerts",
-            DeliverIn(cap=settings.monitor.deliver_batch),
-            result_type=DeliverResult,
-            # serial FIFO delivery: worst case ≈ deliver_batch × webhook_timeout_s
-            # (default 100 × 5s = 500s) — keep start_to_close comfortably above it.
-            start_to_close_timeout=timedelta(minutes=12),
-            schedule_to_close_timeout=timedelta(minutes=25),
-            heartbeat_timeout=timedelta(minutes=2),
-            retry_policy=_RETRY,
-        )
         return SweepResult(
             watch_events=watch.events,
-            new_connection_alerts=result.new_connection_alerts,
-            risk_rise_alerts=result.risk_rise_alerts,
-            burst_alerts=result.burst_alerts,
-            delivered=deliver.delivered,
-            failed=deliver.failed,
-            error="; ".join(e for e in (watch.error, result.error, deliver.error) if e),
+            by_kind=dict(watch.by_kind),
+            error=watch.error,
         )

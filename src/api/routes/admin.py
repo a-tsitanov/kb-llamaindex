@@ -8,7 +8,6 @@ from temporalio.common import WorkflowIDReusePolicy
 from src.api.auth import require_api_key
 from src.api.graph_dep import resolve_graph_admin
 from src.config import settings
-from src.graph.alerts import mark_watched
 from src.graph.store import build_graph_store
 from src.graph.wiki_graph_ops import build_wiki_graph_ops
 from src.tenancy.context import GraphContext
@@ -74,16 +73,3 @@ async def monitor_sweep(graph: GraphContext = Depends(resolve_graph_admin)) -> d
     )
     return {"status": "started", "workflow_id": handle.id}
 
-
-@monitor_router.post("/watch")
-async def monitor_watch(
-    names: list[str], watched: bool = True,
-    graph: GraphContext = Depends(resolve_graph_admin),
-) -> dict:
-    # Intentionally NOT gated on settings.monitor.enabled (unlike /sweep): the
-    # watchlist is the input the sweep consumes, so operators pre-seed it while
-    # monitoring is still dark, then flip MONITOR_ENABLED on. `names` binds to
-    # the JSON body (a string array); `watched` is a query param.
-    _require_default_graph_for_monitor(graph)
-    mark_watched(build_graph_store(graph), names, watched)
-    return {"status": "ok", "count": len(names), "watched": watched}

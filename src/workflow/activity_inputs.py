@@ -20,9 +20,7 @@ from __future__ import annotations
 
 from src.analytics.contracts import (
     CentralityIn,
-    DeliverIn,
     ExecInput,
-    MonitorIn,
     RiskIn,
 )
 from src.workflow.contracts import (
@@ -61,6 +59,7 @@ STORAGE_ACTIVITY_INPUTS: tuple[type, ...] = (
     ExecInput,                      # execute_step: graph
     CentralityIn,                   # materialize_centrality: graph
     RiskIn,                         # materialize_risk: graph
-    MonitorIn,                      # detect_alerts: graph
-    DeliverIn,                      # deliver_alerts: graph
+    # Активность наблюдения (`sweep_watch`) входной модели не имеет вовсе:
+    # она сама обходит все готовые графы, поэтому graph_id в payload'е ей
+    # не нужен — и в списке её нет по этой причине, а не по забывчивости.
 )

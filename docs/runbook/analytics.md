@@ -2,7 +2,7 @@
 
 > Этот runbook — про **метрики ingest-конвейера** (Prometheus / Grafana /
 > Postgres `ingest_metrics`). Аналитические **запросы к графу знаний**
-> (`/api/v1/analyze`, каталог 42 примитивов, материализация, мониторинг Arc-2)
+> (`/api/v1/analyze`, каталог 41 примитива, материализация, мониторинг Arc-2)
 > — в [`graph-analytics.md`](graph-analytics.md).
 
 ## 1. Обзор

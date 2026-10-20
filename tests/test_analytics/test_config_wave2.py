@@ -14,9 +14,15 @@ def test_monitor_settings_defaults():
     assert m.sweep_interval_minutes >= 1 and 0.0 < m.risk_rise_delta <= 1.0
 
 
-def test_monitor_wave3_defaults():
+def test_monitor_delivery_defaults():
+    """Настройки доставки остались, настройки выведенной дуги — нет.
+
+    Burst-детектор и глобальный `MONITOR_WEBHOOK_URL` ушли вместе с дугой
+    `:Alert` (P2): адресат теперь на подписке, а burst под nebula не был
+    портирован вовсе.
+    """
     m = settings.monitor
-    assert m.burst_enabled is False
-    assert m.burst_window_days >= 1 and m.burst_baseline_windows >= 1
-    assert m.burst_ratio > 1.0 and m.burst_min_count >= 1
-    assert m.webhook_url == "" and m.webhook_timeout_s > 0 and m.deliver_batch >= 1
+    assert m.webhook_timeout_s > 0 and m.deliver_batch >= 1
+    retired = {"burst_enabled", "burst_window_days", "burst_baseline_windows",
+               "burst_ratio", "burst_min_count", "webhook_url", "new_window_days"}
+    assert retired & set(type(m).model_fields) == set()

@@ -23,7 +23,6 @@ FACTORIES = [
     ("src.graph.community_read", "build_community_read"),
     ("src.graph.community_writeback", "build_community_writeback"),
     ("src.graph.community_summarize", "build_community_summarize"),
-    ("src.graph.alert_store", "build_alert_store"),
 ]
 
 

@@ -2,8 +2,9 @@
 
 Importing src.analytics.primitives triggers all family-module registrations via
 side-effect imports in that package's __init__.py.  Once all family modules
-are imported we expect CATALOG to contain the full set of 42 primitives
-(28 Wave-0 + 8 Wave-1 + 5 Wave-2 + 1 Wave-3) and render_catalog_for_planner()
+are imported we expect CATALOG to contain the full set of 41 primitives
+(28 Wave-0 + 8 Wave-1 + 5 Wave-2 + 1 Wave-3, minus `alerts`:
+its data source — the Nebula :Alert arc — was retired with P2) and render_catalog_for_planner()
 to mention each one.
 """
 
@@ -60,7 +61,6 @@ _EXPECTED = {
     "event_dossier",
     "event_timeline",
     # Wave 2 — Arc 2 alerts
-    "alerts",
     # Wave 2 — P3 domain rollups
     "issue_resolution_stats",
     "communication_stats",
@@ -70,7 +70,7 @@ _EXPECTED = {
 
 
 def test_wave0_catalog_is_complete() -> None:
-    """All 42 primitives (Wave-0 + Wave-1 + Wave-2 + Wave-3) must be registered in CATALOG."""
+    """All 41 primitives (Wave-0 + Wave-1 + Wave-2 + Wave-3) must be registered in CATALOG."""
     missing = _EXPECTED - set(CATALOG)
     assert not missing, f"Missing from CATALOG: {sorted(missing)}"
 

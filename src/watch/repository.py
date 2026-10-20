@@ -192,19 +192,38 @@ class WatchRepository:
             await cur.execute("SELECT DISTINCT entity_vid, entity_name FROM watch")
             return {r["entity_vid"]: r["entity_name"] for r in await cur.fetchall()}
 
+    @staticmethod
+    def _event_params(events: list[dict[str, Any]]) -> list[tuple]:
+        return [
+            (e["entity_vid"], e["entity_name"], e["kind"], e.get("doc_id"),
+             e.get("doc_date"), json.dumps(e.get("detail") or {}, ensure_ascii=False),
+             e.get("why", ""), e.get("source_table", ""), e.get("source_id"),
+             e["dedup_key"])
+            for e in events
+        ]
+
     async def save_events(self, journal: str, events: list[dict[str, Any]], *, last_id: int) -> None:
         """Insert events (dedup on key) and advance the journal cursor, atomically."""
         async with self._conn() as conn:
             async with conn.cursor() as cur:
                 if events:
-                    await cur.executemany(_INSERT_EVENT, [
-                        (e["entity_vid"], e["entity_name"], e["kind"], e.get("doc_id"),
-                         e.get("doc_date"), json.dumps(e.get("detail") or {}, ensure_ascii=False),
-                         e.get("why", ""), e.get("source_table", ""), e.get("source_id"),
-                         e["dedup_key"])
-                        for e in events
-                    ])
+                    await cur.executemany(_INSERT_EVENT, self._event_params(events))
                 await cur.execute(_UPSERT_CURSOR, (journal, int(last_id)))
+            await conn.commit()
+
+    async def insert_events(self, events: list[dict[str, Any]]) -> None:
+        """Записать события БЕЗ курсора — для детекторов без журнала.
+
+        Единственный такой детектор — рост риска: прежнее значение лежит
+        на узле графа, продвигать по нему нечего.  Отдельный метод, а не
+        ``save_events`` с фиктивным курсором: запись фиктивной строки в
+        ``monitor_cursor`` создала бы вид журнала, которого нет.
+        """
+        if not events:
+            return
+        async with self._conn() as conn:
+            async with conn.cursor() as cur:
+                await cur.executemany(_INSERT_EVENT, self._event_params(events))
             await conn.commit()
 
     # ── subscriptions ───────────────────────────────────────────────

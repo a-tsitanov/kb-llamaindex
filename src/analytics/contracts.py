@@ -142,30 +142,6 @@ class MaterializeResult(_Frozen):
 # ---------------------------------------------------------------------------
 
 
-class MonitorIn(_Frozen):
-    window_days: int = 7
-    risk_rise_delta: float = 0.1
-    graph_id: str = DEFAULT_GRAPH_ID
-
-
-class MonitorResult(_Frozen):
-    new_connection_alerts: int = 0
-    risk_rise_alerts: int = 0
-    burst_alerts: int = 0
-    error: str = ""
-
-
-class DeliverIn(_Frozen):
-    cap: int = 100
-    graph_id: str = DEFAULT_GRAPH_ID
-
-
-class DeliverResult(_Frozen):
-    delivered: int = 0
-    failed: int = 0
-    error: str = ""
-
-
 class WatchSweepResult(_Frozen):
     """Entity-watch sweep tally (events detected, by kind)."""
 
@@ -175,10 +151,15 @@ class WatchSweepResult(_Frozen):
 
 
 class SweepResult(_Frozen):
+    """Итог одного прохода наблюдения.
+
+    Алертных полей больше нет: дуга `:Alert` выведена, и `risk_rise`
+    приходит теперь внутри ``by_kind`` наравне с остальными видами
+    событий — одним потоком, а не отдельным счётчиком.
+    """
+
     watch_events: int = 0
-    new_connection_alerts: int = 0
-    risk_rise_alerts: int = 0
-    burst_alerts: int = 0
+    by_kind: dict[str, int] = {}
     delivered: int = 0
     failed: int = 0
     error: str = ""

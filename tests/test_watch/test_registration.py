@@ -5,7 +5,7 @@ Module-level inspection only — no Temporal server connection, no network.
 
 from __future__ import annotations
 
-from src.watch.activities import MONITOR_ACTIVITIES, detect_alerts
+from src.watch.activities import MONITOR_ACTIVITIES, sweep_watch
 from src.watch.workflow import MonitorSweepWorkflow
 from src.workflow import worker as w
 
@@ -14,8 +14,14 @@ def test_monitor_in_worker_groups():
     assert "monitor" in w.WORKER_GROUPS
 
 
-def test_detect_alerts_in_monitor_activities():
-    assert detect_alerts in MONITOR_ACTIVITIES
+def test_the_retired_alert_arc_is_not_registered():
+    """Активностей выведенной дуги в наборе нет.
+
+    Регистрация — последнее место, где они могли бы вернуться незаметно:
+    воркер поднимает всё, что в списке, и расписание нашло бы их по имени.
+    """
+    names = {getattr(a, "__name__", "") for a in MONITOR_ACTIVITIES}
+    assert {"detect_alerts", "deliver_alerts"} & names == set()
 
 
 def test_monitor_sweep_workflow_importable():
@@ -23,8 +29,6 @@ def test_monitor_sweep_workflow_importable():
 
 
 def test_sweep_watch_in_monitor_activities():
-    from src.watch.activities import sweep_watch
-
     assert sweep_watch in MONITOR_ACTIVITIES
 
 

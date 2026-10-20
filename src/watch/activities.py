@@ -1,267 +1,75 @@
-"""Arc 2 monitoring sweep — detect_alerts Temporal activity.
+"""Temporal-активности наблюдения: свип журналов и рост риска.
 
-Scans watched entities for:
-  (a) new first_seen edges within a rolling window, and
-  (b) risk-score rises above a threshold.
+Одна дуга наблюдения, а не две (спека
+`docs/superpowers/specs/2026-10-20-watch-contour-design.md` §2): подписки
+живут в Postgres (`watch`), события — в `watch_event`, и доставка идёт от
+них.  Прежняя дуга `:Alert` в Nebula — свой флаг подписки
+(`Entity.watched`), свои детекторы и свой глобальный webhook — выведена
+целиком: она порождала `new_connection` ВТОРОЙ раз, то есть критерий
+«одно уведомление на событие» при ней был недостижим.
 
-Persists :Alert nodes via ``upsert_alert`` (MERGE-on-key, fail-soft).
-Never raises across the Temporal boundary — all errors are returned as
-``MonitorResult(error=...)`` so the sweep stays alive.
+Из неё сохранён ровно один детектор — рост риска: предыдущее значение
+лежит на узле графа (`risk_score_prev`), журнала у него нет, поэтому
+графовое чтение осталось здесь, а решение «это событие» переехало в
+чистый `detect_risk_rise` (`src/watch/sweep.py`).
+
+Активность fail-soft по графу: ошибка одного графа логируется и попадает
+в `error`, не останавливая остальные.
 """
 
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 from loguru import logger
 from temporalio import activity
 
-from src.analytics.contracts import (
-    DeliverIn,
-    DeliverResult,
-    MonitorIn,
-    MonitorResult,
-    WatchSweepResult,
-)
+from src.analytics.contracts import WatchSweepResult
 from src.config import settings
-from src.graph.alerts import upsert_alert
 from src.graph.store import build_graph_store
-from src.retrieval.date_filters import today_epoch_days
 from src.tenancy import graph_repo
-from src.tenancy.activity import resolve_graph_for_activity
 from src.tenancy.context import GraphContext, default_graph_context
-from src.watch.delivery import post_alert
 from src.watch.repository import WatchRepository
-from src.watch.sweep import run_watch_sweep
+from src.watch.sweep import detect_risk_rise, run_watch_sweep
 from src.workflow.heartbeat import heartbeat_every
 
-# Maximum rows per sweep pass — keeps a single sweep bounded even on large graphs.
-_TOP_N = 200
-
-def _get_store(graph: GraphContext) -> Any:
-    return build_graph_store(graph)
+# Сколько наблюдаемых сущностей опрашивать за один FETCH PROP: защита от
+# запроса длиной в тысячи vid'ов, а не настройка производительности.
+_RISK_BATCH = 200
 
 
-# ── Detection reads ─────────────────────────────────────────────────────────────
-# Under nebula, structured_query binds no param_map, and an edge-property WHERE
-# on an unanchored scan IndexNotFounds — so the detection reads anchor on the
-# (indexed) watched entities and aggregate in Python.
+def _read_risk_scores(store: object, vids: list[str]) -> list[dict]:
+    """Текущий и прежний риск у перечисленных сущностей.
 
-
-def _read_watched_edges(store: Any, since: int, top_n: int) -> list[dict]:
+    Чтение идёт ПО СПИСКУ подписок, а не по флагу `Entity.watched`:
+    флаг — часть выведенной дуги, и опрос по нему возвращал бы сущности,
+    на которые никто не подписан, молча расходясь с лентой.
+    """
     from src.graph.nebula_store import _q
 
-    watched = store.structured_query(
-        "LOOKUP ON `Entity` WHERE `Entity`.watched == true "
-        "YIELD id(vertex) AS vid, `Entity`.name AS name"
-    ) or []
-    names_by_vid = {r["vid"]: r.get("name") for r in watched}
-    if not names_by_vid:
-        return []
     rows: list[dict] = []
-    nbr_vids: set[str] = set()
-    pending: list[tuple[str, str, str, int, bool, bool]] = []  # src_vid,rel,tgt_vid,ca,a_w,b_w
-    for vid in names_by_vid:
-        for direction, is_out in (("", True), ("REVERSELY", False)):
-            edges = store.structured_query(
-                f"GO FROM {_q(vid)} OVER `RELATED` {direction} YIELD "
-                f"{'dst' if is_out else 'src'}(edge) AS other, "
-                "`RELATED`.rel_type AS rel, `RELATED`.created_at AS ca"
-            ) or []
-            for e in edges:
-                ca = int(e.get("ca") or 0)
-                if ca < since:
-                    continue
-                other = e.get("other")
-                if not other:
-                    continue
-                nbr_vids.add(other)
-                if is_out:  # vid -> other : src watched, tgt = other
-                    pending.append((vid, e.get("rel"), other, ca, True, other in names_by_vid))
-                else:  # other -> vid : tgt watched, src = other
-                    pending.append((other, e.get("rel"), vid, ca, other in names_by_vid, True))
-    # resolve neighbour names (watched names already known)
-    unknown = [v for v in nbr_vids if v not in names_by_vid]
-    if unknown:
-        fetched = store.structured_query(
-            f"FETCH PROP ON `Entity` {', '.join(_q(v) for v in unknown)} "
-            "YIELD id(vertex) AS vid, `Entity`.name AS name"
+    for i in range(0, len(vids), _RISK_BATCH):
+        chunk = vids[i : i + _RISK_BATCH]
+        fetched = store.structured_query(  # type: ignore[attr-defined]
+            f"FETCH PROP ON `Entity` {', '.join(_q(v) for v in chunk)} YIELD "
+            "id(vertex) AS vid, `Entity`.name AS name, "
+            "`Entity`.risk_score AS score, `Entity`.risk_score_prev AS prev"
         ) or []
-        for r in fetched:
-            names_by_vid[r["vid"]] = r.get("name")
-    for src_vid, rel, tgt_vid, ca, a_w, b_w in pending:
-        rows.append({
-            "src": names_by_vid.get(src_vid), "rel": rel,
-            "tgt": names_by_vid.get(tgt_vid), "created_at": ca,
-            "a_watched": a_w, "b_watched": b_w,
-        })
-    rows.sort(key=lambda r: int(r.get("created_at") or 0), reverse=True)
-    return rows[:top_n]
+        rows += [dict(r) for r in fetched]
+    return rows
 
 
-def _read_risk_rise(store: Any, delta: float, top_n: int) -> list[dict]:
-    watched = store.structured_query(
-        "LOOKUP ON `Entity` WHERE `Entity`.watched == true "
-        "YIELD `Entity`.name AS name, `Entity`.risk_score AS score, "
-        "`Entity`.risk_score_prev AS prev"
-    ) or []
-    rows = [
-        {"name": r.get("name"), "score": float(r.get("score") or 0.0)}
-        for r in watched
-        if float(r.get("score") or 0.0) - float(r.get("prev") or 0.0) >= delta
-    ]
-    rows.sort(key=lambda r: r["score"], reverse=True)
-    return rows[:top_n]
-
-
-def _read_burst(store: Any, params: dict) -> list[dict]:
-    # watched_only burst is not ported to nebula (follow-up); burst_enabled is
-    # off by default, so the sweep simply skips this sub-check under nebula.
-    logger.debug("monitor burst detection skipped under nebula (watched_only burst unported)")
-    return []
-
-
-@activity.defn
-async def detect_alerts(p: MonitorIn) -> MonitorResult:
-    """Detect new-connection and risk-rise alerts for watched entities.
-
-    Both graph reads and ``upsert_alert`` writes are synchronous store calls
-    executed off the event loop via ``asyncio.to_thread``.
-    """
-    # Resolved outside the fail-soft try: an unavailable graph fails the
-    # activity non-retryably instead of being reported as a soft error.
-    graph = await resolve_graph_for_activity(p.graph_id)
-    try:
-        store = _get_store(graph)
-        today = today_epoch_days()
-        since = today - p.window_days
-        new_conn_count = 0
-        risk_rise_count = 0
-        burst_count = 0
-
-        async with heartbeat_every(30.0, {"stage": "monitor"}):
-            # ── (a) new-connection alerts ────────────────────────────────
-            edge_rows = await asyncio.to_thread(
-                _read_watched_edges, store, since, _TOP_N,
-            )
-            for row in edge_rows:
-                if row.get("a_watched"):
-                    await asyncio.to_thread(
-                        upsert_alert,
-                        store,
-                        kind="new_connection",
-                        entity=row["src"],
-                        detail=f"{row['rel']}:{row['tgt']}",
-                        created_at=row["created_at"],
-                    )
-                    new_conn_count += 1
-                if row.get("b_watched"):
-                    await asyncio.to_thread(
-                        upsert_alert,
-                        store,
-                        kind="new_connection",
-                        entity=row["tgt"],
-                        detail=f"{row['rel']}:{row['src']}",
-                        created_at=row["created_at"],
-                    )
-                    new_conn_count += 1
-
-            # ── (b) risk-rise alerts ─────────────────────────────────────
-            risk_rows = await asyncio.to_thread(
-                _read_risk_rise, store, p.risk_rise_delta, _TOP_N,
-            )
-            for row in risk_rows:
-                await asyncio.to_thread(
-                    upsert_alert,
-                    store,
-                    kind="risk_rise",
-                    entity=row["name"],
-                    detail="",  # one alert per entity; the score lives on a.score
-                    created_at=today,
-                    score=row["score"],
-                )
-                risk_rise_count += 1
-
-            # ── (c) burst alerts (gated) ─────────────────────────────────
-            if settings.monitor.burst_enabled:
-                m = settings.monitor
-                bw = max(m.burst_baseline_windows, 1)
-                burst_rows = await asyncio.to_thread(
-                    _read_burst, store,
-                    {
-                        "since_recent": today - m.burst_window_days,
-                        "since_baseline": today - m.burst_window_days * (bw + 1),
-                        "baseline_windows": bw,
-                        "min_count": m.burst_min_count,
-                        "ratio": m.burst_ratio,
-                        "top_n": _TOP_N,
-                    },
-                )
-                for row in burst_rows:
-                    await asyncio.to_thread(
-                        upsert_alert,
-                        store,
-                        kind="burst",
-                        entity=row["entity"],
-                        detail=row["event_type"],  # one alert per (entity, event_type)
-                        created_at=today,
-                        score=round(float(row["burst_score"]), 3),
-                    )
-                    burst_count += 1
-
-        return MonitorResult(
-            new_connection_alerts=new_conn_count,
-            risk_rise_alerts=risk_rise_count,
-            burst_alerts=burst_count,
-        )
-    except Exception as exc:
-        logger.warning("detect_alerts failed: {e}", e=exc)
-        return MonitorResult(error=str(exc))
-
-
-_UNPUSHED = (
-    "MATCH (a:Alert) WHERE a.pushed_at IS NULL "
-    "RETURN a.key AS key, a.kind AS kind, a.entity AS entity, "
-    "a.detail AS detail, a.created_at AS created_at, a.score AS score "
-    "ORDER BY a.created_at ASC LIMIT $cap"  # FIFO — deliver oldest unpushed first
-)
-_MARK_PUSHED = "MATCH (a:Alert {key:$key}) SET a.pushed_at = $now"
-
-
-@activity.defn
-async def deliver_alerts(p: DeliverIn) -> DeliverResult:
-    """Deliver unpushed :Alert records to the configured webhook; mark pushed_at. Fail-soft."""
-    url = settings.monitor.webhook_url
-    if not url:
-        return DeliverResult(delivered=0)
-    # Resolved outside the fail-soft try: an unavailable graph fails the
-    # activity non-retryably instead of being reported as a soft error.
-    graph = await resolve_graph_for_activity(p.graph_id)
-    try:
-        store = _get_store(graph)
-        now = today_epoch_days()
-        delivered = 0
-        failed = 0
-        async with heartbeat_every(30.0, {"stage": "deliver"}):
-            rows = await asyncio.to_thread(
-                store.structured_query, _UNPUSHED, param_map={"cap": p.cap}
-            )
-            for r in rows:
-                ok = await post_alert(url, dict(r), timeout_s=settings.monitor.webhook_timeout_s)
-                if ok:
-                    await asyncio.to_thread(
-                        store.structured_query,
-                        _MARK_PUSHED,
-                        param_map={"key": r["key"], "now": now},
-                    )
-                    delivered += 1
-                else:
-                    failed += 1
-        return DeliverResult(delivered=delivered, failed=failed)
-    except Exception as exc:
-        logger.warning("deliver_alerts failed: {e}", e=exc)
-        return DeliverResult(error=str(exc))
+async def _risk_events(repo: WatchRepository, graph: GraphContext,
+                       watched: dict[str, str]) -> int:
+    """Записать события роста риска для подписок этого графа."""
+    if not watched:
+        return 0
+    store = build_graph_store(graph)
+    rows = await asyncio.to_thread(_read_risk_scores, store, list(watched))
+    events = detect_risk_rise(rows, watched, delta=settings.monitor.risk_rise_delta)
+    if events:
+        await repo.insert_events(events)
+    return len(events)
 
 
 async def _watch_graphs() -> list[GraphContext]:
@@ -278,22 +86,31 @@ async def _watch_graphs() -> list[GraphContext]:
 
 @activity.defn
 async def sweep_watch() -> WatchSweepResult:
-    """Entity-watch sweep over every ready graph: journals past their
-    cursors -> watch_event rows for subscribed entities (Postgres ``watch``
-    table, not the Nebula ``watched`` flag). Fail-soft per graph: one
-    graph's error is logged and recorded in ``error`` without stopping
-    the others."""
+    """Свип наблюдения по каждому готовому графу.
+
+    Две части: журналы за своими курсорами (упоминания, связи,
+    противоречия) и рост риска по узлам графа.  Обе пишут в ту же
+    `watch_event` и дедупятся тем же ключом, поэтому подписчик видит один
+    поток, а не два.
+
+    Fail-soft на граф: ошибка одного не останавливает остальные.
+    """
     by_kind: dict[str, int] = {}
     errors: list[str] = []
     async with heartbeat_every(30.0, {"stage": "watch"}):
         for graph in await _watch_graphs():
+            repo = WatchRepository(graph=graph)
             try:
-                for kind, n in (await run_watch_sweep(WatchRepository(graph=graph))).items():
+                for kind, n in (await run_watch_sweep(repo)).items():
                     by_kind[kind] = by_kind.get(kind, 0) + n
+                risk = await _risk_events(repo, graph, await repo.watched())
+                if risk:
+                    by_kind["risk_rise"] = by_kind.get("risk_rise", 0) + risk
             except Exception as exc:
                 logger.warning("sweep_watch failed  graph={g}: {e}", g=graph.id, e=exc)
                 errors.append(f"{graph.id}: {exc}")
-    return WatchSweepResult(events=sum(by_kind.values()), by_kind=by_kind, error="; ".join(errors))
+    return WatchSweepResult(events=sum(by_kind.values()), by_kind=by_kind,
+                            error="; ".join(errors))
 
 
-MONITOR_ACTIVITIES = [sweep_watch, detect_alerts, deliver_alerts]
+MONITOR_ACTIVITIES = [sweep_watch]

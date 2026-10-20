@@ -7,8 +7,6 @@ mark_watched so no live Neo4j is needed.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -33,30 +31,13 @@ async def test_monitor_sweep_returns_disabled_when_off():
 
 
 @pytest.mark.asyncio
-async def test_monitor_watch_calls_mark_watched():
-    """POST /admin/monitor/watch patches mark_watched and build_graph_store."""
+async def test_the_retired_watchlist_route_is_gone() -> None:
+    """`POST /admin/monitor/watch` ставил графовый флаг `Entity.watched` —
+    вход выведенной дуги `:Alert`.  Подписки теперь одни, в Postgres, и
+    создаются через MCP `kb_watch`; маршрут удалён вместе с дугой."""
     from src.api.main import app
 
-    recorded: list = []
-
-    def _fake_mark_watched(store, names, watched=True):
-        recorded.append((names, watched))
-
     transport = ASGITransport(app=app)
-    with (
-        patch("src.api.routes.admin.mark_watched", _fake_mark_watched),
-        patch("src.api.routes.admin.build_graph_store", return_value=MagicMock()),
-    ):
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            r = await ac.post(
-                "/admin/monitor/watch",
-                headers=_auth(),
-                json=["Alpha", "Beta"],
-                params={"watched": "true"},
-            )
-    assert r.status_code == 200
-    body = r.json()
-    assert body["status"] == "ok"
-    assert body["count"] == 2
-    assert body["watched"] is True
-    assert recorded == [(["Alpha", "Beta"], True)]
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.post("/admin/monitor/watch", headers=_auth(), json=["Alpha"])
+    assert r.status_code == 404

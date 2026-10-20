@@ -2,7 +2,7 @@
 
 > Не путать с [`analytics.md`](analytics.md) — тот runbook про **ingest-метрики**
 > (Grafana / Prometheus / `ingest_metrics`). Здесь — про **аналитические запросы
-> к графу знаний**: слой `src/analytics/` (Waves 0–3), каталог из 42
+> к графу знаний**: слой `src/analytics/` (Waves 0–3), каталог из 41
 > детерминированных примитивов, `/api/v1/analyze`, материализация и мониторинг.
 > Теория за инструментами (центральности, Leiden, link prediction, риск) —
 > в [`../ANALYTICS-GUIDE.md`](../ANALYTICS-GUIDE.md).
@@ -87,7 +87,7 @@
 > логах воркера уровня ERROR — это то же событие, что и `error_detail`, но
 > агрегируемое по времени, а не по одному запросу.
 
-## 4. Каталог примитивов (42)
+## 4. Каталог примитивов (41)
 
 Актуальный список — `CATALOG` в `src/analytics/catalog.py` (регистрируется при
 импорте `src.analytics.primitives`). По группам:
@@ -100,7 +100,7 @@
 | Связи/расследование | `entity_dossier`, `connection_path`, `common_connections`, `cooccurrence`, `neighbors_by_relation`, `investigate_next`, `identifier_lookup`, `shared_identifier_entities`, `entity_activity` |
 | Динамика/время | `whats_changed`, `topic_trend`, `trending_events`, `event_timeline`, `event_dossier`, `new_events`, `entity_new_connections`, `relationship_timeline`, `polarity_evolution` |
 | Качество графа | `orphans`, `incomplete_entities`, `merge_candidates`, `recommended_merges`, `review_queue`, `contradictions`, `issue_resolution_stats` |
-| Риск/прогноз | `risk_score`, `circular_ownership`, `link_prediction`, `alerts` |
+| Риск/прогноз | `risk_score`, `circular_ownership`, `link_prediction` |
 
 ### Доверие к источнику и разрешение конфликтов фактов
 
@@ -171,50 +171,51 @@ link-prediction + risk и пишет обратно в граф (`src/analytics/
 **Когда запускать:** после каждого bulk-ингеста (например, tg_ingest); без прогона центральность/прогнозы отражают старый граф.
 Прогресс смотреть в Temporal UI (`analytics-materialize-*`).
 
-## 6. Мониторинг Arc-2 (opt-in, выключен по умолчанию)
+## 6. Наблюдение за сущностями (opt-in, выключено по умолчанию)
 
-Периодический свип по Temporal Schedule в пуле воркера **monitor**: детект
-новых связей, рост risk_score, burst событий (E3); алерты складываются в граф
-(читаются примитивами `alerts` / `review_queue`) и опционально пушатся в webhook.
+Периодический свип по Temporal Schedule в пуле воркера **monitor**: журналы
+ингеста за своими курсорами плюс рост `risk_score`. Всё, что он находит,
+ложится в `watch_event` — одну таблицу на граф, из которой подписчик читает
+ленту (MCP `kb_watch_feed`). Подписки живут в Postgres (таблица `watch`,
+создаются через MCP `kb_watch`).
+
+Прежняя дуга `:Alert` в Nebula — свой флаг подписки `Entity.watched`, свои
+детекторы и один глобальный webhook — **выведена** вместе с P2
+(`docs/superpowers/specs/2026-10-20-watch-contour-design.md`). Она порождала
+`new_connection` второй раз, то есть «одно уведомление на событие» при ней
+было недостижимо. Из неё сохранён один детектор, `risk_rise`: он читает
+`risk_score`/`risk_score_prev` у ПОДПИСАННЫХ сущностей и пишет событие в тот
+же поток.
 
 | Env | Default | Что |
 |---|---|---|
 | `MONITOR_ENABLED` | `false` | Главный флаг; включить + пересоздать worker |
-| `MONITOR_SWEEP_INTERVAL_MINUTES` | `30` | Период свипа |
+| `MONITOR_SWEEP_INTERVAL_MINUTES` | `5` | Период свипа |
 | `MONITOR_TASK_QUEUE` | `kb-monitor` | Очередь (пул `monitor` в `WORKER_GROUPS`) |
-| `MONITOR_NEW_WINDOW_DAYS` | `7` | Окно детекта новых first_seen-связей |
-| `MONITOR_RISK_RISE_DELTA` | `0.1` | Порог роста risk_score для алерта |
-| `MONITOR_BURST_ENABLED` | `false` | Burst-детектор событий (E3) |
-| `MONITOR_BURST_WINDOW_DAYS` / `_BASELINE_WINDOWS` / `_MIN_COUNT` / `_RATIO` | `7`/`4`/`2`/`3.0` | Окно / базовые окна / мин. событий / порог recent÷base |
-| `MONITOR_WEBHOOK_URL` | `""` | Доставка алертов POST'ом (пусто — выключена) |
-| `MONITOR_WEBHOOK_TIMEOUT_S` / `MONITOR_DELIVER_BATCH` | `5.0`/`100` | Таймаут / алертов за свип |
+| `MONITOR_RISK_RISE_DELTA` | `0.1` | Порог роста `risk_score` для события `risk_rise` |
+| `MONITOR_WEBHOOK_TIMEOUT_S` / `MONITOR_DELIVER_BATCH` | `5.0`/`100` | Таймаут отправки / событий за свип |
+| `MONITOR_DOCUMENT_LINK` | `/api/v1/documents/{doc_id}` | Шаблон ссылки на документ в ленте |
+
+Чего больше нет: `MONITOR_WEBHOOK_URL` (адресат теперь на подписке),
+`MONITOR_NEW_WINDOW_DAYS`, весь блок `MONITOR_BURST_*` (burst-детектор под
+nebula не был портирован вовсе и выключен по умолчанию — ушёл вместе с дугой,
+запись в `docs/BACKLOG.md`), маршрут `POST /admin/monitor/watch` (он ставил
+графовый флаг — вход выведенной дуги).
 
 > ⚠️ В `docker-compose.prod.yml` переменные `MONITOR_*` (как и
 > `ANALYTICS_DEFAULT_TOP_N`/`ANALYTICS_MAX_STEPS`) **не прокинуты в anchor
 > `x-app-env`** — значение из `.env` до контейнера не дойдёт (тот же класс
 > ловушки, что инцидент с `TEMPORAL_COMMUNITY_BACKEND` 2026-06-30). Перед
-> включением мониторинга в прод-компоузе добавьте нужные переменные в anchor.
+> включением наблюдения в прод-компоузе добавьте нужные переменные в anchor.
 
-> ⚠️ **Известные пробелы на NebulaGraph.**
-> - **Webhook-доставка не работает.** Если задан `MONITOR_WEBHOOK_URL`,
->   активность `deliver_alerts` (`src/watch/activities.py`) шлёт
->   Cypher (`MATCH (a:Alert) … LIMIT $cap`) с `param_map`, который
->   `NebulaGraphStore.structured_query` отвергает (`NotImplementedError`) —
->   активность ловит исключение и **всегда** возвращает `DeliverResult` с
->   `error`, ничего не доставлено и `pushed_at` не проставлен. Алерты при этом
->   пишутся в граф и читаются примитивом `alerts`. Порт на nGQL — в бэклоге.
-> - **Burst-детектор в свипе пропускается**: `_read_burst` возвращает `[]` без
->   запроса (watched-only burst не портирован), так что
->   `MONITOR_BURST_ENABLED=true` алертов burst не даёт.
+> ⚠️ Узлы `:Alert`, записанные прежней дугой, остаются в графе мусором:
+> удалять их код больше не будет, и чистка — отдельная операторская задача
+> (`MATCH (a:Alert) DETACH DELETE a` в Studio, при необходимости).
 
-Ручное управление (без ожидания расписания):
+Разовый свип прямо сейчас, без ожидания расписания:
 
 ```bash
-# разовый свип прямо сейчас
 curl -X POST -H "X-API-Key: $API_KEY" http://localhost:8000/admin/monitor/sweep
-# пометить сущности наблюдаемыми (watch-list для свипа)
-curl -X POST -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
-  -d '["БРИКС","Газпром"]' "http://localhost:8000/admin/monitor/watch?watched=true"
 ```
 
 ## 7. Смоук + плейбук проверки качества

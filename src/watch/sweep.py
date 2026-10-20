@@ -117,6 +117,41 @@ def detect_contradictions(rows: list[dict[str, Any]], watched: dict[str, str]) -
     return _dedup(out)
 
 
+def detect_risk_rise(
+    rows: list[dict[str, Any]], watched: dict[str, str], *, delta: float,
+) -> list[dict[str, Any]]:
+    """Рост риска у наблюдаемой сущности — событие, а не узел графа.
+
+    Единственный детектор БЕЗ журнала: предыдущее значение лежит на узле
+    (`risk_score_prev`), а не в таблице, поэтому курсор ему не нужен и
+    строки приходят из графового чтения (``src/watch/activities.py``).
+
+    Политика повтора записана в ключе дедупа — счёт округляется до двух
+    знаков: дальнейший рост даёт новое событие, та же величина не даёт
+    ничего.  Без округления каждый пересчёт аналитики, сдвинувший счёт в
+    пятом знаке, выглядел бы новой новостью.
+    """
+    out = []
+    for r in rows:
+        vid = r.get("vid")
+        if vid not in watched:
+            continue
+        score = float(r.get("score") or 0.0)
+        prev = float(r.get("prev") or 0.0)
+        if score - prev < delta:
+            continue
+        out.append({
+            "entity_vid": vid, "entity_name": r.get("name") or watched[vid],
+            "kind": "risk_rise", "doc_id": None, "doc_date": None,
+            "detail": {"score": round(score, 3), "prev": round(prev, 3),
+                       "delta": round(score - prev, 3)},
+            "why": f"риск вырос на {round(score - prev, 2)} (до {round(score, 2)})",
+            "source_table": "entity.risk_score", "source_id": None,
+            "dedup_key": f"risk_rise:{vid}:{score:.2f}",
+        })
+    return _dedup(out)
+
+
 DETECTORS: dict[str, Callable[[list[dict[str, Any]], dict[str, str]], list[dict[str, Any]]]] = {
     "entity_mention": detect_mentions,
     "edge_new": detect_edges,
@@ -147,5 +182,5 @@ async def run_watch_sweep(repo: Any, *, batch: int = 1000, max_batches: int = 50
 
 __all__ = [
     "DETECTORS", "EVENT_LABELS", "IDENTIFIER_LABELS", "IGNORED_LABELS", "detect_contradictions", "detect_edges",
-    "detect_mentions", "run_watch_sweep",
+    "detect_mentions", "detect_risk_rise", "run_watch_sweep",
 ]

@@ -1,1 +1,6 @@
-"""Arc 2 monitoring sweep — detect_alerts activity + MonitorSweepWorkflow."""
+"""Контур наблюдения: подписки на сущности, детекторы событий, доставка.
+
+Одна дуга: подписки в Postgres (`watch`), события в `watch_event`, лента и
+доставка от них.  Границы контура исполняет
+``tests/test_watch/test_boundaries.py``.
+"""

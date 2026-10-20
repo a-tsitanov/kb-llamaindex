@@ -8,7 +8,6 @@ Importing this package is therefore sufficient to populate the full CATALOG
 
 from src.analytics.primitives import (
     aggregations,  # noqa: F401
-    alerts,  # noqa: F401
     centrality,  # noqa: F401
     communities,  # noqa: F401
     connections,  # noqa: F401

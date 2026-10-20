@@ -10,7 +10,7 @@ import pytest
 from temporalio.exceptions import ApplicationError
 
 import src.tenancy.activity as ta
-from src.analytics.contracts import CentralityIn, DeliverIn, MonitorIn
+from src.analytics.contracts import CentralityIn
 from src.tenancy.registry import GraphNotFound
 from src.workflow.contracts import DocumentsForCommunitiesParams, MarkDirtyIn
 
@@ -64,24 +64,6 @@ async def test_documents_for_communities_uses_input_graph(monkeypatch):
     await mod.documents_for_communities(
         DocumentsForCommunitiesParams(community_ids=["1"], graph_id="acme"))
     assert [g.id for g in seen] == ["acme"]
-
-
-async def test_detect_alerts_unavailable_graph_is_not_swallowed(missing_graph):
-    from src.watch import activities as ma
-
-    with pytest.raises(ApplicationError) as ei:
-        await ma.detect_alerts(MonitorIn(graph_id="gone"))
-    assert ei.value.non_retryable is True
-    assert ei.value.type == "GraphUnavailable"
-
-
-async def test_deliver_alerts_unavailable_graph_is_not_swallowed(missing_graph, monkeypatch):
-    from src.watch import activities as ma
-
-    monkeypatch.setattr(ma.settings.monitor, "webhook_url", "http://hook", raising=False)
-    with pytest.raises(ApplicationError) as ei:
-        await ma.deliver_alerts(DeliverIn(graph_id="gone"))
-    assert ei.value.non_retryable is True
 
 
 async def test_materialize_centrality_unavailable_graph_is_not_swallowed(missing_graph):

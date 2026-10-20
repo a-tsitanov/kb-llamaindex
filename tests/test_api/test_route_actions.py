@@ -40,7 +40,6 @@ EXPECTED: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/admin/communities/rebuild"): "admin",
     ("POST", "/admin/wiki/rebuild"): "admin",
     ("POST", "/admin/monitor/sweep"): "admin",
-    ("POST", "/admin/monitor/watch"): "admin",
     ("POST", "/admin/graph/stats"): "admin",
     ("POST", "/admin/graph/refresh-stats"): "admin",
     ("POST", "/admin/graph/pagerank"): "admin",

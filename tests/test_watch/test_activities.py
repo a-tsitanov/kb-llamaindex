@@ -1,204 +1,15 @@
-"""Tests for detect_alerts activity (Arc 2 monitoring sweep)."""
+"""Активность свипа наблюдения: журналы и рост риска.
+
+Тестов дуги `:Alert` здесь больше нет — она выведена вместе с P2
+(спека `docs/superpowers/specs/2026-10-20-watch-contour-design.md` §4).
+Из неё сохранён один детектор, рост риска, и ровно он проверяется ниже:
+чтение идёт ПО СПИСКУ ПОДПИСОК, а не по графовому флагу `watched`,
+иначе свип возвращал бы сущности, на которые никто не подписан.
+"""
 
 from __future__ import annotations
 
 import pytest
-
-from src.analytics.contracts import MonitorIn
-from src.graph.nebula_store import _q, entity_vid
-from src.retrieval.date_filters import today_epoch_days
-
-# Import the module under test — will fail until activities.py exists.
-from src.watch import activities as ma
-
-# nebula has no MERGE: a new :Alert is an INSERT VERTEX (after a FETCH miss).
-_ALERT_INSERT = "INSERT VERTEX `Alert` "
-
-_WATCHED_LOOKUP = (
-    "LOOKUP ON `Entity` WHERE `Entity`.watched == true "
-    "YIELD id(vertex) AS vid, `Entity`.name AS name"
-)
-_RISK_LOOKUP = (
-    "LOOKUP ON `Entity` WHERE `Entity`.watched == true "
-    "YIELD `Entity`.name AS name, `Entity`.risk_score AS score, "
-    "`Entity`.risk_score_prev AS prev"
-)
-
-
-def _go(vid, *, out):
-    direction = "" if out else "REVERSELY"
-    return (
-        f"GO FROM {_q(vid)} OVER `RELATED` {direction} YIELD "
-        f"{'dst' if out else 'src'}(edge) AS other, "
-        "`RELATED`.rel_type AS rel, `RELATED`.created_at AS ca"
-    )
-
-
-def _fetch_names(vids):
-    return (
-        f"FETCH PROP ON `Entity` {', '.join(_q(v) for v in vids)} "
-        "YIELD id(vertex) AS vid, `Entity`.name AS name"
-    )
-
-
-class _NebulaStmtStore:
-    """nGQL fake keyed on the EXACT statements the nebula seam issues.
-
-    Unknown statements answer ``[]`` (so every ``FETCH PROP ON Alert`` misses
-    and the alert is INSERTed) and are still recorded in ``calls``.  Nebula
-    binds no parameters, so a non-empty ``param_map`` is a test failure."""
-
-    def __init__(self, responses=None):
-        self._responses = dict(responses or {})
-        self.calls: list[str] = []
-
-    def structured_query(self, query, param_map=None):
-        assert not param_map, f"nebula binds no params, got {param_map!r}"
-        self.calls.append(query)
-        return list(self._responses.get(query, []))
-
-
-_A, _B = entity_vid("Alice"), entity_vid("Bob")
-
-
-@pytest.mark.asyncio
-async def test_detect_alerts_writes_both_kinds(monkeypatch: pytest.MonkeyPatch) -> None:
-    """One edge row + one risk row → one alert of each kind."""
-    # Alice (watched) -[KNOWS]-> Bob (not watched), created inside the window.
-    store = _NebulaStmtStore({
-        _WATCHED_LOOKUP: [{"vid": _A, "name": "Alice"}],
-        _go(_A, out=True): [{"other": _B, "rel": "KNOWS", "ca": today_epoch_days()}],
-        _fetch_names([_B]): [{"vid": _B, "name": "Bob"}],
-        _RISK_LOOKUP: [{"name": "Alice", "score": 0.8, "prev": None}],
-    })
-    monkeypatch.setattr(ma, "_get_store", lambda graph: store)
-
-    result = await ma.detect_alerts(MonitorIn(window_days=7, risk_rise_delta=0.1))
-
-    assert result.new_connection_alerts == 1
-    assert result.risk_rise_alerts == 1
-    assert result.error == ""
-
-    # Verify two Alert upserts (nebula: INSERT VERTEX) were recorded on the fake store.
-    merge_calls = [stmt for stmt in store.calls if stmt.startswith(_ALERT_INSERT)]
-    assert len(merge_calls) == 2, f"Expected 2 MERGE calls, got {len(merge_calls)}"
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "nebula behaves differently (src bug, not ported away): "
-        "_read_watched_edges walks RELATED from EVERY watched anchor in both "
-        "directions, so an edge whose endpoints are both watched is read twice "
-        "(out from src + REVERSELY from tgt) and counted 4x, not 2x "
-        "(upsert dedups the Alert vertices by key; the count does not). "
-        "src/watch/activities.py _read_watched_edges"
-    ),
-)
-@pytest.mark.asyncio
-async def test_detect_alerts_both_watched_emits_two_connection_alerts(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When both endpoints are watched, two new_connection alerts are emitted."""
-
-    # ONE edge Alice -[KNOWS]-> Bob, both endpoints watched.  A faithful
-    # nebula graph answers it from BOTH anchors: outbound from Alice and
-    # REVERSELY (inbound) from Bob.
-    ca = today_epoch_days()
-    store = _NebulaStmtStore({
-        _WATCHED_LOOKUP: [{"vid": _A, "name": "Alice"}, {"vid": _B, "name": "Bob"}],
-        _go(_A, out=True): [{"other": _B, "rel": "KNOWS", "ca": ca}],
-        _go(_B, out=False): [{"other": _A, "rel": "KNOWS", "ca": ca}],
-    })
-    monkeypatch.setattr(ma, "_get_store", lambda graph: store)
-    result = await ma.detect_alerts(MonitorIn(window_days=7, risk_rise_delta=0.1))
-    assert result.new_connection_alerts == 2
-    assert result.risk_rise_alerts == 0
-
-
-@pytest.mark.asyncio
-async def test_detect_alerts_failsoft(monkeypatch: pytest.MonkeyPatch) -> None:
-    """If _get_store raises, detect_alerts must return error and not propagate."""
-
-    def _boom(graph) -> None:
-        raise RuntimeError("neo4j gone")
-
-    monkeypatch.setattr(ma, "_get_store", _boom)
-    result = await ma.detect_alerts(MonitorIn())
-    assert result.error != ""
-    assert "neo4j gone" in result.error
-    assert result.new_connection_alerts == 0
-    assert result.risk_rise_alerts == 0
-
-
-_BURST_ROW = {
-    "entity": "Acme",
-    "event_type": "lawsuit",
-    "recent": 6,
-    "baseline_rate": 1.0,
-    "burst_score": 6.0,
-}
-
-
-def _is_known_stmt(stmt: str) -> bool:
-    """The nebula reads/writes detect_alerts issues today besides burst: the
-    watched-edge / risk LOOKUPs and the Alert upsert (FETCH/INSERT/UPDATE)."""
-    return (
-        stmt in (_WATCHED_LOOKUP, _RISK_LOOKUP)
-        or stmt.startswith("FETCH PROP ON `Alert`")
-        or stmt.startswith(_ALERT_INSERT)
-        or stmt.startswith("UPDATE VERTEX ON `Alert`")
-    )
-
-
-class _NebulaBurstStore:
-    """Nebula fake for the burst sub-check: no watched entities (edges/risk
-    reads empty), every Alert FETCH misses (so an alert is INSERTed), and ANY
-    other statement — i.e. a future nebula burst read, whatever its nGQL —
-    answers the burst row.  Nebula binds no params."""
-
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-
-    def structured_query(self, query: str, param_map: dict | None = None) -> list[dict]:
-        assert not param_map, f"nebula binds no params, got {param_map!r}"
-        self.calls.append(query)
-        if _is_known_stmt(query):
-            return []
-        return [dict(_BURST_ROW)]
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "nebula gap: watched_only burst detection is not ported — "
-        "_read_burst returns [] under nebula without issuing any query "
-        "(src/watch/activities.py _read_burst), so no burst alert "
-        "is raised even when gated on.  The fake answers the burst row to ANY "
-        "non-watched/risk/Alert statement, so porting the read flips this to XPASS"
-    ),
-)
-@pytest.mark.asyncio
-async def test_detect_alerts_burst_gated_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    store = _NebulaBurstStore()
-    monkeypatch.setattr(ma, "_get_store", lambda graph: store)
-    monkeypatch.setattr(ma.settings.monitor, "burst_enabled", True, raising=False)
-    result = await ma.detect_alerts(MonitorIn(window_days=7, risk_rise_delta=0.1))
-    assert result.burst_alerts == 1
-    inserts = [c for c in store.calls if c.startswith(_ALERT_INSERT)]
-    assert len(inserts) == 1  # one burst alert upserted (nebula: INSERT VERTEX)
-
-
-@pytest.mark.asyncio
-async def test_detect_alerts_burst_gated_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    store = _NebulaBurstStore()
-    monkeypatch.setattr(ma, "_get_store", lambda graph: store)
-    monkeypatch.setattr(ma.settings.monitor, "burst_enabled", False, raising=False)
-    result = await ma.detect_alerts(MonitorIn())
-    assert result.burst_alerts == 0
-    # burst query never issued: only the watched/risk reads ran.
-    assert [c for c in store.calls if not _is_known_stmt(c)] == []
-
 
 # ── entity-watch sweep activity ──────────────────────────────────────
 
@@ -209,6 +20,17 @@ async def _default_only():
     return [default_graph_context()]
 
 
+class _NoWatches:
+    """Репозиторий без подписок: журнальная часть свипа подменена, а
+    риск без подписок и так не читается."""
+
+    async def watched(self):
+        return {}
+
+    async def insert_events(self, events):
+        raise AssertionError("нечего записывать")
+
+
 @pytest.mark.asyncio
 async def test_sweep_watch_tallies_events(monkeypatch):
     import src.watch.activities as acts
@@ -217,7 +39,7 @@ async def test_sweep_watch_tallies_events(monkeypatch):
         return {"new_mention": 2, "new_identifier": 1}
 
     monkeypatch.setattr(acts, "run_watch_sweep", _run)
-    monkeypatch.setattr(acts, "WatchRepository", lambda *, graph: object())
+    monkeypatch.setattr(acts, "WatchRepository", lambda *, graph: _NoWatches())
     monkeypatch.setattr(acts, "_watch_graphs", _default_only)
     out = await acts.sweep_watch()
     assert out.events == 3 and out.by_kind == {"new_mention": 2, "new_identifier": 1}
@@ -232,7 +54,110 @@ async def test_sweep_watch_never_raises(monkeypatch):
         raise RuntimeError("pg down")
 
     monkeypatch.setattr(acts, "run_watch_sweep", _boom)
-    monkeypatch.setattr(acts, "WatchRepository", lambda *, graph: object())
+    monkeypatch.setattr(acts, "WatchRepository", lambda *, graph: _NoWatches())
     monkeypatch.setattr(acts, "_watch_graphs", _default_only)
     out = await acts.sweep_watch()
     assert out.events == 0 and "pg down" in out.error
+
+
+# ── рост риска ───────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_risk_rise_lands_in_the_same_event_stream(monkeypatch):
+    """Рост риска — событие в `watch_event`, а не узел графа.
+
+    Подписчик видит один поток: журнальные виды и риск приходят одним
+    ``by_kind``, а не двумя разными счётчиками, как было при двух дугах.
+    """
+    import src.watch.activities as acts
+
+    inserted: list[list[dict]] = []
+
+    class _Repo:
+        async def watched(self):
+            return {"vid1": "Акме"}
+
+        async def insert_events(self, events):
+            inserted.append(events)
+
+    async def _run(repo, **kw):
+        return {"new_mention": 1}
+
+    monkeypatch.setattr(acts, "run_watch_sweep", _run)
+    monkeypatch.setattr(acts, "WatchRepository", lambda *, graph: _Repo())
+    monkeypatch.setattr(acts, "_watch_graphs", _default_only)
+    monkeypatch.setattr(acts, "build_graph_store", lambda g: object())
+    monkeypatch.setattr(
+        acts, "_read_risk_scores",
+        lambda store, vids: [{"vid": "vid1", "name": "Акме", "score": 0.8, "prev": 0.2}],
+    )
+
+    out = await acts.sweep_watch()
+
+    assert out.by_kind == {"new_mention": 1, "risk_rise": 1}
+    assert out.events == 2
+    event = inserted[0][0]
+    assert event["kind"] == "risk_rise"
+    assert event["dedup_key"] == "risk_rise:vid1:0.80"
+    # Журнала у риска нет, поэтому и курсора нет: запись идёт отдельным
+    # методом, а не save_events с фиктивным курсором.
+    assert event["source_table"] == "entity.risk_score"
+
+
+@pytest.mark.asyncio
+async def test_risk_is_read_for_subscribed_entities_only(monkeypatch):
+    import src.watch.activities as acts
+
+    asked: list[list[str]] = []
+
+    class _Repo:
+        async def watched(self):
+            return {"vid1": "Акме", "vid2": "Бета"}
+
+        async def insert_events(self, events):
+            pass
+
+    async def _run(repo, **kw):
+        return {}
+
+    monkeypatch.setattr(acts, "run_watch_sweep", _run)
+    monkeypatch.setattr(acts, "WatchRepository", lambda *, graph: _Repo())
+    monkeypatch.setattr(acts, "_watch_graphs", _default_only)
+    monkeypatch.setattr(acts, "build_graph_store", lambda g: object())
+
+    def _read(store, vids):
+        asked.append(sorted(vids))
+        return []
+
+    monkeypatch.setattr(acts, "_read_risk_scores", _read)
+    await acts.sweep_watch()
+
+    assert asked == [["vid1", "vid2"]]
+
+
+@pytest.mark.asyncio
+async def test_no_subscriptions_means_no_graph_read(monkeypatch):
+    """Пустая подписка — не повод открывать соединение с графом."""
+    import src.watch.activities as acts
+
+    class _Repo:
+        async def watched(self):
+            return {}
+
+        async def insert_events(self, events):
+            raise AssertionError("нечего записывать")
+
+    async def _run(repo, **kw):
+        return {}
+
+    def _boom(g):
+        raise AssertionError("граф читать незачем")
+
+    monkeypatch.setattr(acts, "run_watch_sweep", _run)
+    monkeypatch.setattr(acts, "WatchRepository", lambda *, graph: _Repo())
+    monkeypatch.setattr(acts, "_watch_graphs", _default_only)
+    monkeypatch.setattr(acts, "build_graph_store", _boom)
+
+    out = await acts.sweep_watch()
+    assert out.events == 0 and out.error == ""

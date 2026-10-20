@@ -104,20 +104,6 @@ async def test_monitor_sweep_409_for_non_default_graph(as_key):
     assert r.json()["detail"] == "monitor is available only for the default graph"
 
 
-async def test_monitor_watch_409_for_non_default_graph(as_key):
-    from src.api.routes import admin
-
-    as_key(ADMIN)
-    with patch.object(admin, "mark_watched") as mark:
-        r = await _post(
-            "/admin/monitor/watch", json=["Acme Corp"],
-            headers={"X-API-Key": "k", "X-Graph": "acme"},
-        )
-    assert r.status_code == 409
-    assert r.json()["detail"] == "monitor is available only for the default graph"
-    mark.assert_not_called()
-
-
 async def test_graph_admin_uses_request_graph(as_key):
     from src.api.routes import graph_admin
 
