@@ -178,10 +178,12 @@ kb-llamaindex/
 │   ├── ingestion/               # IngestionPipeline + identifier canon
 │   ├── retrieval/               # vector index, atomic tools, LLMPool
 │   ├── graph/                   # NebulaGraph store, retriever, communities
-│   ├── analytics/               # 42-primitive catalog, planner, materialize,
+│   ├── analytics/               # 41-primitive catalog, planner, materialize,
 │   │                            #   risk, events, provenance
+│   ├── watch/                   # КОНТУР НАБЛЮДЕНИЯ: журналы, детекторы
+│   │                            #   событий, подписки, доставка подписчикам
 │   ├── workflow/                # Temporal: ingest, search, analytics,
-│   │                            #   wiki, monitor + worker launcher
+│   │                            #   wiki + worker launcher
 │   ├── mcp/                     # MCP-1 (search/analyze) + MCP-2 (atomic+graph)
 │   │                            #   + MCP-3 (exact stats, no LLM)
 │   ├── stats/                   # точные счётчики для MCP-3
