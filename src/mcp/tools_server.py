@@ -48,6 +48,7 @@ from src.mcp._shared import (
     assert_api_key_env_set,
     build_sse_auth,
     current_graph,
+    current_principal,
     log_banner,
     parse_args,
 )
@@ -997,6 +998,13 @@ async def _watch(
 
     if webhook_url and not destination_ok(webhook_url):
         return {"error": "webhook_url must be an http(s) URL"}
+    # Доставка проверяет право по ключу, которым подписались.  Без токена
+    # такого имени нет, и подписка с адресатом была бы молча
+    # недоставляемой — честнее отказать сразу.
+    principal = current_principal()
+    if webhook_url and not principal:
+        return {"error": "push delivery needs an authenticated key; "
+                         "subscribe without webhook_url for feed-only"}
     search = _entity_search(graph)
     hits = await search.search(name, mode="exact", limit=5)
     if len(hits) != 1:
@@ -1009,7 +1017,7 @@ async def _watch(
     hit = hits[0]
     await _watch_repo(graph).add_watch(
         _OWNER, hit["vid"], hit["name"], kinds=list(kinds or []), note=note,
-        webhook_url=webhook_url,
+        webhook_url=webhook_url, created_by=principal,
     )
     return {"status": "watching", "entity": _candidate(hit), "kinds": list(kinds or []),
             "delivery": "webhook" if webhook_url else "feed only"}

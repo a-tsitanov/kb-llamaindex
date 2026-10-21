@@ -9,9 +9,13 @@
   не мог быть правильным для нескольких подписчиков — именно он делал
   доставку безадресной.
 * **Право проверяется перед КАЖДОЙ отправкой.** Доставка идёт сама, не в
-  ответ на запрос: ключа в руках нет, есть `owner` подписки. Права могли
-  отозвать после подписки, и физическая изоляция таблиц от этого не
-  спасает — утечка идёт наружу, через webhook.
+  ответ на запрос: ключа в руках нет, есть `created_by` подписки — имя
+  ключа, которым подписались. Права могли отозвать после подписки, и
+  физическая изоляция таблиц от этого не спасает: утечка идёт наружу,
+  через webhook. Проверяется ИМЕННО `created_by`, а не `owner`: `owner`
+  — корзина ленты и сегодня равен константе 'default', ключа с таким
+  именем в реестре нет, и проверка по нему отказала бы всем подпискам
+  (найдено живой проверкой 2026-10-21).
 * **Дедуп по (подписчик, событие).** Свип перезапускается; подписчик не
   должен получать одно и то же.
 * **Потолок в сутки и сводка.** События пишутся ВСЕ (лента полная), но
@@ -164,15 +168,30 @@ async def deliver_due(
     tally = Counter({"delivered": 0, "failed": 0, "suppressed": 0,
                      "refused": 0, "digests": 0})
     rows = await repo.due_deliveries(limit=batch, max_attempts=max_attempts)
-    for owner, group in groupby(rows, key=lambda r: r["owner"]):
+    # Группировка по ПРИНЦИПАЛУ (`created_by`) и корзине ленты (`owner`):
+    # право и суточный потолок принадлежат тому, кто подписался, а строки
+    # журнала доставки ключуются владельцем ленты.
+    for (principal, owner), group in groupby(
+        rows, key=lambda r: (r.get("created_by") or "", r["owner"]),
+    ):
         items = list(group)
-        if not await _may_read(owner, graph):
+        if not principal:
+            # Подписка без принципала: легаси-строка или stdio без токена.
+            # Отправлять некому «от имени», поэтому только лента.
+            logger.info(
+                "watch delivery refused: подписка без created_by  owner={o} events={n}",
+                o=owner, n=len(items),
+            )
+            tally["refused"] += len(items)
+            continue
+        if not await _may_read(principal, graph):
             # Строки НЕ помечаются: права могут вернуть, и тогда событие
             # уйдёт.  Пометка 'failed' израсходовала бы попытки на отказ,
             # к отправке не относящийся.
             logger.info(
-                "watch delivery refused: нет ключа с правом read  owner={o} graph={g} events={n}",
-                o=owner, g=graph.id, n=len(items),
+                "watch delivery refused: нет ключа с правом read  "
+                "created_by={p} graph={g} events={n}",
+                p=principal, g=graph.id, n=len(items),
             )
             tally["refused"] += len(items)
             continue

@@ -20,8 +20,24 @@ class _Cur:
         return None
 
 
+def _ddl_without_comments() -> str:
+    """GRAPH_DDL без SQL-комментариев.
+
+    Проверка «глобальных таблиц здесь нет» ищет подстроку, а комментарии
+    ОБЪЯСНЯЮТ соседние таблицы и законно называют общие — например, почему
+    право на доставку проверяется по реестру ключей в `public`. Упоминание
+    в комментарии не создаёт таблицу, поэтому сравнивать надо с SQL, а не
+    с текстом файла.
+    """
+    return "\n".join(
+        line.split("--", 1)[0]
+        for stmt in setup_db.GRAPH_DDL
+        for line in stmt.splitlines()
+    )
+
+
 def test_graph_ddl_contains_every_graph_table_and_no_global_one():
-    joined = "\n".join(setup_db.GRAPH_DDL)
+    joined = _ddl_without_comments()
     for t in (
         "documents",
         "doc_processing",

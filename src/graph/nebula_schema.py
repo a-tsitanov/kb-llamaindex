@@ -373,12 +373,14 @@ def ensure_schema(
         attempts=1, delay_s=0,
     )
 
-    # 3h. Same for EXISTING spaces created before the Arc-2 monitor columns
-    # (watched flag + risk_score_prev for the risk-rise delta).
+    # 3h. Same for EXISTING spaces created before `risk_score_prev` (прежнее
+    # значение риска для детектора роста).  Флага подписки `watched` здесь
+    # больше нет: дуга `:Alert` выведена вместе с P2, подписки живут в
+    # Postgres.  В уже созданных пространствах колонка и её индекс
+    # остаются — ронять их код не будет, это операторская чистка.
     _execute_with_retry(
         session,
-        "ALTER TAG `Entity` ADD (watched bool DEFAULT false, "
-        "risk_score_prev double DEFAULT 0.0);",
+        "ALTER TAG `Entity` ADD (risk_score_prev double DEFAULT 0.0);",
         attempts=1, delay_s=0,
     )
 
@@ -399,9 +401,9 @@ def ensure_schema(
         "wiki_synced_at, wiki_page_title, wikibase_qid, "
         "event_type, event_ts_raw, event_start_epoch, event_end_epoch, event_ts_precision, "
         "pagerank, betweenness, eigenvector, risk_score, risk_band, risk_components, "
-        "completeness_score, watched, risk_score_prev) "
+        "completeness_score, risk_score_prev) "
         f'VALUES "{probe}":("", "", 0, 0, "", "", "", false, 0, "", 0, "", "", '
-        '"", "", 0, 0, "", 0.0, 0.0, 0.0, 0.0, "", "", 0.0, false, 0.0);',
+        '"", "", 0, 0, "", 0.0, 0.0, 0.0, 0.0, "", "", 0.0, 0.0);',
         probe, attempts=use_attempts, delay_s=use_delay_s,
     )
 
@@ -417,15 +419,6 @@ def ensure_schema(
         "CREATE TAG INDEX IF NOT EXISTS `entity_wiki_dirty_idx` ON `Entity`(wiki_dirty);",
         attempts=3, delay_s=1.0,
     )
-    # entity_watched_idx (on the ALTER-added `watched` column) backs the Arc-2
-    # monitor's LOOKUP of watched entities — created post-probe for the same
-    # reason as entity_wiki_dirty_idx (an index on an ALTERed column).
-    _execute_with_retry(
-        session,
-        "CREATE TAG INDEX IF NOT EXISTS `entity_watched_idx` ON `Entity`(watched);",
-        attempts=3, delay_s=1.0,
-    )
-
     _probe_tag_write_ready(
         session, "Community",
         "INSERT VERTEX `Community` (id, level, member_count, members_hash, updated, "

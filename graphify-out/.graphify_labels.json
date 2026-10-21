@@ -1142,8 +1142,5 @@
   "1140": "[Stage 7] — 2026-05-09 — Identifier canonicalization",
   "1141": "[Offline Models] — 2026-05-26 — Offline HF model loading + pre-download script",
   "1142": "[Intake 1.4A] — 2026-10-19 — Ключ как источник: атрибуция и фидерный ключ",
-  "1143": "test_search_deps_lock.py",
-  "1144": "test_ingest_group.py",
-  "1145": "test_ingest_source_channel.py",
   "1146": "test_tg_ingest_groups.py"
 }

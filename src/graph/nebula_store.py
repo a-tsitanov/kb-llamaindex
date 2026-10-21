@@ -101,7 +101,7 @@ _PRESERVED: tuple[tuple[str, str], ...] = (
     ("wiki_synced_at", "int"), ("wiki_page_title", "str"), ("wikibase_qid", "str"),
     ("pagerank", "float"), ("betweenness", "float"), ("eigenvector", "float"),
     ("risk_score", "float"), ("risk_band", "str"), ("risk_components", "str"),
-    ("completeness_score", "float"), ("watched", "bool"), ("risk_score_prev", "float"),
+    ("completeness_score", "float"), ("risk_score_prev", "float"),
 )
 
 

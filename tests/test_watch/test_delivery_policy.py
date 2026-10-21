@@ -29,13 +29,17 @@ _URL = "http://hook.internal/watch"
 
 
 def _event(event_id: int, *, owner: str = _OWNER, url: str = _URL,
-           kind: str = "new_mention", limit: int | None = None) -> dict[str, Any]:
+           kind: str = "new_mention", limit: int | None = None,
+           created_by: str | None = None) -> dict[str, Any]:
     return {
         "id": event_id, "entity_vid": "vid1", "entity_name": "Акме", "kind": kind,
         "doc_id": "11111111-1111-1111-1111-111111111111", "doc_date": None,
         "detail": {"provenance": {"source_kind": "tg:news"}}, "why": "упоминается",
         "detected_at": dt.datetime(2026, 10, 20, 12, 0, 0),
         "owner": owner, "webhook_url": url, "daily_push_limit": limit, "attempts": 0,
+        # Принципал подписки — имя КЛЮЧА, которым подписались; `owner` для
+        # этого не годится (он корзина ленты и сегодня константа).
+        "created_by": owner if created_by is None else created_by,
     }
 
 
@@ -285,3 +289,42 @@ async def test_two_subscribers_are_independent(patched) -> None:
 
     assert out["delivered"] == 1 and out["refused"] == 1
     assert [p["event_id"] for _u, p in sender.sent] == [1]
+
+
+@pytest.mark.asyncio
+async def test_subscription_without_a_principal_is_feed_only(patched) -> None:
+    """Подписка без `created_by` push не получает.
+
+    Так выглядят легаси-строки и подписки, созданные по stdio без токена:
+    проверять право не по чему, а отправить «от имени никого» значило бы
+    отдать содержимое графа наружу без проверки вообще. Найдено живой
+    проверкой 2026-10-21: `watch.owner` — константа 'default', и ключа с
+    таким именем в реестре нет.
+    """
+    sender = patched(sender=_Sender())
+    repo = _Repo([_event(1, created_by="")])
+
+    out = await _run(repo)
+
+    assert sender.sent == [] and out["refused"] == 1
+    assert repo.marks == []
+
+
+@pytest.mark.asyncio
+async def test_right_is_checked_against_the_principal_not_the_feed_owner(patched) -> None:
+    sender = _Sender()
+    asked: list[str] = []
+
+    async def _records(owner: str):
+        asked.append(owner)
+        return [ApiKeyRecord.full(owner)]
+
+    patched(sender=sender, records=_records)
+    repo = _Repo([_event(1, owner="default", created_by="analyst-key")])
+
+    out = await _run(repo)
+
+    assert out["delivered"] == 1
+    assert asked == ["analyst-key"]
+    # Журнал доставки по-прежнему ключуется владельцем ленты.
+    assert repo.marks == [("default", 1, "delivered", None)]

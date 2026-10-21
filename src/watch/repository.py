@@ -230,7 +230,7 @@ class WatchRepository:
 
     async def add_watch(
         self, owner: str, vid: str, name: str, *, kinds: list[str] | None = None,
-        note: str = "", webhook_url: str = "",
+        note: str = "", webhook_url: str = "", created_by: str = "",
     ) -> None:
         """Создать или обновить подписку.
 
@@ -239,17 +239,26 @@ class WatchRepository:
         единственный способ отключить доставку, оставив подписку, и
         «подписаться заново без адресата» должно значить именно то, что
         написано.
+
+        ``created_by`` — ``owner`` ключа, которым подписались.  ``owner``
+        строки для этого не годится: он корзина ЛЕНТЫ и сегодня равен
+        константе 'default' (один владелец, пока у панели нет
+        пользователей), а ключа с таким именем в ``public.api_keys`` нет —
+        доставка отказала бы всем подпискам.
         """
         async with self._conn() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
                     "INSERT INTO watch "
-                    "(owner, entity_vid, entity_name, kinds, note, webhook_url) "
-                    "VALUES (%s, %s, %s, %s, %s, %s) "
+                    "(owner, entity_vid, entity_name, kinds, note, webhook_url, "
+                    "created_by) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s) "
                     "ON CONFLICT (owner, entity_vid) DO UPDATE SET "
                     "kinds = EXCLUDED.kinds, note = EXCLUDED.note, "
-                    "webhook_url = EXCLUDED.webhook_url, muted_until = NULL",
-                    (owner, vid, name, list(kinds or []), note, webhook_url),
+                    "webhook_url = EXCLUDED.webhook_url, "
+                    "created_by = EXCLUDED.created_by, muted_until = NULL",
+                    (owner, vid, name, list(kinds or []), note, webhook_url,
+                     created_by),
                 )
             await conn.commit()
 
@@ -267,7 +276,7 @@ class WatchRepository:
         async with self._conn() as conn, conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 "SELECT entity_vid, entity_name, kinds, muted_until, note, "
-                "webhook_url, daily_push_limit, created_at "
+                "webhook_url, daily_push_limit, created_by, created_at "
                 "FROM watch WHERE owner = %s ORDER BY created_at",
                 (owner,),
             )
@@ -356,7 +365,7 @@ class WatchRepository:
         sql = (
             "SELECT e.id, e.entity_vid, e.entity_name, e.kind, e.doc_id, e.doc_date, "
             "e.detail, e.why, e.detected_at, "
-            "w.owner, w.webhook_url, w.daily_push_limit, "
+            "w.owner, w.created_by, w.webhook_url, w.daily_push_limit, "
             "COALESCE(dl.attempts, 0) AS attempts "
             "FROM watch_event e "
             "JOIN watch w ON w.entity_vid = e.entity_vid "
@@ -367,7 +376,7 @@ class WatchRepository:
             "  AND (w.muted_until IS NULL OR w.muted_until < now()) "
             "  AND (dl.state IS NULL "
             "       OR (dl.state = 'failed' AND dl.attempts < %s)) "
-            "ORDER BY w.owner, e.id LIMIT %s"
+            "ORDER BY w.created_by, w.owner, e.id LIMIT %s"
         )
         async with self._conn() as conn, conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(sql, (int(max_attempts), int(limit)))

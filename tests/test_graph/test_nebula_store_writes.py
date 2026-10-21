@@ -21,14 +21,15 @@ def _no_entity_mirror(monkeypatch):
     monkeypatch.setattr(nebula_store_mod, "mirror_entities", lambda graph, rows: None)
 
 
-# Columns upsert_nodes does not own (wiki sweep, analytics materialize, the
-# monitor's watch flag); they are read back and written again unchanged.
+# Columns upsert_nodes does not own (wiki sweep, analytics materialize,
+# prior risk score); they are read back and written again unchanged.
+# Флага `watched` здесь больше нет: дуга `:Alert` выведена вместе с P2.
 PRESERVED_COLS = (
     "wiki_dirty, wiki_dirty_at, wiki_hash, wiki_synced_at, wiki_page_title, "
     "wikibase_qid, pagerank, betweenness, eigenvector, risk_score, risk_band, "
-    "risk_components, completeness_score, watched, risk_score_prev"
+    "risk_components, completeness_score, risk_score_prev"
 )
-DEFAULT_TAIL = 'false, 0, "", 0, "", "", 0.0, 0.0, 0.0, 0.0, "", "", 0.0, false, 0.0'
+DEFAULT_TAIL = 'false, 0, "", 0, "", "", 0.0, 0.0, 0.0, 0.0, "", "", 0.0, 0.0'
 
 
 class _Cast:
@@ -153,7 +154,7 @@ def test_upsert_nodes_preserves_watch_analytics_and_wiki_columns_for_existing_en
         "wiki_page_title": "A_(page)", "wikibase_qid": "Q42",
         "pagerank": 0.25, "betweenness": 0.5, "eigenvector": 0.125,
         "risk_score": 0.75, "risk_band": "high", "risk_components": "{}",
-        "completeness_score": 0.5, "watched": True, "risk_score_prev": 0.375,
+        "completeness_score": 0.5, "risk_score_prev": 0.375,
     }])
     store = _store_with_session(sess)
     node = SimpleNamespace(name="A", label="PERSON", properties={"description": "x"})
@@ -164,7 +165,7 @@ def test_upsert_nodes_preserves_watch_analytics_and_wiki_columns_for_existing_en
     assert len(inserts) == 1
     assert (
         '"d0", "", "", 0, 0, "", true, 5, "h", 6, "A_(page)", "Q42", 0.25, 0.5, 0.125, '
-        '0.75, "high", "{}", 0.5, true, 0.375)'
+        '0.75, "high", "{}", 0.5, 0.375)'
     ) in inserts[0]
 
 
@@ -173,7 +174,7 @@ def test_upsert_nodes_readback_fetches_preserved_columns():
     store = _store_with_session(sess)
     store.upsert_nodes([SimpleNamespace(name="A", label="", properties={})])
     fetch = next(s for s in sess.executed if "FETCH PROP ON `Entity`" in s)
-    for col in ("watched", "risk_score", "pagerank", "wikibase_qid", "wiki_dirty"):
+    for col in ("risk_score_prev", "risk_score", "pagerank", "wikibase_qid", "wiki_dirty"):
         assert f"`Entity`.{col} AS {col}" in fetch
 
 

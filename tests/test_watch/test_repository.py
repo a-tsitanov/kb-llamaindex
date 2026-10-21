@@ -195,7 +195,7 @@ async def test_add_watch_upserts_on_owner_and_entity():
     assert "INSERT INTO watch" in sql and "ON CONFLICT (owner, entity_vid)" in sql
     # Адресат доставки пишется всегда, в том числе пустым: пусто =
     # «только лента», и это единственный способ её отключить.
-    assert params == ("default", "v", "Блинов", ["new_mention"], "КУСП 805", "")
+    assert params == ("default", "v", "Блинов", ["new_mention"], "КУСП 805", "", "")
 
 
 async def test_remove_watch_reports_whether_anything_was_removed():

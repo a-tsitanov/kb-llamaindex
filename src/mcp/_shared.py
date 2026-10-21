@@ -206,6 +206,21 @@ async def current_graph(action: Action = Action.READ) -> GraphContext:
     return ctx  # type: ignore[return-value]  # set whenever `deferred` is None
 
 
+def current_principal() -> str:
+    """``owner`` ключа этого вызова, или пусто без токена.
+
+    Нужен подписке наблюдения: `watch.owner` — корзина ЛЕНТЫ и сегодня
+    равен константе 'default', а доставке нужно имя, которое есть в
+    ``public.api_keys``, иначе право проверить не по чему.  Пусто
+    означает stdio (или HTTP с выключенной аутентификацией) — такая
+    подписка остаётся ленточной, push ей не положен.
+    """
+    token = get_access_token()
+    if token is None:
+        return ""
+    return _record_from_token(token).owner
+
+
 def build_sse_auth() -> RegistryTokenVerifier | None:
     """FastMCP auth provider for HTTP transports: a ``RegistryTokenVerifier``
     unless ``KB_MCP_REQUIRE_AUTH`` is disabled.  Keys come from the registry

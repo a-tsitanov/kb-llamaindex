@@ -415,6 +415,13 @@ CREATE TABLE IF NOT EXISTS watch_event (
 ALTER TABLE watch ADD COLUMN IF NOT EXISTS webhook_url TEXT NOT NULL DEFAULT '';
 -- NULL = взять потолок из настроек (MONITOR_DAILY_PUSH_LIMIT).
 ALTER TABLE watch ADD COLUMN IF NOT EXISTS daily_push_limit INTEGER;
+-- `owner` — корзина ЛЕНТЫ, и сегодня это константа 'default' (один владелец,
+-- пока у панели нет пользователей, src/mcp/tools_server.py).  Для доставки
+-- этого мало: право проверяется по КЛЮЧУ, и ключа с именем 'default' в
+-- `public.api_keys` нет.  Поэтому кто создал подписку пишется отдельно —
+-- это и есть принципал, которому разрешают (или не разрешают) отправку.
+-- Пусто (легаси-строки и stdio без токена) = push не делаем, только лента.
+ALTER TABLE watch ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT '';
 
 -- Сводка остатка: что не влезло в суточный потолок, уходит ОДНИМ
 -- сообщением.  Своя таблица, а не строка в watch_delivery: сводок у
