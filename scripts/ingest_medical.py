@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import httpx
 
+from src.intake.client import DUPLICATE, classify, quota_wait
 from tests.eval.medical_fixture import MEDICAL_CORPUS_PATH
 
 
@@ -84,7 +85,7 @@ def enqueue(client: httpx.Client, args: argparse.Namespace, txt_path: Path) -> s
             files={"file": (txt_path.name, fh, "text/plain")},
             data={"department": args.department},
         )
-    if resp.status_code == httpx.codes.CONFLICT:
+    if classify(resp.status_code) == DUPLICATE:
         detail = resp.json().get("detail") or {}
         job_id = detail.get("doc_id")
         if not job_id:
@@ -103,6 +104,7 @@ def enqueue(client: httpx.Client, args: argparse.Namespace, txt_path: Path) -> s
         # Квота графа (шаг 1.6): в пайплайне нет места, а не сломался приём.
         # Без этой ветки оператор получил бы трассировку httpx, из которой
         # не видно ни квоты, ни того, что прогон достаточно повторить позже.
+        # Срок ожидания считает клиент приёма — то же правило, что у фидеров.
         detail = ""
         try:
             detail = str((resp.json() or {}).get("detail") or "")
@@ -110,7 +112,7 @@ def enqueue(client: httpx.Client, args: argparse.Namespace, txt_path: Path) -> s
             detail = resp.text[:200]
         raise SystemExit(
             f"graph backlog is full (quota), corpus not enqueued: {detail}; "
-            "retry once the pipeline drains"
+            f"retry in ~{quota_wait(resp)}s once the pipeline drains"
         )
     resp.raise_for_status()
     job_id = str(resp.json()["job_id"])

@@ -60,6 +60,7 @@ from typing import Any
 
 from loguru import logger
 
+from src.intake.client import DUPLICATE, FAILED, SENT, post_document
 from src.intake.queue.priorities import PRIO_BACKFILL
 from src.retrieval.groups import GROUP_SET, pick_priority
 
@@ -67,40 +68,12 @@ from src.retrieval.groups import GROUP_SET, pick_priority
 # (visibility into WHAT news is ingested each round). Override via TG_LOG_PREVIEW_CHARS.
 _PREVIEW_CHARS = int(os.environ.get("TG_LOG_PREVIEW_CHARS", "200"))
 
-# Исходы одной попытки приёма.  Три, а не bool: после включения дедупа 409 —
-# не новый документ, но и не сбой («приём уже знает это тело»), и счётчики
-# обязаны их различать, иначе идемпотентный повторный проход читался бы как
-# сплошные ошибки.  Значения совпадают с ключами tally.
-SENT = "sent"
-DUPLICATE = "duplicate"
-FAILED = "failed"
-
-# Отступление на квотный отказ приёма (429, шаг 1.6).  Квота означает
-# «сейчас нет места», а не «сломалось», и различать это обязан фидер: 429
-# как ошибка остановил бы окно канала до рассасывания очереди, 429 как
-# успех потерял бы сообщение.  Поэтому ждём названный срок и пробуем
-# снова, а исчерпав попытки, отдаём FAILED — проход останавливается на
-# этом сообщении, курсор не двигается, следующий круг начнётся с него.
-QUOTA_ATTEMPTS = 3
-QUOTA_DEFAULT_WAIT_S = 30
-# Сервер может назвать срок больше, чем фидеру осмысленно висеть: ждать
-# час бессмысленно, следующий проход всё равно повторит сообщение.
-QUOTA_MAX_WAIT_S = 60
-
-
-def _quota_wait(resp: Any) -> int:
-    """Сколько ждать по заголовку ``Retry-After``, с умолчанием и потолком.
-
-    Заголовок может отсутствовать или прийти в формате HTTP-даты — на
-    обоих случаях берётся умолчание: разбирать дату ради фидера, который
-    всё равно повторит сообщение следующим проходом, не стоит.
-    """
-    raw = getattr(resp, "headers", {}) or {}
-    try:
-        wait = int(raw.get("Retry-After", QUOTA_DEFAULT_WAIT_S))
-    except (TypeError, ValueError):
-        wait = QUOTA_DEFAULT_WAIT_S
-    return max(1, min(wait, QUOTA_MAX_WAIT_S))
+# Исходы одной попытки приёма приходят из клиента приёма
+# (``src/intake/client.py``): 409 — не новый документ, но и не сбой
+# («приём уже знает это тело»), и счётчики обязаны их различать, иначе
+# идемпотентный повторный проход читался бы как сплошные ошибки.  Значения
+# совпадают с ключами tally.  Отступление на 429 и разбор 409 живут там
+# же: политика ответов приёма у всех фидеров одна.
 
 
 def _message_to_doc(msg: Any, channel: str) -> tuple[str, str, str] | None:
@@ -152,15 +125,13 @@ async def post_ingest(
 ) -> str:
     """POST one document to /api/v1/ingest (multipart); fail-soft.
 
-    Исход: ``SENT`` на 2xx, ``DUPLICATE`` на 409 (приём уже знает это тело),
-    ``FAILED`` на любом другом коде и на сетевом сбое.  ``on_duplicate``
-    уходит в форму только когда задан — пустое значение оставляет серверное
-    умолчание (`reject` для обычного POST).
+    Политику ответов исполняет клиент приёма: ``SENT`` на 2xx,
+    ``DUPLICATE`` на 409, отступление на 429 (квота графа), ``FAILED``
+    на прочем и на сетевом сбое.  Здесь остаётся только форма документа
+    и логирование — курсор и счётчики ведёт вызывающий.
 
-    429 (квота графа исчерпана) — единственный код, который повторяется:
-    ждём ``Retry-After`` и пробуем снова, до ``QUOTA_ATTEMPTS`` раз.  500
-    повтором не лечится, 409 — не ошибка, поэтому ни тот, ни другой не
-    повторяются.
+    ``on_duplicate`` уходит в форму только когда задан: пустое значение
+    оставляет серверное умолчание (`reject` для обычного POST).
     """
     data: dict[str, str] = {"document_date": document_date}
     if queue:
@@ -173,42 +144,17 @@ async def post_ingest(
         data["channel"] = channel
     if on_duplicate:
         data["on_duplicate"] = on_duplicate
-    for attempt in range(1, QUOTA_ATTEMPTS + 1):
-        try:
-            resp = await http.post(
-                f"{api_base}/api/v1/ingest",
-                headers={"X-API-Key": api_key},
-                files={"file": (filename, text.encode("utf-8"), "text/plain")},
-                data=data,
-            )
-        except Exception as exc:
-            logger.warning("post_ingest failed file={f}: {e}", f=filename, e=exc)
-            return FAILED
-        if 200 <= resp.status_code < 300:
-            return SENT
-        if resp.status_code == 409:
-            logger.info("post_ingest duplicate file={f} — приём уже знает это тело",
-                        f=filename)
-            return DUPLICATE
-        if resp.status_code == 429:
-            if attempt == QUOTA_ATTEMPTS:
-                logger.warning(
-                    "post_ingest quota file={f}: квота графа исчерпана, "
-                    "попыток {n} — сообщение останется на следующий проход",
-                    f=filename, n=QUOTA_ATTEMPTS,
-                )
-                return FAILED
-            wait = _quota_wait(resp)
-            logger.info(
-                "post_ingest quota file={f}: ждём {w}s (попытка {a}/{n})",
-                f=filename, w=wait, a=attempt, n=QUOTA_ATTEMPTS,
-            )
-            await asyncio.sleep(wait)
-            continue
+    res = await post_document(
+        http, api_base, api_key,
+        filename=filename, content=text.encode("utf-8"), data=data,
+    )
+    if res.outcome == DUPLICATE:
+        logger.info("post_ingest duplicate file={f} — приём уже знает это тело",
+                    f=filename)
+    elif res.outcome == FAILED and res.status_code not in (0, 429):
         logger.warning("post_ingest failed file={f} status={s}",
-                       f=filename, s=resp.status_code)
-        return FAILED
-    return FAILED
+                       f=filename, s=res.status_code)
+    return res.outcome
 
 
 async def read_and_enqueue(
@@ -550,7 +496,6 @@ def select_mode(args: Any) -> str:
 
 def main() -> int:
     import argparse
-    import asyncio
     import os
 
     p = argparse.ArgumentParser(
