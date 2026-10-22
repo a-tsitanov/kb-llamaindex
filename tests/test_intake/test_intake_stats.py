@@ -164,6 +164,26 @@ async def test_duplicate_share_counts_both_kinds_of_repeat(monkeypatch, pg) -> N
     out = await pg.intake_stats()
 
     assert out["duplicate_share"] == pytest.approx(5 / 20)
+    # Рядом с долей — само число: на корпусе в четверть миллиона строк
+    # доля живёт в пятом знаке и глазами не читается.
+    assert out["duplicates"] == 5
+
+
+async def test_rare_repeats_do_not_round_away(monkeypatch, pg) -> None:
+    """Семь повторов на четверть миллиона строк — не ноль.
+
+    Округление до четвёртого знака показывало бы ровно 0.0, то есть
+    «повторов нет»; нашлось на выкате .31 2026-10-22.
+    """
+    _patch(monkeypatch, [
+        [{"kind": "document", "status": "completed", "n": 255425},
+         {"kind": "sighting", "status": "duplicate", "n": 7}],
+        [], [], [], [],
+    ])
+    out = await pg.intake_stats()
+
+    assert out["duplicates"] == 7
+    assert out["duplicate_share"] > 0
 
 
 async def test_empty_graph_gives_zeros_not_division_error(monkeypatch, pg) -> None:

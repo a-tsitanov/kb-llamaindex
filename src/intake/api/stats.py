@@ -84,6 +84,9 @@ class IntakeStatsResponse(BaseModel):
     sightings: int
     by_status: dict[str, int]
     duplicate_share: float
+    # Само число повторов рядом с долей: на большом корпусе доля — это
+    # пятый знак после запятой, и читать её глазами бесполезно.
+    duplicates: int = 0
     throughput: Throughput
     stuck: Stuck
     coverage: Coverage

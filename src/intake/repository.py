@@ -673,7 +673,13 @@ class IntakeRepository:
             "versions": versions,
             "sightings": sightings,
             "by_status": by_status,
-            "duplicate_share": round(repeats / rows, 4) if rows else 0.0,
+            # Шесть знаков, а не четыре: на корпусе в четверть миллиона
+            # строк семь повторов — это 2.7e-05, и округление до четвёртого
+            # знака показывало бы ровно 0.0, то есть «повторов нет» (найдено
+            # на выкате .31 2026-10-22). Рядом отдаётся и само число, чтобы
+            # оператор не считал долю обратно.
+            "duplicate_share": round(repeats / rows, 6) if rows else 0.0,
+            "duplicates": repeats,
             "throughput": {
                 k: int(scalars.get(k) or 0)
                 for k in ("arrived_1h", "arrived_24h", "finished_1h", "finished_24h")
