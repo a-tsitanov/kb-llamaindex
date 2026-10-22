@@ -161,6 +161,7 @@ kb-llamaindex/
 ├── .env.example                 # dev profile (.env.prod.example for prod)
 ├── docker-compose.yml           # dev: backends + litellm + observability
 ├── docker-compose.prod.yml      # prod: whole app, external LiteLLM
+├── docker-compose.hermes.yml    # Telegram-facing agent (Hermes), own config home
 ├── src/
 │   ├── config.py                # nested pydantic-settings
 │   ├── utils/logging.py         # loguru bootstrap

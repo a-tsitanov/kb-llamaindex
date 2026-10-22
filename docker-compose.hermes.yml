@@ -1,0 +1,25 @@
+# Hermes Agent (Nous Research) as the Telegram-facing agent — replaces openclaw.
+# Config-home ./data/hermes (config.yaml, .env with secrets, SOUL.md, memories/,
+# workspace/AGENTS.md), migrated from ./data/openclaw via `hermes claw migrate`.
+# Same Telegram bot as openclaw: never run both (one token = one poller).
+#
+#   docker compose -p agent_v2 -f docker-compose.hermes.yml up -d hermes
+#   docker compose -p agent_v2 -f docker-compose.hermes.yml exec hermes hermes ...
+#
+# API :8642 bound to loopback only; dashboard off (needs auth to run).
+services:
+  hermes:
+    image: ${HERMES_IMAGE:-nousresearch/hermes-agent:latest}
+    command: gateway run
+    volumes:
+      - ./data/hermes:/opt/data
+    ports:
+      - "127.0.0.1:8642:8642"
+    environment:
+      HERMES_DASHBOARD: "0"
+    networks: [default]
+    restart: unless-stopped
+networks:
+  default:
+    name: agent_v2_default
+    external: true
