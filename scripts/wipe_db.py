@@ -101,7 +101,7 @@ _PG_TABLES = (
     # отправлять, то есть мусор напрямую влияет на поведение.
     "watch_delivery", "watch_digest",
     "entity_mention", "edge_new", "watch_event", "watch_seen",
-    "monitor_cursor", "risk_snapshot",
+    "monitor_cursor",
 )
 
 

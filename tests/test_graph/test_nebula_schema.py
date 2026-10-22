@@ -139,7 +139,11 @@ def test_ensure_schema_probes_both_entity_and_community():
     assert "INSERT VERTEX `Entity` " in joined, "Entity write-readiness probe missing"
     assert "INSERT VERTEX `Community` " in joined, "Community write-readiness probe missing"
     # each successful probe removes its sentinel vertex
-    assert fake.statements.count('DELETE VERTEX "__kb_schema_probe__";') == 3
+    # Каждая удачная проба снимает свой маячок: Entity и Community.
+    # Третьей пробы, `Alert`, больше нет — дуга выведена вместе с P2, её
+    # тег не создаётся и готовность проверять нечему.
+    assert fake.statements.count('DELETE VERTEX "__kb_schema_probe__";') == 2
+    assert "INSERT VERTEX `Alert` " not in joined
 
 
 def test_schema_has_community_tag_with_report_columns():

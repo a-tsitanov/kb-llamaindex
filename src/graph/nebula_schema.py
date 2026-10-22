@@ -124,13 +124,10 @@ SCHEMA_DDL: list[str] = [
     # reader. Do not add it back without a query that uses it — and note
     # that re-adding it here is what silently undid the first attempt to
     # DROP it, because `ensure_schema` runs on every new session `build_graph_store(graph)` opens.
-    # Arc-2 monitor findings (`Alert {alert_key,...}`). VID =
-    # alert_vid(key). score/updated_at are 0 for unscored (new_connection) alerts.
-    "CREATE TAG IF NOT EXISTS `Alert` ("
-    "alert_key string, kind string DEFAULT '', entity string DEFAULT '', "
-    "detail string DEFAULT '', created_at int DEFAULT 0, "
-    "score double DEFAULT 0.0, updated_at int DEFAULT 0);",
-    "CREATE TAG INDEX IF NOT EXISTS `alert_key_idx` ON `Alert`(alert_key(256));",
+    # Тега `Alert` здесь больше нет: дуга выведена вместе с P2, писателей и
+    # читателей у него не осталось, а DDL и проба готовности прогонялись на
+    # КАЖДОМ открытии сессии.  В уже созданных пространствах тег и его индекс
+    # остаются — код их не трогает, чистка операторская.
     # NOTE: `entity_wiki_dirty_idx` (on the ALTER-added `wiki_dirty` column) is
     # NOT here — an index on an ALTERed column must be created AFTER the ALTER
     # has propagated, else on an EXISTING space this CREATE runs before the
@@ -424,14 +421,6 @@ def ensure_schema(
         "INSERT VERTEX `Community` (id, level, member_count, members_hash, updated, "
         "report, title, summary, summarized_at) "
         f'VALUES "{probe}":("", 0, 0, "", 0, "", "", "", 0);',
-        probe, attempts=use_attempts, delay_s=use_delay_s,
-    )
-
-    _probe_tag_write_ready(
-        session, "Alert",
-        "INSERT VERTEX `Alert` (alert_key, kind, entity, detail, created_at, "
-        "score, updated_at) "
-        f'VALUES "{probe}":("", "", "", "", 0, 0.0, 0);',
         probe, attempts=use_attempts, delay_s=use_delay_s,
     )
 

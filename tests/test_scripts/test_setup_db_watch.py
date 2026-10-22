@@ -3,7 +3,7 @@ from scripts.setup_db import _WATCH_DDL, _WATCH_INDEXES_DDL
 
 _TABLES = (
     "watch", "entity_mention", "edge_new", "watch_event",
-    "watch_seen", "monitor_cursor", "risk_snapshot",
+    "watch_seen", "monitor_cursor",
     "watch_digest", "watch_delivery",
 )
 

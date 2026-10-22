@@ -470,12 +470,6 @@ CREATE TABLE IF NOT EXISTS monitor_cursor (
     last_id    BIGINT NOT NULL DEFAULT 0,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE TABLE IF NOT EXISTS risk_snapshot (
-    entity_vid TEXT NOT NULL,
-    risk_score DOUBLE PRECISION NOT NULL,
-    taken_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (entity_vid, taken_at)
-);
 """
 
 _WATCH_INDEXES_DDL = """

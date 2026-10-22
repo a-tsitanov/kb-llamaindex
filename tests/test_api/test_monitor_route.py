@@ -1,8 +1,9 @@
-"""ASGI tests for POST /admin/monitor/sweep and /admin/monitor/watch.
+"""ASGI-тесты `POST /admin/monitor/sweep`.
 
-The MONITOR_ENABLED default is False, so sweep returns {"status": "disabled"}
-without touching Temporal.  The watch route is tested via monkeypatching
-mark_watched so no live Neo4j is needed.
+Умолчание `MONITOR_ENABLED` — False, поэтому свип отвечает
+{"status": "disabled"}, не трогая Temporal.  Маршрут выставления графового
+флага удалён вместе с дугой `:Alert` (P2) — здесь проверяется, что его
+больше нет.
 """
 
 from __future__ import annotations
