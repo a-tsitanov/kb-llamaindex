@@ -150,6 +150,7 @@ docker compose -f docker-compose.prod.yml up -d
 | [`docs/runbook/wiki-editor.md`](docs/runbook/wiki-editor.md) | Continuous per-entity MediaWiki article editor from the knowledge graph (dirty-mark + scheduled sweep, bot-section rewrite, anti-drift, citations) |
 | [`docs/MODELS.md`](docs/MODELS.md) | Per-role model guidance + escalation table |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | **Top-level system map** — components, data stores, ingest vs search paths, durable execution, degradation, observability (links out to the deep docs) |
+| [`docs/CONTOURS.md`](docs/CONTOURS.md) | **Layers, contours and data flows** — six layers and the dependency rules between contours, processes and worker pools, the document's path step by step, what a feeder controls and what intake does, every table with its owning contour |
 | [`docs/diagrams/system_architecture.svg`](docs/diagrams/system_architecture.svg) | Rendered container-view diagram (source `docs/diagrams/system_architecture.d2`) |
 
 ## Directory layout
