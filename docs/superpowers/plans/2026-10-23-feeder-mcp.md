@@ -32,7 +32,7 @@
 
 ---
 
-### Задача 1: Реестр источников
+### Task 1: Реестр источников
 
 **Files:**
 - Modify: `src/storage/pg_schema.py` (новый `_SOURCE_DDL`, запись в `GRAPH_DDL` после `_DOCUMENT_DOWNLOAD_DDL`)
@@ -75,7 +75,7 @@
 
 ---
 
-### Задача 2: Доверие на канал доезжает до записи графа
+### Task 2: Доверие на канал доезжает до записи графа
 
 **Files:**
 - Modify: `src/analytics/source_trust.py`, `src/workflow/contracts.py` (`IngestParams`, `Ctx`), `src/intake/api/ingest.py` (сборка `IngestParams`), `src/workflow/activities/fetch_source.py` (две точки сборки `Ctx`), `src/workflow/activities/build_property_graph.py:113-130`
@@ -107,7 +107,7 @@
 
 ---
 
-### Задача 3: Право `sources` и отказ чужому графу
+### Task 3: Право `sources` и отказ чужому графу
 
 **Files:**
 - Modify: `src/tenancy/authz.py` (`Action`), `docs/multi-graph-ops.md` (§4 — перечень действий)
@@ -138,7 +138,7 @@
 
 ---
 
-### Задача 4: Телеграм-операции под разделяемым клиентом
+### Task 4: Телеграм-операции под разделяемым клиентом
 
 **Files:**
 - Create: `src/intake/sources/telegram.py`
@@ -170,7 +170,7 @@
 
 ---
 
-### Задача 5: Предложение с кодом и подключение
+### Task 5: Предложение с кодом и подключение
 
 **Files:**
 - Create: `src/intake/sources/proposals.py`, `src/intake/sources/service.py`
@@ -206,7 +206,7 @@
 
 ---
 
-### Задача 6: Перенос, выход и доверие
+### Task 6: Перенос, выход и доверие
 
 **Files:**
 - Modify: `src/intake/sources/service.py`
@@ -227,7 +227,7 @@
 
 ---
 
-### Задача 7: Отчёт по каналу
+### Task 7: Отчёт по каналу
 
 **Files:**
 - Create: `src/intake/sources/report.py`
@@ -249,7 +249,7 @@
 
 ---
 
-### Задача 8: MCP-сервер в процессе фидера и выкат
+### Task 8: MCP-сервер в процессе фидера и выкат
 
 **Files:**
 - Create: `src/intake/sources/mcp_server.py`, `docs/runbook/feeder-sources.md`
