@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, NamedTuple
 
 from loguru import logger
@@ -16,8 +17,9 @@ from loguru import logger
 from src.intake.client import SENT, post_document
 from src.intake.sources.messages import ingest_form, message_to_doc
 from src.intake.sources.proposals import ProposalStore
-from src.intake.sources.repository import SourceRepository
+from src.intake.sources.repository import SourceRepository, SourceRow
 from src.intake.sources.telegram import FloodWait, FolderNotFound, TelegramOps
+from src.retrieval.groups import GROUP_SET
 
 
 class ApplyResult(NamedTuple):
@@ -114,6 +116,109 @@ async def apply_proposal(
             http=http, api_base=api_base, api_key=api_key, graph=graph,
         )
     return ApplyResult(connected, skipped, bootstrapped, partial)
+
+
+async def move_source(
+    store: ProposalStore,
+    ops: TelegramOps,
+    repo: SourceRepository,
+    proposal_id: str,
+    code: str,
+    peer_id: int,
+    folder: str,
+) -> None:
+    """Переложить канал в другую папку по коду подтверждения.
+
+    Папки агент не создаёт: допустима только группа из `GROUP_SET`, иначе
+    отказ `ValueError` ДО кода и телеграма (предложение не сгорает). Неверный
+    код — `BadProposal` до единого обращения к аккаунту. Канал должен быть
+    активным в реестре (`LookupError` иначе); текущая папка — `group_name`
+    его строки.
+
+    Порядок: сначала в новую папку, потом из старой, потом реестр — канал ни
+    в какой момент не остаётся вовсе без папки. Сбой на любом шаге отменяет
+    уже сделанное (best-effort) и поднимается наверх; реестр меняется
+    последним. Если отмена тоже не удалась, канал лежит сразу в двух папках,
+    а реестр называет старую. Документы и курсор диалога не трогаются.
+    """
+    if folder not in GROUP_SET:
+        raise ValueError(f"папка {folder!r} вне допустимых групп: {sorted(GROUP_SET)}")
+    store.take(proposal_id, code)
+    row = await _active_row(repo, peer_id)
+    old = row.group_name
+    if old == folder:
+        return
+    await ops.add_to_folder(peer_id, folder)
+    try:
+        await ops.remove_from_folder(peer_id, old)
+    except Exception:
+        await _undo(ops.remove_from_folder, peer_id, folder)
+        raise
+    try:
+        if not await repo.set_group(peer_id, folder):
+            raise LookupError(f"источник {peer_id} пропал из реестра при переносе")
+    except Exception:
+        await _undo(ops.add_to_folder, peer_id, old)
+        await _undo(ops.remove_from_folder, peer_id, folder)
+        raise
+
+
+async def leave_source(
+    store: ProposalStore,
+    ops: TelegramOps,
+    repo: SourceRepository,
+    proposal_id: str,
+    code: str,
+    peer_id: int,
+) -> None:
+    """Выйти из канала по коду подтверждения и пометить его `left`.
+
+    Строка и уже принятые документы остаются, доверие тоже; приём не
+    вызывается вовсе. Сбой выхода оставляет строку активной. Если выход
+    удался, а реестр не записался, поднимается ошибка реестра: аккаунт уже
+    вне канала, строка ещё `active`, повтор вызова потребует нового кода.
+    """
+    store.take(proposal_id, code)
+    await _active_row(repo, peer_id)
+    await ops.leave(peer_id)
+    if not await repo.mark_left(peer_id):
+        raise LookupError(f"источник {peer_id} пропал из реестра при выходе")
+
+
+async def set_source_trust(
+    repo: SourceRepository, peer_id: int, trust: float | None,
+) -> SourceRow:
+    """Личное доверие к каналу: `0..1` или `None` («как у группы»).
+
+    Кода нет: телеграм-аккаунт не меняется, пишется только наша таблица.
+    Число действует вперёд — записанные связи не перештамповываются.
+    """
+    if trust is not None and not (math.isfinite(trust) and 0.0 <= trust <= 1.0):
+        raise ValueError(f"доверие должно быть в [0, 1] или None, получено {trust!r}")
+    if await repo.get(peer_id) is None:
+        raise LookupError(f"источник {peer_id} не подключён")
+    await repo.set_trust(peer_id, trust)
+    row = await repo.get(peer_id)
+    if row is None:
+        raise LookupError(f"источник {peer_id} пропал из реестра")
+    return row
+
+
+async def _active_row(repo: SourceRepository, peer_id: int) -> SourceRow:
+    """Предложение разрешает лишь известное реестру: чужой peer_id — отказ."""
+    row = await repo.get(peer_id)
+    if row is None or row.state != "active":
+        raise LookupError(f"источник {peer_id} не подключён")
+    return row
+
+
+async def _undo(op: Any, peer_id: int, folder: str) -> None:
+    try:
+        await op(peer_id, folder)
+    except Exception as exc:
+        logger.warning(
+            "отмена правки папки {f} для {p} не удалась: {e!r}", f=folder, p=peer_id, e=exc,
+        )
 
 
 def _reason(exc: Exception) -> str:
