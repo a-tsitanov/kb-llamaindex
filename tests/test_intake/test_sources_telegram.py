@@ -3,9 +3,6 @@
 import asyncio
 
 import pytest
-
-pytest.importorskip("telethon")
-
 from telethon import utils as tg_utils
 from telethon.errors import FloodWaitError, UsernameNotOccupiedError
 from telethon.tl import functions, types
@@ -108,7 +105,7 @@ async def test_search_only_public_channels_and_limit():
     assert found[0] == Candidate(_pid(1), "@a", "T", 10, True)
 
 
-@pytest.mark.parametrize("raw", ["@foo", "foo", "https://t.me/foo", "t.me/foo/", "http://t.me/foo?x=1"])
+@pytest.mark.parametrize("raw", ["@foo", "foo", "https://t.me/foo", "t.me/foo/", "http://t.me/foo?x=1", "https://t.me/foo/123"])
 @pytest.mark.asyncio
 async def test_resolve_accepts_handle_forms(raw):
     client = _Client({functions.contacts.ResolveUsernameRequest: _resolved(_chan(5, "foo"))})
@@ -267,3 +264,25 @@ async def test_every_method_waits_for_the_lock(name):
     lock.release()
     await task
     assert client.calls > 0
+
+
+@pytest.mark.asyncio
+async def test_remove_from_folder_not_member_does_not_write():
+    client = _Client({functions.messages.GetDialogFiltersRequest: [_folder(2, "news", include=[10], pinned=[12])]})
+    ops, _ = _ops(client)
+    await ops.remove_from_folder(_pid(5), "news")
+    assert not any(isinstance(r, functions.messages.UpdateDialogFilterRequest) for r in client.requests)
+
+
+@pytest.mark.parametrize("method", ["add_to_folder", "remove_from_folder"])
+@pytest.mark.asyncio
+async def test_shared_chatlist_cannot_be_edited(method):
+    chatlist = types.DialogFilterChatlist(
+        id=4, title=types.TextWithEntities("news", []),
+        pinned_peers=[], include_peers=[_inp(5)],
+    )
+    client = _Client({functions.messages.GetDialogFiltersRequest: [chatlist]})
+    ops, _ = _ops(client)
+    with pytest.raises(FolderNotFound, match="общий"):
+        await getattr(ops, method)(_pid(5), "news")
+    assert not any(isinstance(r, functions.messages.UpdateDialogFilterRequest) for r in client.requests)

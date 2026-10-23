@@ -12,17 +12,33 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from functools import cache
+from types import SimpleNamespace
 from typing import Any, NamedTuple
 
-from telethon import utils as tg_utils
-from telethon.errors import (
-    FloodWaitError,
-    UsernameInvalidError,
-    UsernameNotOccupiedError,
-)
-from telethon.tl import functions
-
 from src.intake.sources.folders import filter_title
+
+
+@cache
+def _tl() -> SimpleNamespace:
+    """Telethon живёт в необязательном extra `tg`: импортируем лениво, чтобы
+    модуль грузился и без него (как в `scripts/tg_ingest.py`)."""
+    from telethon import utils as tg_utils
+    from telethon.errors import (
+        FloodWaitError,
+        UsernameInvalidError,
+        UsernameNotOccupiedError,
+    )
+    from telethon.tl import functions, types
+
+    return SimpleNamespace(
+        tg_utils=tg_utils,
+        functions=functions,
+        types=types,
+        FloodWaitError=FloodWaitError,
+        UsernameInvalidError=UsernameInvalidError,
+        UsernameNotOccupiedError=UsernameNotOccupiedError,
+    )
 
 
 class Candidate(NamedTuple):
@@ -48,7 +64,7 @@ class FolderNotFound(LookupError):
 def _candidate(chat: Any) -> Candidate:
     username = getattr(chat, "username", None)
     return Candidate(
-        peer_id=tg_utils.get_peer_id(chat),
+        peer_id=_tl().tg_utils.get_peer_id(chat),
         slug=f"@{username}" if username else "",
         title=getattr(chat, "title", "") or "",
         participants=getattr(chat, "participants_count", None),
@@ -68,7 +84,8 @@ def _normalize_handle(handle: str) -> str:
     if h.startswith(("t.me/", "telegram.me/")):
         h = h.split("/", 1)[1]
     h = h.split("?", 1)[0].strip("/")
-    return h.lstrip("@")
+    # ссылка на сообщение (`foo/123`) ведёт на канал — берём первый сегмент
+    return h.split("/", 1)[0].lstrip("@")
 
 
 class TelegramOps:
@@ -81,12 +98,12 @@ class TelegramOps:
         async with self._lock:
             try:
                 yield
-            except FloodWaitError as exc:
+            except _tl().FloodWaitError as exc:
                 raise FloodWait(exc.seconds) from exc
 
     async def search(self, query: str, limit: int) -> list[Candidate]:
         async with self._guard():
-            res = await self._client(functions.contacts.SearchRequest(q=query, limit=limit))
+            res = await self._client(_tl().functions.contacts.SearchRequest(q=query, limit=limit))
         found = [_candidate(c) for c in res.chats if _is_public_channel(c)]
         return found[:limit]
 
@@ -97,9 +114,9 @@ class TelegramOps:
         async with self._guard():
             try:
                 res = await self._client(
-                    functions.contacts.ResolveUsernameRequest(username=username)
+                    _tl().functions.contacts.ResolveUsernameRequest(username=username)
                 )
-            except (UsernameNotOccupiedError, UsernameInvalidError):
+            except (_tl().UsernameNotOccupiedError, _tl().UsernameInvalidError):
                 return None
         for chat in res.chats:
             if _is_public_channel(chat):
@@ -109,12 +126,12 @@ class TelegramOps:
     async def join(self, peer_id: int) -> None:
         async with self._guard():
             entity = await self._client.get_input_entity(peer_id)
-            await self._client(functions.channels.JoinChannelRequest(entity))
+            await self._client(_tl().functions.channels.JoinChannelRequest(entity))
 
     async def leave(self, peer_id: int) -> None:
         async with self._guard():
             entity = await self._client.get_input_entity(peer_id)
-            await self._client(functions.channels.LeaveChannelRequest(entity))
+            await self._client(_tl().functions.channels.LeaveChannelRequest(entity))
 
     async def history(self, peer_id: int, limit: int) -> list:
         async with self._guard():
@@ -134,7 +151,7 @@ class TelegramOps:
             entity = await self._client.get_input_entity(peer_id)
             target.include_peers = [*target.include_peers, entity]
             await self._client(
-                functions.messages.UpdateDialogFilterRequest(id=target.id, filter=target)
+                _tl().functions.messages.UpdateDialogFilterRequest(id=target.id, filter=target)
             )
 
     async def remove_from_folder(self, peer_id: int, folder: str) -> None:
@@ -142,17 +159,20 @@ class TelegramOps:
             target = await self._find_folder(folder)
             if peer_id not in self._member_ids(target):
                 return
-            keep = lambda p: tg_utils.get_peer_id(p) != peer_id  # noqa: E731
+
+            def keep(p: Any) -> bool:
+                return _tl().tg_utils.get_peer_id(p) != peer_id
+
             target.include_peers = [p for p in target.include_peers if keep(p)]
             target.pinned_peers = [p for p in target.pinned_peers if keep(p)]
             await self._client(
-                functions.messages.UpdateDialogFilterRequest(id=target.id, filter=target)
+                _tl().functions.messages.UpdateDialogFilterRequest(id=target.id, filter=target)
             )
 
     # --- под блокировкой вызывающего ---
 
     async def _filters(self) -> list[Any]:
-        res = await self._client(functions.messages.GetDialogFiltersRequest())
+        res = await self._client(_tl().functions.messages.GetDialogFiltersRequest())
         # новые слои отдают обёртку `.filters`, старые — список
         return list(getattr(res, "filters", res))
 
@@ -160,12 +180,17 @@ class TelegramOps:
         wanted = name.strip().casefold()
         for f in await self._filters():
             if filter_title(f).strip().casefold() == wanted and hasattr(f, "include_peers"):
+                if isinstance(f, _tl().types.DialogFilterChatlist):
+                    raise FolderNotFound(
+                        f"папка {name!r} — общий список (chatlist), "
+                        "его нельзя редактировать через UpdateDialogFilterRequest"
+                    )
                 return f
         raise FolderNotFound(f"папки {name!r} нет в аккаунте; агент папки не создаёт")
 
     @staticmethod
     def _member_ids(folder: Any) -> set[int]:
         return {
-            tg_utils.get_peer_id(p)
+            _tl().tg_utils.get_peer_id(p)
             for p in [*folder.include_peers, *folder.pinned_peers]
         }

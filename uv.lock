@@ -1529,6 +1529,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
+    { name = "telethon" },
 ]
 gliner = [
     { name = "gliner" },
@@ -1581,6 +1582,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.20,<0.1" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.7,<1" },
     { name = "sentence-transformers", marker = "extra == 'rerank'", specifier = ">=3,<6" },
+    { name = "telethon", marker = "extra == 'dev'", specifier = ">=1.36,<2" },
     { name = "telethon", marker = "extra == 'tg'", specifier = ">=1.36,<2" },
     { name = "temporalio", specifier = ">=1.8,<2" },
     { name = "tenacity", specifier = ">=9,<10" },

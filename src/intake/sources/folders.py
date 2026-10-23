@@ -84,7 +84,7 @@ def resolve_group_map(folders: list[Any], *, peer_id: Callable[[Any], int]) -> d
             if prev and prev != title:
                 winner = pick_priority(prev, title)
                 logger.warning(
-                    "folders: channel {c} in multiple group-folders "
+                    "tg_ingest: channel {c} in multiple group-folders "
                     "({a}, {b}) → keeping {w}", c=pid, a=prev, b=title, w=winner,
                 )
                 out[pid] = winner
