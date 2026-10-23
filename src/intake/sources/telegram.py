@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import cache
@@ -72,11 +73,24 @@ def _candidate(chat: Any) -> Candidate:
     )
 
 
+_HANDLE_RE = re.compile(r"[A-Za-z0-9_]+")
+
+
 def _is_public_channel(chat: Any) -> bool:
     return bool(getattr(chat, "username", None)) and hasattr(chat, "access_hash")
 
 
+# Первые сегменты, которые слагом канала не являются: приглашение
+# (`t.me/joinchat/xyz`, `t.me/+abc`) и служебные ссылки (`t.me/s/foo` —
+# веб-предпросмотр, `t.me/c/123/4` — приватный канал по внутреннему id).
+# Без этого отбора `resolve` спросил бы у телеграма «joinchat» или «s» и
+# вернул бы совершенно другой канал как найденный.
+_RESERVED_SEGMENTS = frozenset({"joinchat", "s", "c"})
+
+
 def _normalize_handle(handle: str) -> str:
+    """Слаг канала из любой записи: `foo`, `@foo`, `t.me/foo`, ссылка на
+    сообщение `t.me/foo/123`.  Пустая строка — «это не слаг»."""
     h = handle.strip()
     for prefix in ("https://", "http://"):
         if h.startswith(prefix):
@@ -85,7 +99,10 @@ def _normalize_handle(handle: str) -> str:
         h = h.split("/", 1)[1]
     h = h.split("?", 1)[0].strip("/")
     # ссылка на сообщение (`foo/123`) ведёт на канал — берём первый сегмент
-    return h.split("/", 1)[0].lstrip("@")
+    first = h.split("/", 1)[0].lstrip("@")
+    if first in _RESERVED_SEGMENTS or not _HANDLE_RE.fullmatch(first):
+        return ""
+    return first
 
 
 class TelegramOps:

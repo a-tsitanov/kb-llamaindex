@@ -123,6 +123,25 @@ async def test_resolve_missing_is_none():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "https://t.me/joinchat/AAAAAEHbEkejzxUjAUCfYg",
+        "t.me/+AbCdEf",
+        "t.me/s/foo",
+        "t.me/c/1234567890/42",
+    ],
+)
+async def test_resolve_refuses_links_that_are_not_a_handle(raw):
+    """Приглашение и служебная ссылка слагом не являются: спросить про них
+    телеграм нельзя — ответом был бы чужой канал («joinchat», «s», «c»)."""
+    client = _Client({functions.contacts.ResolveUsernameRequest: _resolved(_chan(5, "foo"))})
+    ops, _ = _ops(client)
+    assert await ops.resolve(raw) is None
+    assert client.requests == []
+
+
+@pytest.mark.asyncio
 async def test_resolve_user_is_none():
     client = _Client({functions.contacts.ResolveUsernameRequest: _resolved()})
     ops, _ = _ops(client)
