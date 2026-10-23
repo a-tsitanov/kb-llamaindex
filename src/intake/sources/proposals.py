@@ -76,7 +76,9 @@ class ProposalStore:
         if entry is None:
             raise BadProposal("предложения нет, оно просрочено или уже использовано")
         proposal, _ = entry
-        if not hmac.compare_digest(proposal.code, code.strip().upper()):
+        if not hmac.compare_digest(
+            proposal.code.encode(), code.strip().upper().encode(),
+        ):
             raise BadProposal("код подтверждения не совпал; предложение погашено")
         return proposal
 

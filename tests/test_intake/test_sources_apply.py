@@ -19,8 +19,12 @@ class _Msg:
 
 
 class _Ops:
-    def __init__(self, log, flood_on=None, flood_at="join", history=None, no_folder=()):
+    def __init__(
+        self, log, flood_on=None, flood_at="join", history=None, no_folder=(),
+        leave_fails=False,
+    ):
         self.log = log
+        self.leave_fails = leave_fails
         self.flood_on = flood_on
         self.flood_at = flood_at
         self.hist = history if history is not None else {}
@@ -40,6 +44,11 @@ class _Ops:
         self._maybe_flood("folder", peer_id)
         self.log.append(("folder", peer_id, folder))
 
+    async def leave(self, peer_id):
+        self.log.append(("leave", peer_id))
+        if self.leave_fails:
+            raise RuntimeError("leave упал")
+
     async def history(self, peer_id, limit):
         self._maybe_flood("history", peer_id)
         self.log.append(("history", peer_id, limit))
@@ -49,12 +58,15 @@ class _Ops:
 class _Repo:
     """Реестр с той же семантикой UPSERT, что и у SourceRepository.add."""
 
-    def __init__(self, log):
+    def __init__(self, log, fail_on=()):
         self.log = log
         self.rows = {}
+        self.fail_on = set(fail_on)
 
     async def add(self, peer_id, slug, title, group_name, *, added_by):
         self.log.append(("add", peer_id))
+        if peer_id in self.fail_on:
+            raise RuntimeError("реестр недоступен")
         old = self.rows.get(peer_id, {})
         self.rows[peer_id] = {
             "slug": slug, "title": title, "group_name": group_name,
@@ -173,16 +185,17 @@ async def test_floodwait_stops_traversal_and_keeps_the_first(posts):
     res = await _apply(store, ops, repo, p)
     assert res.connected == [1]
     assert [pid for pid, _ in res.skipped] == [2, 3]
-    assert all("FloodWait" in why or "подождать" in why for _, why in res.skipped)
+    assert all("подождать" in why for _, why in res.skipped)
     assert list(repo.rows) == [1]
     assert ("join", 3) not in log
 
 
-async def test_floodwait_in_folder_leaves_no_registry_row(posts):
-    _log, store, p, ops, repo = _kit([_item(1), _item(2)], flood_on=1, flood_at="folder")
+async def test_floodwait_in_folder_rolls_back_the_join(posts):
+    log, store, p, ops, repo = _kit([_item(1), _item(2)], flood_on=1, flood_at="folder")
     res = await _apply(store, ops, repo, p)
     assert res.connected == [] and [pid for pid, _ in res.skipped] == [1, 2]
     assert repo.rows == {}
+    assert ("leave", 1) in log and ("join", 2) not in log
 
 
 async def test_floodwait_during_bootstrap_keeps_the_peer_connected(posts):
@@ -192,14 +205,59 @@ async def test_floodwait_during_bootstrap_keeps_the_peer_connected(posts):
     assert list(repo.rows) == [1] and ("join", 2) not in log
 
 
-async def test_missing_folder_skips_that_peer_only(posts):
-    _log, store, p, ops, repo = _kit(
+async def test_missing_folder_rolls_back_and_skips_that_peer_only(posts):
+    log, store, p, ops, repo = _kit(
         [_item(1, group="digest"), _item(2, group="news")], no_folder={"digest"},
     )
     res = await _apply(store, ops, repo, p)
     assert res.connected == [2]
     assert [pid for pid, _ in res.skipped] == [1]
     assert list(repo.rows) == [2]
+    assert ("leave", 1) in log and ("leave", 2) not in log
+    assert ("join", 2) in log
+
+
+async def test_registry_failure_rolls_back_and_does_not_raise(posts):
+    log, store, p, ops, repo = _kit([_item(1), _item(2)])
+    repo.fail_on = {1}
+    res = await _apply(store, ops, repo, p)
+    assert res.connected == [2]
+    assert [pid for pid, _ in res.skipped] == [1]
+    assert "реестр недоступен" in dict(res.skipped)[1]
+    assert ("leave", 1) in log and ("leave", 2) not in log
+    assert list(repo.rows) == [2]
+
+
+async def test_failed_rollback_asks_for_manual_cleanup(posts):
+    log, store, p, ops, repo = _kit(
+        [_item(1, group="digest")], no_folder={"digest"}, leave_fails=True,
+    )
+    res = await _apply(store, ops, repo, p)
+    assert res.connected == [] and repo.rows == {}
+    assert ("leave", 1) in log
+    assert "ручная чистка" in dict(res.skipped)[1]
+
+
+async def test_other_join_error_skips_the_peer_and_continues(posts):
+    log, store, p, ops, repo = _kit([_item(1), _item(2)])
+
+    async def boom(peer_id):
+        if peer_id == 1:
+            raise RuntimeError("канал закрыт")
+        log.append(("join", peer_id))
+
+    ops.join = boom
+    res = await _apply(store, ops, repo, p)
+    assert res.connected == [2] and "канал закрыт" in dict(res.skipped)[1]
+    assert ("leave", 1) not in log  # вступления не было, откатывать нечего
+
+
+async def test_history_floodwait_is_reported_in_partial(posts):
+    _log, store, p, ops, repo = _kit([_item(1)], flood_on=1, flood_at="history")
+    res = await _apply(store, ops, repo, p)
+    assert res.connected == [1] and res.skipped == []
+    assert [pid for pid, _ in res.partial] == [1]
+    assert "подождать" in res.partial[0][1]
 
 
 async def test_peer_ids_is_a_subset_filter_over_the_proposal(posts):

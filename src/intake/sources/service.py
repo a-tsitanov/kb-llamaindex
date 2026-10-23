@@ -24,6 +24,8 @@ class ApplyResult(NamedTuple):
     connected: list[int]
     skipped: list[tuple[int, str]]
     bootstrapped: int
+    # подключены (есть в connected), но историю дочитал не весь обход
+    partial: tuple[tuple[int, str], ...] | list[tuple[int, str]] = ()
 
 
 async def apply_proposal(
@@ -46,6 +48,10 @@ async def apply_proposal(
     Неверный код, просрочка и повтор поднимают `BadProposal` до единого
     обращения к телеграму. `FloodWait` обход прекращает: остаток уходит в
     `skipped`, уже подключённые остаются в `connected` и в реестре.
+    Любой сбой по каналу (папка, `RPCError`, реестр) кладёт его в `skipped` и
+    не роняет вызов; если вступление уже состоялось, оно отменяется `leave`,
+    а провал отмены оговаривается в причине. `FloodWait` на чтении истории
+    оставляет канал в `connected` и отмечает его в `partial`.
     `bootstrapped` считает документы, принятые приёмом как новые
     (дубликат и сбой в счёт не идут).
     """
@@ -55,6 +61,7 @@ async def apply_proposal(
 
     connected: list[int] = []
     skipped: list[tuple[int, str]] = []
+    partial: list[tuple[int, str]] = []
     bootstrapped = 0
     flood: FloodWait | None = None
 
@@ -66,19 +73,20 @@ async def apply_proposal(
         if flood is not None:
             skipped.append((peer_id, _flood_reason(flood)))
             continue
+        joined = False
         try:
             await ops.join(peer_id)
+            joined = True
             await ops.add_to_folder(peer_id, item.group_name)
-        except FloodWait as exc:
-            flood = exc
-            skipped.append((peer_id, _flood_reason(exc)))
+            await repo.add(
+                peer_id, item.slug, item.title, item.group_name, added_by=added_by,
+            )
+        except Exception as exc:  # сбой одного канала не должен ронять обход
+            if isinstance(exc, FloodWait):
+                flood = exc
+            reason = await _rollback(ops, peer_id, joined, _reason(exc))
+            skipped.append((peer_id, reason))
             continue
-        except FolderNotFound as exc:
-            skipped.append((peer_id, f"папка не найдена: {exc}"))
-            continue
-        await repo.add(
-            peer_id, item.slug, item.title, item.group_name, added_by=added_by,
-        )
         connected.append(peer_id)
         if bootstrap <= 0:
             continue
@@ -87,12 +95,37 @@ async def apply_proposal(
         except FloodWait as exc:
             # вступили и записали — канал подключён; историю дочитает свип
             flood = exc
+            partial.append((peer_id, f"история не подтянута: {_flood_reason(exc)}"))
             continue
         bootstrapped += await _bootstrap(
             messages, item.slug or str(peer_id), item.group_name,
             http=http, api_base=api_base, api_key=api_key, graph=graph,
         )
-    return ApplyResult(connected, skipped, bootstrapped)
+    return ApplyResult(connected, skipped, bootstrapped, partial)
+
+
+def _reason(exc: Exception) -> str:
+    if isinstance(exc, FloodWait):
+        return _flood_reason(exc)
+    if isinstance(exc, FolderNotFound):
+        return f"папка не найдена: {exc}"
+    return f"{type(exc).__name__}: {exc}"
+
+
+async def _rollback(ops: TelegramOps, peer_id: int, joined: bool, reason: str) -> str:
+    """Выйти из канала, если вступили, а записать не удалось: членство без
+    строки реестра никто не увидит. Сбой выхода — в причину, нужна ручная чистка."""
+    if not joined:
+        return reason
+    try:
+        await ops.leave(peer_id)
+    except Exception as exc:
+        logger.warning("откат вступления {p} не удался: {e!r}", p=peer_id, e=exc)
+        return (
+            f"{reason}; выйти из канала не удалось ({type(exc).__name__}: {exc}), "
+            "аккаунт остался в канале — нужна ручная чистка"
+        )
+    return f"{reason}; вступление отменено"
 
 
 def _flood_reason(exc: FloodWait) -> str:

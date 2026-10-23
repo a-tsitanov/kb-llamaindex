@@ -81,3 +81,10 @@ def test_group_outside_group_set_is_refused(group):
 def test_empty_proposal_is_refused():
     with pytest.raises(ValueError):
         ProposalStore().create([])
+
+
+def test_non_ascii_lookalike_code_is_bad_proposal_not_typeerror():
+    store = ProposalStore()
+    p = store.create([_item()])
+    with pytest.raises(BadProposal):
+        store.take(p.id, "АВСDEF")  # кириллические А, В, С
