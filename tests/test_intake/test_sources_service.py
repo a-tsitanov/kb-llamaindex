@@ -14,9 +14,12 @@ class _Ops:
     def __init__(self, log, no_folder=(), fail=None):
         self.log = log
         self.no_folder = set(no_folder)
-        self.fail = fail or {}  # имя операции -> исключение
+        # имя операции или пара (операция, папка) -> исключение
+        self.fail = fail or {}
 
-    def _maybe_fail(self, name):
+    def _maybe_fail(self, name, folder=None):
+        if (name, folder) in self.fail:
+            raise self.fail[(name, folder)]
         if name in self.fail:
             raise self.fail[name]
 
@@ -24,11 +27,11 @@ class _Ops:
         self.log.append(("add_folder", peer_id, folder))
         if folder in self.no_folder:
             raise FolderNotFound(folder)
-        self._maybe_fail("add_folder")
+        self._maybe_fail("add_folder", folder)
 
     async def remove_from_folder(self, peer_id, folder):
         self.log.append(("remove_folder", peer_id, folder))
-        self._maybe_fail("remove_folder")
+        self._maybe_fail("remove_folder", folder)
 
     async def leave(self, peer_id):
         self.log.append(("leave", peer_id))
@@ -98,12 +101,15 @@ def ingest(monkeypatch):
     return calls
 
 
-def _kit(peer=1, group="news", **ops_kw):
+def _kit(peer=1, group="news", extra=(), **ops_kw):
+    """`extra` — активные каналы реестра, которых НЕТ в предложении."""
     log = []
     store = ProposalStore()
     p = store.create([ProposalItem(peer, "chan", "T", group)])
     repo = _Repo(log)
     repo.seed(peer, group)
+    for other in extra:
+        repo.seed(other, group)
     return log, store, p, _Ops(log, **ops_kw), repo
 
 
@@ -131,6 +137,7 @@ async def test_move_into_unknown_group_is_refused_before_telegram(ingest):
     assert log == [] and repo.rows[1]["group_name"] == "news"
     # предложение не сожжено отказом по папке
     await move_source(store, ops, repo, p.id, p.code, 1, "digest")
+    assert repo.rows[1]["group_name"] == "digest"
 
 
 async def test_move_into_missing_telegram_folder_leaves_account_as_is(ingest):
@@ -141,15 +148,29 @@ async def test_move_into_missing_telegram_folder_leaves_account_as_is(ingest):
     assert repo.rows[1]["group_name"] == "news"
 
 
-async def test_move_failure_on_remove_undoes_the_new_folder(ingest):
-    log, store, p, ops, repo = _kit(fail={"remove_folder": FloodWait(30)})
-    with pytest.raises(FloodWait):
-        await move_source(store, ops, repo, p.id, p.code, 1, "digest")
+async def test_move_remove_old_not_found_completes_the_move(ingest):
+    # канала в старой папке уже нет — это не провал переноса
+    log, store, p, ops, repo = _kit(
+        fail={("remove_folder", "news"): FolderNotFound("news")},
+    )
+    await move_source(store, ops, repo, p.id, p.code, 1, "digest")
     assert log == [
         ("add_folder", 1, "digest"), ("remove_folder", 1, "news"),
-        ("remove_folder", 1, "digest"),
+        ("set_group", 1, "digest"),
     ]
+    assert repo.rows[1]["group_name"] == "digest"
+
+
+async def test_move_ambiguous_remove_old_failure_is_not_undone(ingest):
+    log, store, p, ops, repo = _kit(
+        fail={("remove_folder", "news"): FloodWait(30)},
+    )
+    with pytest.raises(Exception) as ei:
+        await move_source(store, ops, repo, p.id, p.code, 1, "digest")
+    assert log == [("add_folder", 1, "digest"), ("remove_folder", 1, "news")]
     assert repo.rows[1]["group_name"] == "news"
+    msg = str(ei.value)
+    assert "news" in msg and "digest" in msg and "повтор" in msg
 
 
 async def test_move_registry_failure_puts_the_channel_back(ingest):
@@ -157,8 +178,46 @@ async def test_move_registry_failure_puts_the_channel_back(ingest):
     repo.fail_on = {"set_group"}
     with pytest.raises(RuntimeError):
         await move_source(store, ops, repo, p.id, p.code, 1, "digest")
-    assert log[-2:] == [("add_folder", 1, "news"), ("remove_folder", 1, "digest")]
+    assert log == [
+        ("add_folder", 1, "digest"), ("remove_folder", 1, "news"),
+        ("set_group", 1, "digest"),
+        ("add_folder", 1, "news"), ("remove_folder", 1, "digest"),
+    ]
     assert repo.rows[1]["group_name"] == "news"
+
+
+async def test_move_failed_undo_is_reported_in_the_error(ingest):
+    log, store, p, ops, repo = _kit(
+        fail={("add_folder", "news"): FloodWait(7)},
+    )
+    repo.fail_on = {"set_group"}
+    with pytest.raises(Exception) as ei:
+        await move_source(store, ops, repo, p.id, p.code, 1, "digest")
+    assert log[-2:] == [("add_folder", 1, "news"), ("remove_folder", 1, "digest")]
+    msg = str(ei.value)
+    assert "отмен" in msg and "news" in msg
+    assert repo.rows[1]["group_name"] == "news"
+
+
+async def test_move_code_for_another_channel_is_refused_and_burned(ingest):
+    log, store, p, ops, repo = _kit(extra=(2,))
+    with pytest.raises(BadProposal):
+        await move_source(store, ops, repo, p.id, p.code, 2, "digest")
+    assert log == [] and repo.rows[2]["group_name"] == "news"
+    with pytest.raises(BadProposal):  # код погашен
+        await move_source(store, ops, repo, p.id, p.code, 1, "digest")
+    assert log == []
+
+
+async def test_move_unknown_or_left_channel_does_not_burn_the_code(ingest):
+    log, store, p, ops, repo = _kit(extra=(2,))
+    repo.rows[2]["state"] = "left"
+    for other in (99, 2):
+        with pytest.raises(LookupError):
+            await move_source(store, ops, repo, p.id, p.code, other, "digest")
+    assert log == []
+    await move_source(store, ops, repo, p.id, p.code, 1, "digest")
+    assert repo.rows[1]["group_name"] == "digest"
 
 
 async def test_move_refuses_unknown_peer(ingest):
@@ -230,6 +289,28 @@ async def test_leave_needs_the_code(ingest):
     assert log == [] and repo.rows[1]["state"] == "active"
 
 
+async def test_leave_code_for_another_channel_is_refused_and_burned(ingest):
+    log, store, p, ops, repo = _kit(extra=(2,))
+    with pytest.raises(BadProposal):
+        await leave_source(store, ops, repo, p.id, p.code, 2)
+    assert log == [] and repo.rows[2]["state"] == "active"
+    with pytest.raises(BadProposal):
+        await leave_source(store, ops, repo, p.id, p.code, 1)
+    assert log == []
+
+
+async def test_leave_unknown_or_left_channel_does_not_burn_the_code(ingest):
+    log, store, p, ops, repo = _kit(extra=(2,))
+    repo.rows[2]["state"] = "left"
+    for other in (99, 2):
+        with pytest.raises(LookupError):
+            await leave_source(store, ops, repo, p.id, p.code, other)
+    assert log == []
+    await leave_source(store, ops, repo, p.id, p.code, 1)
+    assert log == [("leave", 1), ("mark_left", 1)]
+    assert repo.rows[1]["state"] == "left"
+
+
 # --- set_source_trust ---
 
 async def test_set_trust_writes_and_returns_the_row(ingest):
@@ -271,3 +352,23 @@ async def test_set_trust_none_falls_back_to_the_group():
     repo.seed(1, trust=0.9)
     row = await set_source_trust(repo, 1, None)
     assert row.trust is None and repo.rows[1]["trust"] is None
+
+
+@pytest.mark.parametrize("bad", [True, False, "0.5"])
+async def test_set_trust_rejects_bool_and_non_numbers(bad):
+    log = []
+    repo = _Repo(log)
+    repo.seed(1, trust=0.4)
+    with pytest.raises(ValueError):
+        await set_source_trust(repo, 1, bad)
+    assert log == [] and repo.rows[1]["trust"] == 0.4
+
+
+async def test_set_trust_works_on_a_left_channel():
+    # доверие действует вперёд, поэтому ставится и вышедшему каналу
+    log = []
+    repo = _Repo(log)
+    repo.seed(1, state="left")
+    row = await set_source_trust(repo, 1, 0.3)
+    assert log == [("set_trust", 1, 0.3)]
+    assert row.trust == 0.3 and row.state == "left"
