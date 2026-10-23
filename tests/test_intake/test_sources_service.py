@@ -5,9 +5,21 @@ from types import SimpleNamespace
 import pytest
 
 from src.intake.sources import service
-from src.intake.sources.proposals import BadProposal, ProposalItem, ProposalStore
-from src.intake.sources.service import leave_source, move_source, set_source_trust
-from src.intake.sources.telegram import FloodWait, FolderNotFound
+from src.intake.sources.proposals import (
+    CONNECT,
+    LEAVE,
+    MOVE,
+    BadProposal,
+    ProposalItem,
+    ProposalStore,
+)
+from src.intake.sources.service import (
+    AmbiguousMove,
+    leave_source,
+    move_source,
+    set_source_trust,
+)
+from src.intake.sources.telegram import FloodWait, FolderNotEditable, FolderNotFound
 
 
 class _Ops:
@@ -101,11 +113,11 @@ def ingest(monkeypatch):
     return calls
 
 
-def _kit(peer=1, group="news", extra=(), **ops_kw):
+def _kit(peer=1, group="news", extra=(), action=MOVE, **ops_kw):
     """`extra` — активные каналы реестра, которых НЕТ в предложении."""
     log = []
     store = ProposalStore()
-    p = store.create([ProposalItem(peer, "chan", "T", group)])
+    p = store.create([ProposalItem(peer, "chan", "T", group)], action)
     repo = _Repo(log)
     repo.seed(peer, group)
     for other in extra:
@@ -165,12 +177,38 @@ async def test_move_ambiguous_remove_old_failure_is_not_undone(ingest):
     log, store, p, ops, repo = _kit(
         fail={("remove_folder", "news"): FloodWait(30)},
     )
-    with pytest.raises(Exception) as ei:
+    with pytest.raises(AmbiguousMove) as ei:
         await move_source(store, ops, repo, p.id, p.code, 1, "digest")
     assert log == [("add_folder", 1, "digest"), ("remove_folder", 1, "news")]
     assert repo.rows[1]["group_name"] == "news"
     msg = str(ei.value)
     assert "news" in msg and "digest" in msg and "повтор" in msg
+    assert (ei.value.old, ei.value.new, ei.value.seconds) == ("news", "digest", 30)
+    assert isinstance(ei.value.__cause__, FloodWait)
+
+
+async def test_move_ambiguous_failure_without_floodwait_has_no_seconds(ingest):
+    _log, store, p, ops, repo = _kit(
+        fail={("remove_folder", "news"): ConnectionError("обрыв")},
+    )
+    with pytest.raises(AmbiguousMove) as ei:
+        await move_source(store, ops, repo, p.id, p.code, 1, "digest")
+    assert ei.value.seconds is None
+    assert (ei.value.old, ei.value.new) == ("news", "digest")
+    assert isinstance(ei.value.__cause__, ConnectionError)
+
+
+async def test_move_remove_old_from_chatlist_fails_loudly_without_set_group(ingest):
+    # общий список редактировать нельзя: канал по-прежнему в старой папке
+    log, store, p, ops, repo = _kit(
+        fail={("remove_folder", "news"): FolderNotEditable("news")},
+    )
+    with pytest.raises(FolderNotEditable) as ei:
+        await move_source(store, ops, repo, p.id, p.code, 1, "digest")
+    assert log == [("add_folder", 1, "digest"), ("remove_folder", 1, "news")]
+    assert repo.rows[1]["group_name"] == "news"
+    msg = str(ei.value)
+    assert "общий" in msg and "news" in msg and "по-прежнему" in msg
 
 
 async def test_move_registry_failure_puts_the_channel_back(ingest):
@@ -186,17 +224,99 @@ async def test_move_registry_failure_puts_the_channel_back(ingest):
     assert repo.rows[1]["group_name"] == "news"
 
 
-async def test_move_failed_undo_is_reported_in_the_error(ingest):
+async def test_move_undo_readd_failed_leaves_the_channel_in_neither_folder(ingest):
     log, store, p, ops, repo = _kit(
         fail={("add_folder", "news"): FloodWait(7)},
     )
     repo.fail_on = {"set_group"}
-    with pytest.raises(Exception) as ei:
+    with pytest.raises(AmbiguousMove) as ei:
         await move_source(store, ops, repo, p.id, p.code, 1, "digest")
     assert log[-2:] == [("add_folder", 1, "news"), ("remove_folder", 1, "digest")]
     msg = str(ei.value)
-    assert "отмен" in msg and "news" in msg
+    assert "ни в одной" in msg and "news" in msg and "digest" in msg
+    assert "в обеих" not in msg
+    assert ei.value.seconds == 7 and (ei.value.old, ei.value.new) == ("news", "digest")
+    assert isinstance(ei.value.__cause__, RuntimeError)
     assert repo.rows[1]["group_name"] == "news"
+
+
+async def test_move_undo_remove_new_failed_leaves_the_channel_in_both_folders(ingest):
+    _log, store, p, ops, repo = _kit(
+        fail={("remove_folder", "digest"): ConnectionError("обрыв")},
+    )
+    repo.fail_on = {"set_group"}
+    with pytest.raises(AmbiguousMove) as ei:
+        await move_source(store, ops, repo, p.id, p.code, 1, "digest")
+    msg = str(ei.value)
+    assert "в обеих" in msg and "ни в одной" not in msg
+    assert ei.value.seconds is None
+
+
+async def test_move_both_undo_steps_failed_leaves_the_channel_only_in_the_new(ingest):
+    _log, store, p, ops, repo = _kit(
+        fail={
+            ("add_folder", "news"): ConnectionError("обрыв"),
+            ("remove_folder", "digest"): ConnectionError("обрыв"),
+        },
+    )
+    repo.fail_on = {"set_group"}
+    with pytest.raises(AmbiguousMove) as ei:
+        await move_source(store, ops, repo, p.id, p.code, 1, "digest")
+    msg = str(ei.value)
+    assert "только в новой" in msg and "digest" in msg
+    assert "в обеих" not in msg and "ни в одной" not in msg
+
+
+async def test_move_undo_does_not_readd_where_the_channel_never_was(ingest):
+    # снятие вернуло «папки нет / канала там нет»: возвращать в старую нечего
+    log, store, p, ops, repo = _kit(
+        fail={("remove_folder", "news"): FolderNotFound("news")},
+    )
+    repo.fail_on = {"set_group"}
+    with pytest.raises(RuntimeError):
+        await move_source(store, ops, repo, p.id, p.code, 1, "digest")
+    assert ("add_folder", 1, "news") not in log
+    assert log[-1] == ("remove_folder", 1, "digest")
+
+
+async def test_move_undo_failure_message_says_old_was_not_restored_on_purpose(ingest):
+    log, store, p, ops, repo = _kit(
+        fail={
+            ("remove_folder", "news"): FolderNotFound("news"),
+            ("remove_folder", "digest"): ConnectionError("обрыв"),
+        },
+    )
+    repo.fail_on = {"set_group"}
+    with pytest.raises(AmbiguousMove) as ei:
+        await move_source(store, ops, repo, p.id, p.code, 1, "digest")
+    assert ("add_folder", 1, "news") not in log
+    msg = str(ei.value)
+    assert "не возвращали" in msg and "только в новой" in msg
+
+
+async def test_connect_code_is_refused_by_move_and_burned(ingest):
+    log, store, p, ops, repo = _kit(action=CONNECT)
+    with pytest.raises(BadProposal):
+        await move_source(store, ops, repo, p.id, p.code, 1, "digest")
+    assert log == [] and repo.rows[1]["group_name"] == "news"
+    with pytest.raises(BadProposal):
+        await move_source(store, ops, repo, p.id, p.code, 1, "digest")
+
+
+async def test_connect_code_is_refused_by_leave_and_burned(ingest):
+    log, store, p, ops, repo = _kit(action=CONNECT)
+    with pytest.raises(BadProposal):
+        await leave_source(store, ops, repo, p.id, p.code, 1)
+    assert log == [] and repo.rows[1]["state"] == "active"
+    with pytest.raises(BadProposal):
+        await leave_source(store, ops, repo, p.id, p.code, 1)
+
+
+async def test_move_code_is_refused_by_leave(ingest):
+    log, store, p, ops, repo = _kit(action=MOVE)
+    with pytest.raises(BadProposal):
+        await leave_source(store, ops, repo, p.id, p.code, 1)
+    assert log == []
 
 
 async def test_move_code_for_another_channel_is_refused_and_burned(ingest):
@@ -260,7 +380,7 @@ async def test_move_replay_is_rejected(ingest):
 # --- leave_source ---
 
 async def test_leave_leaves_marks_left_and_ignores_ingest(ingest):
-    log, store, p, ops, repo = _kit()
+    log, store, p, ops, repo = _kit(action=LEAVE)
     repo.rows[1]["trust"] = 0.7
     await leave_source(store, ops, repo, p.id, p.code, 1)
     assert log == [("leave", 1), ("mark_left", 1)]
@@ -269,28 +389,28 @@ async def test_leave_leaves_marks_left_and_ignores_ingest(ingest):
 
 
 async def test_leave_telegram_failure_keeps_the_row_active(ingest):
-    log, store, p, ops, repo = _kit(fail={"leave": FloodWait(5)})
+    log, store, p, ops, repo = _kit(action=LEAVE, fail={"leave": FloodWait(5)})
     with pytest.raises(FloodWait):
         await leave_source(store, ops, repo, p.id, p.code, 1)
     assert log == [("leave", 1)] and repo.rows[1]["state"] == "active"
 
 
 async def test_leave_refuses_unknown_peer(ingest):
-    log, store, p, ops, repo = _kit()
+    log, store, p, ops, repo = _kit(action=LEAVE)
     with pytest.raises(LookupError):
         await leave_source(store, ops, repo, p.id, p.code, 99)
     assert log == []
 
 
 async def test_leave_needs_the_code(ingest):
-    log, store, p, ops, repo = _kit()
+    log, store, p, ops, repo = _kit(action=LEAVE)
     with pytest.raises(BadProposal):
         await leave_source(store, ops, repo, p.id, "ZZZZZZ", 1)
     assert log == [] and repo.rows[1]["state"] == "active"
 
 
 async def test_leave_code_for_another_channel_is_refused_and_burned(ingest):
-    log, store, p, ops, repo = _kit(extra=(2,))
+    log, store, p, ops, repo = _kit(action=LEAVE, extra=(2,))
     with pytest.raises(BadProposal):
         await leave_source(store, ops, repo, p.id, p.code, 2)
     assert log == [] and repo.rows[2]["state"] == "active"
@@ -300,7 +420,7 @@ async def test_leave_code_for_another_channel_is_refused_and_burned(ingest):
 
 
 async def test_leave_unknown_or_left_channel_does_not_burn_the_code(ingest):
-    log, store, p, ops, repo = _kit(extra=(2,))
+    log, store, p, ops, repo = _kit(action=LEAVE, extra=(2,))
     repo.rows[2]["state"] = "left"
     for other in (99, 2):
         with pytest.raises(LookupError):

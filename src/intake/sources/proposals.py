@@ -20,6 +20,12 @@ from src.retrieval.groups import GROUP_SET
 _ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _CODE_LEN = 6
 
+# Действие, на которое выдан код: код на вступление не открывает перенос и выход.
+CONNECT = "connect"
+MOVE = "move"
+LEAVE = "leave"
+ACTIONS = frozenset({CONNECT, MOVE, LEAVE})
+
 
 class BadProposal(ValueError):
     """Предложения нет, оно просрочено, уже использовано или код не тот."""
@@ -38,6 +44,8 @@ class Proposal:
     id: str
     code: str
     items: list[ProposalItem]
+    # на какое действие выдан код: CONNECT, MOVE или LEAVE
+    action: str
 
 
 class ProposalStore:
@@ -48,7 +56,9 @@ class ProposalStore:
         self._clock = clock
         self._live: dict[str, tuple[Proposal, float]] = {}
 
-    def create(self, items: list[ProposalItem]) -> Proposal:
+    def create(self, items: list[ProposalItem], action: str) -> Proposal:
+        if action not in ACTIONS:
+            raise ValueError(f"действие {action!r} не из {sorted(ACTIONS)}")
         if not items:
             raise ValueError("пустое предложение")
         for it in items:
@@ -61,15 +71,18 @@ class ProposalStore:
             id=secrets.token_urlsafe(8),
             code="".join(secrets.choice(_ALPHABET) for _ in range(_CODE_LEN)),
             items=list(items),
+            action=action,
         )
         self._live[proposal.id] = (proposal, self._clock() + self._ttl)
         return proposal
 
-    def take(self, proposal_id: str, code: str) -> Proposal:
+    def take(self, proposal_id: str, code: str, action: str) -> Proposal:
         """Забрать предложение (одноразово).
 
         Неверный код предложение тоже сжигает: иначе код можно было бы
-        подобрать перебором, а новое предложение стоит одного вызова.
+        подобрать перебором, а новое предложение стоит одного вызова. Так же
+        и код, предъявленный для другого действия: пользователь подтвердил
+        вступление, а не перенос или выход.
         """
         self._purge()
         entry = self._live.pop(proposal_id, None)
@@ -80,6 +93,11 @@ class ProposalStore:
             proposal.code.encode(), code.strip().upper().encode(),
         ):
             raise BadProposal("код подтверждения не совпал; предложение погашено")
+        if proposal.action != action:
+            raise BadProposal(
+                f"код выдан на действие {proposal.action!r}, а не {action!r}; "
+                "предложение погашено"
+            )
         return proposal
 
     def _purge(self) -> None:

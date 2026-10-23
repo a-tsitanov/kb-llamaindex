@@ -16,10 +16,37 @@ from loguru import logger
 
 from src.intake.client import SENT, post_document
 from src.intake.sources.messages import ingest_form, message_to_doc
-from src.intake.sources.proposals import BadProposal, Proposal, ProposalStore
+from src.intake.sources.proposals import (
+    CONNECT,
+    LEAVE,
+    MOVE,
+    BadProposal,
+    Proposal,
+    ProposalStore,
+)
 from src.intake.sources.repository import SourceRepository, SourceRow
-from src.intake.sources.telegram import FloodWait, FolderNotFound, TelegramOps
+from src.intake.sources.telegram import (
+    FloodWait,
+    FolderNotEditable,
+    FolderNotFound,
+    TelegramOps,
+)
 from src.retrieval.groups import GROUP_SET
+
+
+class AmbiguousMove(RuntimeError):
+    """Перенос оборвался с неясным состоянием папок аккаунта.
+
+    Текст читает человек; машинам — поля: `old`, `new` (папки) и `seconds` —
+    сколько просит подождать телеграм, если причиной был `FloodWait`, иначе
+    `None`.
+    """
+
+    def __init__(self, message: str, *, old: str, new: str, seconds: int | None = None) -> None:
+        super().__init__(message)
+        self.old = old
+        self.new = new
+        self.seconds = seconds
 
 
 class ApplyResult(NamedTuple):
@@ -58,7 +85,7 @@ async def apply_proposal(
     `bootstrapped` считает документы, принятые приёмом как новые
     (дубликат и сбой в счёт не идут).
     """
-    proposal = store.take(proposal_id, code)
+    proposal = store.take(proposal_id, code, CONNECT)
     by_peer = {it.peer_id: it for it in proposal.items}
     wanted = list(by_peer) if peer_ids is None else list(dict.fromkeys(peer_ids))
 
@@ -138,52 +165,92 @@ async def move_source(
     Неверный код и код, выданный на другой канал (`BadProposal`), сжигают
     предложение; кривое имя папки и неизвестный или вышедший канал — нет.
 
+    Код привязан к действию `move`: код на вступление или выход — отказ
+    `BadProposal`, предложение гасится.
+
     Порядок правок: сначала в новую папку, потом из старой, потом реестр —
     канал ни в какой момент не остаётся вовсе без папки. Снятие из старой
-    папки с `FolderNotFound` — канала там уже нет, идём дальше. Любой другой
+    папки с `FolderNotFound` — канала там нет, идём дальше (при сбое реестра
+    его туда и не возвращаем). `FolderNotEditable` (общий список) — канал
+    по-прежнему в старой папке: ошибка, реестр не трогается. Любой другой
     сбой снятия НЕ отменяется: запрос мог дойти до сервера, отмена оставила бы
-    канал вообще без папки; поднимается ошибка, канал может лежать в обеих
-    папках, реестр называет старую, повтор переноса сходится (операции с
-    папками идемпотентны). Сбой записи в реестр отменяется: оба вызова
-    телеграма там заведомо удались; если отмена не удалась, это в тексте
-    ошибки. Документы и курсор диалога не трогаются.
+    канал вообще без папки; поднимается `AmbiguousMove`, канал может лежать в
+    обеих папках, реестр называет старую, повтор переноса сходится (операции с
+    папками идемпотентны). Сбой записи в реестр отменяется (вернуть старую,
+    снять новую); если отмена не удалась, `AmbiguousMove` называет, какой шаг
+    упал и где канал теперь. Документы и курсор диалога не трогаются.
     """
     if folder not in GROUP_SET:
         raise ValueError(f"папка {folder!r} вне допустимых групп: {sorted(GROUP_SET)}")
     row = await _active_row(repo, peer_id)
-    _bind(store.take(proposal_id, code), peer_id)
+    _bind(store.take(proposal_id, code, MOVE), peer_id)
     old = row.group_name
     if old == folder:
         return
     await ops.add_to_folder(peer_id, folder)
+    was_in_old = True
     try:
         await ops.remove_from_folder(peer_id, old)
+    except FolderNotEditable as exc:
+        # общий список не правится: канал по-прежнему в старой папке, а новая
+        # уже приняла его; реестр не трогаем, чтобы он не расходился с аккаунтом
+        raise FolderNotEditable(
+            f"папка {old!r} — общий список (chatlist), её состав не правится, "
+            f"канал {peer_id} по-прежнему в ней и уже добавлен в {folder!r}; "
+            f"реестр по-прежнему называет {old!r}"
+        ) from exc
     except FolderNotFound:
-        pass
+        was_in_old = False  # канала там и не было — переносить из неё нечего
     except Exception as exc:
-        raise RuntimeError(
+        raise AmbiguousMove(
             f"снятие {peer_id} из папки {old!r} оборвалось ({_reason(exc)}), отмена не "
             f"делалась: канал может лежать в обеих папках ({old!r} и {folder!r}), "
-            f"реестр по-прежнему называет {old!r}; повтор переноса сходится"
+            f"реестр по-прежнему называет {old!r}; повтор переноса сходится",
+            old=old, new=folder,
+            seconds=exc.seconds if isinstance(exc, FloodWait) else None,
         ) from exc
     try:
         if not await repo.set_group(peer_id, folder):
             raise LookupError(f"источник {peer_id} пропал из реестра при переносе")
     except Exception as exc:
-        failed = [
-            err
-            for err in (
-                await _undo(ops.add_to_folder, peer_id, old),
-                await _undo(ops.remove_from_folder, peer_id, folder),
-            )
-            if err
-        ]
-        if failed:
-            raise RuntimeError(
-                f"{exc}; отмена переноса {peer_id} не удалась ({'; '.join(failed)}): "
-                f"канал может лежать в обеих папках, реестр называет {old!r}"
-            ) from exc
-        raise
+        readd = await _undo(ops.add_to_folder, peer_id, old) if was_in_old else None
+        unadd = await _undo(ops.remove_from_folder, peer_id, folder)
+        if readd is None and unadd is None:
+            raise
+        raise AmbiguousMove(
+            f"{exc}; {_undo_report(peer_id, old, folder, was_in_old, readd, unadd)}",
+            old=old, new=folder,
+            seconds=next(
+                (e.seconds for e in (readd, unadd) if isinstance(e, FloodWait)), None,
+            ),
+        ) from exc
+
+
+def _undo_report(
+    peer_id: int, old: str, new: str, was_in_old: bool,
+    readd: Exception | None, unadd: Exception | None,
+) -> str:
+    """Что не удалось отменить и где теперь канал; реестр называет `old`."""
+    failed = []
+    if readd is not None:
+        failed.append(f"возврат в {old!r}: {_reason(readd)}")
+    if unadd is not None:
+        failed.append(f"снятие с {new!r}: {_reason(unadd)}")
+    if readd is not None and unadd is None:
+        where = f"ни в одной из папок ({old!r}, {new!r})"
+    elif readd is None and unadd is not None:
+        where = f"в обеих папках ({old!r} и {new!r})" if was_in_old else (
+            f"только в новой ({new!r})"
+        )
+    else:
+        where = f"только в новой ({new!r})"
+    note = "" if was_in_old else (
+        f"; в {old!r} канала не было, его туда не возвращали"
+    )
+    return (
+        f"отмена переноса {peer_id} не удалась ({'; '.join(failed)}): "
+        f"канал лежит {where}, реестр называет {old!r}{note}"
+    )
 
 
 async def leave_source(
@@ -206,7 +273,7 @@ async def leave_source(
     вне канала, строка ещё `active`, повтор вызова потребует нового кода.
     """
     await _active_row(repo, peer_id)
-    _bind(store.take(proposal_id, code), peer_id)
+    _bind(store.take(proposal_id, code, LEAVE), peer_id)
     await ops.leave(peer_id)
     if not await repo.mark_left(peer_id):
         raise LookupError(f"источник {peer_id} пропал из реестра при выходе")
@@ -251,15 +318,15 @@ async def _active_row(repo: SourceRepository, peer_id: int) -> SourceRow:
     return row
 
 
-async def _undo(op: Any, peer_id: int, folder: str) -> str | None:
-    """Отмена правки папки; сбой возвращается текстом, чтобы попасть в ошибку."""
+async def _undo(op: Any, peer_id: int, folder: str) -> Exception | None:
+    """Отмена правки папки; сбой возвращается, чтобы попасть в ошибку."""
     try:
         await op(peer_id, folder)
     except Exception as exc:
         logger.warning(
             "отмена правки папки {f} для {p} не удалась: {e!r}", f=folder, p=peer_id, e=exc,
         )
-        return f"папка {folder!r}: {_reason(exc)}"
+        return exc
     return None
 
 

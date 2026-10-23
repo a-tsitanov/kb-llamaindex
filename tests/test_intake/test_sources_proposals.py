@@ -2,7 +2,14 @@
 
 import pytest
 
-from src.intake.sources.proposals import BadProposal, ProposalItem, ProposalStore
+from src.intake.sources.proposals import (
+    CONNECT,
+    LEAVE,
+    MOVE,
+    BadProposal,
+    ProposalItem,
+    ProposalStore,
+)
 
 
 class _Clock:
@@ -20,71 +27,96 @@ def _item(peer_id=1, group="news"):
 def test_code_is_six_unambiguous_chars():
     store = ProposalStore()
     for _ in range(50):
-        code = store.create([_item()]).code
+        code = store.create([_item()], CONNECT).code
         assert len(code) == 6
         assert not set(code) & set("0OIl1")
 
 
 def test_take_with_right_code_returns_the_proposal():
     store = ProposalStore()
-    p = store.create([_item(1), _item(2, "digest")])
-    got = store.take(p.id, p.code)
+    p = store.create([_item(1), _item(2, "digest")], CONNECT)
+    got = store.take(p.id, p.code, CONNECT)
     assert got.id == p.id and [i.peer_id for i in got.items] == [1, 2]
 
 
 def test_second_take_is_rejected():
     store = ProposalStore()
-    p = store.create([_item()])
-    store.take(p.id, p.code)
+    p = store.create([_item()], CONNECT)
+    store.take(p.id, p.code, CONNECT)
     with pytest.raises(BadProposal):
-        store.take(p.id, p.code)
+        store.take(p.id, p.code, CONNECT)
 
 
 def test_wrong_code_is_rejected_and_burns_the_proposal():
     store = ProposalStore()
-    p = store.create([_item()])
+    p = store.create([_item()], CONNECT)
     with pytest.raises(BadProposal):
-        store.take(p.id, "ZZZZZZ")
+        store.take(p.id, "ZZZZZZ", CONNECT)
     # перебор кода не должен быть возможен: после промаха предложение мертво
     with pytest.raises(BadProposal):
-        store.take(p.id, p.code)
+        store.take(p.id, p.code, CONNECT)
 
 
 def test_unknown_id_is_rejected():
     with pytest.raises(BadProposal):
-        ProposalStore().take("nope", "ABCDEF")
+        ProposalStore().take("nope", "ABCDEF", CONNECT)
 
 
 def test_expired_proposal_is_rejected():
     clock = _Clock()
     store = ProposalStore(ttl_s=900, clock=clock)
-    p = store.create([_item()])
+    p = store.create([_item()], CONNECT)
     clock.now += 901
     with pytest.raises(BadProposal):
-        store.take(p.id, p.code)
+        store.take(p.id, p.code, CONNECT)
 
 
 def test_not_yet_expired_proposal_is_taken():
     clock = _Clock()
     store = ProposalStore(ttl_s=900, clock=clock)
-    p = store.create([_item()])
+    p = store.create([_item()], CONNECT)
     clock.now += 899
-    assert store.take(p.id, p.code).id == p.id
+    assert store.take(p.id, p.code, CONNECT).id == p.id
 
 
 @pytest.mark.parametrize("group", ["", "sport", "News"])
 def test_group_outside_group_set_is_refused(group):
     with pytest.raises(ValueError):
-        ProposalStore().create([_item(group=group)])
+        ProposalStore().create([_item(group=group)], CONNECT)
 
 
 def test_empty_proposal_is_refused():
     with pytest.raises(ValueError):
-        ProposalStore().create([])
+        ProposalStore().create([], CONNECT)
 
 
 def test_non_ascii_lookalike_code_is_bad_proposal_not_typeerror():
     store = ProposalStore()
-    p = store.create([_item()])
+    p = store.create([_item()], CONNECT)
     with pytest.raises(BadProposal):
-        store.take(p.id, "АВСDEF")  # кириллические А, В, С
+        store.take(p.id, "АВСDEF", CONNECT)  # кириллические А, В, С
+
+
+def test_proposal_remembers_its_action():
+    p = ProposalStore().create([_item()], MOVE)
+    assert p.action == MOVE
+
+
+def test_action_literals_are_the_agreed_ones():
+    assert (CONNECT, MOVE, LEAVE) == ("connect", "move", "leave")
+
+
+@pytest.mark.parametrize("action", ["", "join", "Connect", "delete"])
+def test_unknown_action_is_refused_on_create(action):
+    with pytest.raises(ValueError):
+        ProposalStore().create([_item()], action)
+
+
+def test_mismatched_action_is_rejected_and_burns_the_proposal():
+    store = ProposalStore()
+    p = store.create([_item()], CONNECT)
+    with pytest.raises(BadProposal, match="действ"):
+        store.take(p.id, p.code, LEAVE)
+    # код, нацеленный на чужое действие, — злоупотребление: предложение погашено
+    with pytest.raises(BadProposal):
+        store.take(p.id, p.code, CONNECT)

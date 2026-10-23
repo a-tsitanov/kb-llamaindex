@@ -7,7 +7,7 @@ import pytest
 
 from src.intake.client import FAILED, SENT, Result
 from src.intake.sources import service
-from src.intake.sources.proposals import BadProposal, ProposalItem, ProposalStore
+from src.intake.sources.proposals import CONNECT, MOVE, BadProposal, ProposalItem, ProposalStore
 from src.intake.sources.service import apply_proposal
 from src.intake.sources.telegram import FloodWait, FolderNotFound
 
@@ -104,7 +104,7 @@ def _item(peer_id, slug="chan", group="news"):
 def _kit(items, **ops_kw):
     log = []
     store = ProposalStore()
-    return log, store, store.create(items), _Ops(log, **ops_kw), _Repo(log)
+    return log, store, store.create(items, CONNECT), _Ops(log, **ops_kw), _Repo(log)
 
 
 async def _apply(store, ops, repo, p, code=None, peers=None, bootstrap=100):
@@ -301,3 +301,16 @@ async def test_left_channel_is_reactivated_keeping_operator_fields(posts):
     row = repo.rows[1]
     assert row["state"] == "active" and row["slug"] == "new"
     assert row["trust"] == 0.9 and row["note"] == "проверен"
+
+
+async def test_move_code_is_refused_by_apply_and_burned(posts):
+    log = []
+    store = ProposalStore()
+    p = store.create([_item(1)], MOVE)
+    ops, repo = _Ops(log), _Repo(log)
+    with pytest.raises(BadProposal):
+        await _apply(store, ops, repo, p)
+    assert log == []
+    with pytest.raises(BadProposal):  # код погашен
+        await _apply(store, ops, repo, p)
+    assert log == []

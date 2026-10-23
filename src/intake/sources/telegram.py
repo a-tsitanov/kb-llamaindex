@@ -62,6 +62,10 @@ class FolderNotFound(LookupError):
     """Папки нет в аккаунте; агент папки не создаёт."""
 
 
+class FolderNotEditable(FolderNotFound):
+    """Папка есть, но это общий список (chatlist): состав не правится."""
+
+
 def _candidate(chat: Any) -> Candidate:
     username = getattr(chat, "username", None)
     return Candidate(
@@ -198,7 +202,7 @@ class TelegramOps:
         for f in await self._filters():
             if filter_title(f).strip().casefold() == wanted and hasattr(f, "include_peers"):
                 if isinstance(f, _tl().types.DialogFilterChatlist):
-                    raise FolderNotFound(
+                    raise FolderNotEditable(
                         f"папка {name!r} — общий список (chatlist), "
                         "его нельзя редактировать через UpdateDialogFilterRequest"
                     )

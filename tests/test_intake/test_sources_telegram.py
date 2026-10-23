@@ -10,6 +10,7 @@ from telethon.tl import functions, types
 from src.intake.sources.telegram import (
     Candidate,
     FloodWait,
+    FolderNotEditable,
     FolderNotFound,
     TelegramOps,
 )
@@ -302,6 +303,18 @@ async def test_shared_chatlist_cannot_be_edited(method):
     )
     client = _Client({functions.messages.GetDialogFiltersRequest: [chatlist]})
     ops, _ = _ops(client)
-    with pytest.raises(FolderNotFound, match="общий"):
+    with pytest.raises(FolderNotEditable, match="общий"):
         await getattr(ops, method)(_pid(5), "news")
     assert not any(isinstance(r, functions.messages.UpdateDialogFilterRequest) for r in client.requests)
+
+
+def test_not_editable_is_a_folder_not_found_for_old_callers():
+    assert issubclass(FolderNotEditable, FolderNotFound)
+
+
+@pytest.mark.asyncio
+async def test_missing_folder_is_plain_not_found_not_not_editable():
+    ops, _ = _ops(_Client({functions.messages.GetDialogFiltersRequest: []}))
+    with pytest.raises(FolderNotFound) as ei:
+        await ops.remove_from_folder(_pid(5), "news")
+    assert not isinstance(ei.value, FolderNotEditable)
