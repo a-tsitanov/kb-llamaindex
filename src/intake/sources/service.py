@@ -188,16 +188,20 @@ async def move_source(
     if old == folder:
         return
     await ops.add_to_folder(peer_id, folder)
+    # Снятие само говорит, тронуло ли оно папку: канала там могло не быть, и
+    # тогда отменять нечего — иначе отмена положила бы его в папку, где его
+    # никогда не было.
     was_in_old = True
     try:
-        await ops.remove_from_folder(peer_id, old)
+        was_in_old = await ops.remove_from_folder(peer_id, old)
     except FolderNotEditable as exc:
         # общий список не правится: канал по-прежнему в старой папке, а новая
         # уже приняла его; реестр не трогаем, чтобы он не расходился с аккаунтом
         raise FolderNotEditable(
             f"папка {old!r} — общий список (chatlist), её состав не правится, "
             f"канал {peer_id} по-прежнему в ней и уже добавлен в {folder!r}; "
-            f"реестр по-прежнему называет {old!r}"
+            f"реестр по-прежнему называет {old!r}",
+            folder=old,
         ) from exc
     except FolderNotFound:
         was_in_old = False  # канала там и не было — переносить из неё нечего

@@ -287,6 +287,33 @@ async def test_every_method_waits_for_the_lock(name):
 
 
 @pytest.mark.asyncio
+async def test_folder_edits_report_whether_they_changed_anything():
+    """Правка папки говорит, тронула ли она состав. Переносу это нужно:
+    отменять снятие, которого не было, значит положить канал в папку, где он
+    никогда не лежал."""
+    client = _Client(
+        {functions.messages.GetDialogFiltersRequest: [_folder(1, "news", include=[7])]},
+    )
+    ops, _ = _ops(client)
+    assert await ops.remove_from_folder(_pid(7), "news") is True
+    assert await ops.remove_from_folder(_pid(9), "news") is False
+    assert await ops.add_to_folder(_pid(9), "news") is True
+
+
+@pytest.mark.asyncio
+async def test_folder_errors_name_the_folder():
+    """Имя папки — поле ошибки, а не только текст: вызывающий различает
+    «не далась новая» и «не далась старая» без разбора сообщения."""
+    client = _Client(
+        {functions.messages.GetDialogFiltersRequest: [_folder(1, "news", include=[7])]},
+    )
+    ops, _ = _ops(client)
+    with pytest.raises(FolderNotFound) as missing:
+        await ops.add_to_folder(_pid(7), "digest")
+    assert missing.value.folder == "digest"
+
+
+@pytest.mark.asyncio
 async def test_remove_from_folder_not_member_does_not_write():
     client = _Client({functions.messages.GetDialogFiltersRequest: [_folder(2, "news", include=[10], pinned=[12])]})
     ops, _ = _ops(client)

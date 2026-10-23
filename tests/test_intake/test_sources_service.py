@@ -23,9 +23,16 @@ from src.intake.sources.telegram import FloodWait, FolderNotEditable, FolderNotF
 
 
 class _Ops:
-    def __init__(self, log, no_folder=(), fail=None):
+    """Правки папок возвращают, тронули ли состав, как настоящий TelegramOps.
+
+    `not_member` — папки, в которых канала нет: снятие оттуда ничего не меняет
+    и отменять его нельзя.
+    """
+
+    def __init__(self, log, no_folder=(), fail=None, not_member=()):
         self.log = log
         self.no_folder = set(no_folder)
+        self.not_member = set(not_member)
         # имя операции или пара (операция, папка) -> исключение
         self.fail = fail or {}
 
@@ -38,12 +45,14 @@ class _Ops:
     async def add_to_folder(self, peer_id, folder):
         self.log.append(("add_folder", peer_id, folder))
         if folder in self.no_folder:
-            raise FolderNotFound(folder)
+            raise FolderNotFound(folder, folder=folder)
         self._maybe_fail("add_folder", folder)
+        return True
 
     async def remove_from_folder(self, peer_id, folder):
         self.log.append(("remove_folder", peer_id, folder))
         self._maybe_fail("remove_folder", folder)
+        return folder not in self.not_member
 
     async def leave(self, peer_id):
         self.log.append(("leave", peer_id))
@@ -220,6 +229,20 @@ async def test_move_registry_failure_puts_the_channel_back(ingest):
         ("add_folder", 1, "digest"), ("remove_folder", 1, "news"),
         ("set_group", 1, "digest"),
         ("add_folder", 1, "news"), ("remove_folder", 1, "digest"),
+    ]
+    assert repo.rows[1]["group_name"] == "news"
+
+
+async def test_move_does_not_return_the_channel_to_a_folder_it_was_not_in(ingest):
+    """Снятие сказало «канала тут не было» — отмена не возвращает его в старую
+    папку: иначе сбой реестра создал бы членство, которого никогда не было."""
+    log, store, p, ops, repo = _kit(not_member={"news"})
+    repo.fail_on = {"set_group"}
+    with pytest.raises(RuntimeError):
+        await move_source(store, ops, repo, p.id, p.code, 1, "digest")
+    assert log == [
+        ("add_folder", 1, "digest"), ("remove_folder", 1, "news"),
+        ("set_group", 1, "digest"), ("remove_folder", 1, "digest"),
     ]
     assert repo.rows[1]["group_name"] == "news"
 

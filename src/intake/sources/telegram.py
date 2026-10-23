@@ -59,7 +59,15 @@ class FloodWait(RuntimeError):
 
 
 class FolderNotFound(LookupError):
-    """Папки нет в аккаунте; агент папки не создаёт."""
+    """Папки нет в аккаунте; агент папки не создаёт.
+
+    Имя папки лежит в `folder`: вызывающий различает «не далась новая папка»
+    и «не далась старая» по полю, а не разбором текста.
+    """
+
+    def __init__(self, message: str, *, folder: str = "") -> None:
+        super().__init__(message)
+        self.folder = folder
 
 
 class FolderNotEditable(FolderNotFound):
@@ -164,22 +172,29 @@ class TelegramOps:
             filters = await self._filters()
         return [t for f in filters if (t := filter_title(f).strip())]
 
-    async def add_to_folder(self, peer_id: int, folder: str) -> None:
+    async def add_to_folder(self, peer_id: int, folder: str) -> bool:
+        """True — состав папки изменён; False — канал в ней уже был."""
         async with self._guard():
             target = await self._find_folder(folder)
             if peer_id in self._member_ids(target):
-                return
+                return False
             entity = await self._client.get_input_entity(peer_id)
             target.include_peers = [*target.include_peers, entity]
             await self._client(
                 _tl().functions.messages.UpdateDialogFilterRequest(id=target.id, filter=target)
             )
+            return True
 
-    async def remove_from_folder(self, peer_id: int, folder: str) -> None:
+    async def remove_from_folder(self, peer_id: int, folder: str) -> bool:
+        """True — канал снят; False — его в папке и не было.
+
+        Разница важна переносу: отменять снятие, которого не было, значит
+        положить канал в папку, где он никогда не лежал.
+        """
         async with self._guard():
             target = await self._find_folder(folder)
             if peer_id not in self._member_ids(target):
-                return
+                return False
 
             def keep(p: Any) -> bool:
                 return _tl().tg_utils.get_peer_id(p) != peer_id
@@ -189,6 +204,7 @@ class TelegramOps:
             await self._client(
                 _tl().functions.messages.UpdateDialogFilterRequest(id=target.id, filter=target)
             )
+            return True
 
     # --- под блокировкой вызывающего ---
 
@@ -204,10 +220,13 @@ class TelegramOps:
                 if isinstance(f, _tl().types.DialogFilterChatlist):
                     raise FolderNotEditable(
                         f"папка {name!r} — общий список (chatlist), "
-                        "его нельзя редактировать через UpdateDialogFilterRequest"
+                        "его нельзя редактировать через UpdateDialogFilterRequest",
+                        folder=name,
                     )
                 return f
-        raise FolderNotFound(f"папки {name!r} нет в аккаунте; агент папки не создаёт")
+        raise FolderNotFound(
+            f"папки {name!r} нет в аккаунте; агент папки не создаёт", folder=name,
+        )
 
     @staticmethod
     def _member_ids(folder: Any) -> set[int]:
