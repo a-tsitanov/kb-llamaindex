@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, NamedTuple
 
 from fastapi import HTTPException
 from fastmcp.exceptions import ToolError
@@ -101,7 +101,7 @@ class RegistryTokenVerifier(TokenVerifier):
         )
 
 
-def _record_from_token(tok: AccessToken) -> ApiKeyRecord:
+def key_from_token(tok: AccessToken) -> ApiKeyRecord:
     """Rebuild the key record from the claims :meth:`RegistryTokenVerifier.verify_token`
     wrote — the inverse of that mapping, and the only reader of those claims.
 
@@ -116,6 +116,46 @@ def _record_from_token(tok: AccessToken) -> ApiKeyRecord:
         scopes=frozenset(c.get("scopes") or tok.scopes or ()),
         graph_ids=tuple(graph_ids) if graph_ids is not None else None,
     )
+
+
+# Прежнее имя: тесты и старые вызовы читают его.
+_record_from_token = key_from_token
+
+
+class GraphResolution(NamedTuple):
+    """Итог обращения к реестру: контекст, арендатор и отложенная ошибка."""
+
+    ctx: GraphContext | None
+    tenant: str | None
+    deferred: ToolError | None
+
+    def context_or_raise(self) -> GraphContext:
+        """Бросить отложенную ошибку или вернуть контекст.  Зовётся только
+        ПОСЛЕ решения о доступе."""
+        if self.deferred is not None:
+            raise self.deferred
+        return self.ctx  # type: ignore[return-value]  # задан, пока deferred is None
+
+
+async def resolve_graph(gid: str) -> GraphResolution:
+    """Найти граф в реестре, НЕ бросая ошибку «нет графа / не готов».
+
+    Контракт: отказ реестра возвращается как ``deferred`` и поднимается
+    вызывающим только после его собственного решения о доступе
+    (``guard`` или ``authorize``), чтобы ключ без права не узнал, есть ли
+    граф и готов ли он.  Арендатор приходит в ``GraphContext`` или
+    ``GraphNotReady`` — второго обращения к реестру не нужно; для
+    несуществующего графа он ``None``.  Само решение здесь не принимается.
+    """
+    try:
+        ctx = await get_graph_registry().get(gid)
+    except GraphNotFound:
+        return GraphResolution(None, None, ToolError(GRAPH_NOT_FOUND_DETAIL))
+    except GraphNotReady as exc:
+        return GraphResolution(
+            None, exc.tenant_id, ToolError(f"graph {gid!r} is {exc.status}"),
+        )
+    return GraphResolution(ctx, ctx.tenant_id, None)
 
 
 def _configured_mcp_graph() -> str:
@@ -169,24 +209,14 @@ async def current_graph(action: Action = Action.READ) -> GraphContext:
     # ``KB_MCP_GRAPH`` увёл бы такой ключ в чужой граф и дал бы отказ там,
     # где клиент ничего не выбирал.
     token = get_access_token()
-    key = _record_from_token(token) if token is not None else None
+    key = key_from_token(token) if token is not None else None
     x_graph = get_http_headers(include={"x-graph"}).get("x-graph")
     try:
         gid = choose_graph_id(x_graph, key, default=_configured_mcp_graph())
     except HTTPException as exc:
         raise ToolError(str(exc.detail)) from None
-    ctx: GraphContext | None = None
-    tenant: str | None = None
-    deferred: ToolError | None = None
-    try:
-        ctx = await get_graph_registry().get(gid)
-    except GraphNotFound:
-        deferred = ToolError(GRAPH_NOT_FOUND_DETAIL)
-    except GraphNotReady as exc:
-        tenant = exc.tenant_id
-        deferred = ToolError(f"graph {gid!r} is {exc.status}")
-    else:
-        tenant = ctx.tenant_id
+    resolved = await resolve_graph(gid)
+    tenant = resolved.tenant
     if token is None:
         # No token at all: stdio (no HTTP request) or HTTP with
         # KB_MCP_REQUIRE_AUTH=false.  There is no key to decide about, and
@@ -201,9 +231,7 @@ async def current_graph(action: Action = Action.READ) -> GraphContext:
                 raise ToolError(f"forbidden: {action} not allowed")
             # Someone else's graph answers as one that does not exist.
             raise ToolError(GRAPH_NOT_FOUND_DETAIL)
-    if deferred is not None:
-        raise deferred
-    return ctx  # type: ignore[return-value]  # set whenever `deferred` is None
+    return resolved.context_or_raise()
 
 
 def current_principal() -> str:
@@ -218,7 +246,7 @@ def current_principal() -> str:
     token = get_access_token()
     if token is None:
         return ""
-    return _record_from_token(token).owner
+    return key_from_token(token).owner
 
 
 def build_sse_auth() -> RegistryTokenVerifier | None:

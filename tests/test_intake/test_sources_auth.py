@@ -7,7 +7,8 @@ import src.intake.sources.auth as auth
 import src.mcp._shared as sh
 from src.config import settings
 from src.tenancy.api_keys import ApiKeyRecord
-from src.tenancy.context import new_graph_context
+from src.tenancy.context import GraphContext, new_graph_context
+from src.tenancy.registry import GraphNotFound
 from tests.test_mcp.test_current_graph import mint_token
 
 FEEDER = "feeder_g"
@@ -31,7 +32,7 @@ def _key(scopes=("sources",), tenant="default", graphs=None):
 @pytest.fixture
 def reg(monkeypatch):
     r = _Reg()
-    monkeypatch.setattr(auth, "get_graph_registry", lambda: r)
+    monkeypatch.setattr(sh, "get_graph_registry", lambda: r)
     monkeypatch.setattr(auth, "get_http_headers", lambda **kw: {})
     return r
 
@@ -72,6 +73,9 @@ async def test_missing_right_is_refused_even_when_authz_is_off(monkeypatch, reg)
 
 
 async def test_other_tenant_answers_as_missing_graph(monkeypatch, reg):
+    # Тест держится на том, что фейковый реестр отдаёт контекст арендатора
+    # `default`; ключ `t2` ему чужой.  Без этого отказ был бы «нет права».
+    assert (await reg.get(FEEDER)).tenant_id == "default"
     await _with_token(monkeypatch, _key(tenant="t2"))
     with pytest.raises(ToolError) as e:
         await auth.require_sources_access(FEEDER)
@@ -89,3 +93,32 @@ async def test_header_naming_the_feeder_graph_is_accepted(monkeypatch, reg):
     await _with_token(monkeypatch, _key())
     monkeypatch.setattr(auth, "get_http_headers", lambda **kw: {"x-graph": FEEDER})
     assert (await auth.require_sources_access(FEEDER)).id == FEEDER
+
+
+async def test_key_narrowed_to_another_graph_is_refused(monkeypatch, reg):
+    await _with_token(monkeypatch, _key(graphs=("some_other",)))
+    with pytest.raises(ToolError, match="forbidden"):
+        await auth.require_sources_access(FEEDER)
+
+
+async def test_graph_not_found_is_not_disclosed_to_unauthorized_key(monkeypatch, reg):
+    """Ключ без права получает один и тот же отказ, есть граф или нет."""
+    await _with_token(monkeypatch, _key(scopes=("read",)))
+    with pytest.raises(ToolError) as existing:
+        await auth.require_sources_access(FEEDER)
+
+    async def missing(gid):
+        raise GraphNotFound(gid)
+
+    monkeypatch.setattr(reg, "get", missing)
+    with pytest.raises(ToolError) as absent:
+        await auth.require_sources_access(FEEDER)
+    assert str(absent.value) == str(existing.value)
+    assert str(absent.value) != sh.GRAPH_NOT_FOUND_DETAIL
+
+
+async def test_happy_path_returns_graph_context(monkeypatch, reg):
+    await _with_token(monkeypatch, _key())
+    ctx = await auth.require_sources_access(FEEDER)
+    assert isinstance(ctx, GraphContext)
+    assert ctx.id == FEEDER

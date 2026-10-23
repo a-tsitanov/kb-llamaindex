@@ -11,10 +11,9 @@ from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_access_token, get_http_headers
 
 from src.api.graph_dep import GRAPH_NOT_FOUND_DETAIL
-from src.mcp._shared import _record_from_token
+from src.mcp._shared import key_from_token, resolve_graph
 from src.tenancy.authz import Action, authorize
 from src.tenancy.context import GraphContext
-from src.tenancy.registry import GraphNotFound, GraphNotReady, get_graph_registry
 
 
 async def require_sources_access(feeder_graph_id: str) -> GraphContext:
@@ -35,29 +34,16 @@ async def require_sources_access(feeder_graph_id: str) -> GraphContext:
     token = get_access_token()
     if token is None:
         raise ToolError("authentication required: sources tools need an API key")
-    key = _record_from_token(token)
+    key = key_from_token(token)
     x_graph = get_http_headers(include={"x-graph"}).get("x-graph")
     if x_graph and x_graph != feeder_graph_id:
         raise ToolError("foreign graph: this server works only with the feeder's graph")
 
-    ctx: GraphContext | None = None
-    tenant: str | None = None
-    deferred: ToolError | None = None
-    try:
-        ctx = await get_graph_registry().get(feeder_graph_id)
-    except GraphNotFound:
-        deferred = ToolError(GRAPH_NOT_FOUND_DETAIL)
-    except GraphNotReady as exc:
-        tenant = exc.tenant_id
-        deferred = ToolError(f"graph {feeder_graph_id!r} is {exc.status}")
-    else:
-        tenant = ctx.tenant_id
+    resolved = await resolve_graph(feeder_graph_id)
 
-    decision = authorize(key, feeder_graph_id, tenant, Action.SOURCES)
+    decision = authorize(key, feeder_graph_id, resolved.tenant, Action.SOURCES)
     if not decision.allowed:
         if decision.reason in ("scope", "graph"):
             raise ToolError(f"forbidden: {Action.SOURCES} not allowed")
         raise ToolError(GRAPH_NOT_FOUND_DETAIL)
-    if deferred is not None:
-        raise deferred
-    return ctx  # type: ignore[return-value]  # задан, пока deferred is None
+    return resolved.context_or_raise()
