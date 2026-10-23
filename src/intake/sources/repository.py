@@ -93,9 +93,13 @@ class SourceRepository:
                 )
             await conn.commit()
 
-    async def _one(self, where: str, param: Any) -> SourceRow | None:
+    async def _one(
+        self, where: str, param: Any, order: str = "",
+    ) -> SourceRow | None:
         async with self._conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-            await cur.execute(f"SELECT {_COLS} FROM source WHERE {where}", (param,))
+            await cur.execute(
+                f"SELECT {_COLS} FROM source WHERE {where}{order}", (param,),
+            )
             row = await cur.fetchone()
         return SourceRow.from_dict(row) if row else None
 
@@ -104,7 +108,12 @@ class SourceRepository:
 
     async def by_slug(self, slug: str) -> SourceRow | None:
         """Источник по ТЕКУЩЕМУ слагу (``source.slug``), не по историческим."""
-        return await self._one("slug = %s", slug)
+        # Слаг в source не уникален: порядок делает выбор детерминированным
+        # (действующий канал, затем самый поздно подключённый).
+        return await self._one(
+            "slug = %s", slug,
+            " ORDER BY (state = 'active') DESC, added_at DESC, peer_id DESC LIMIT 1",
+        )
 
     async def list_active(self) -> list[SourceRow]:
         async with self._conn() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -154,7 +163,11 @@ class SourceRepository:
             await cur.execute(
                 "SELECT s.trust FROM source_slug ss "
                 "JOIN source s ON s.peer_id = ss.peer_id "
-                "WHERE ss.slug = %s AND s.state = 'active' LIMIT 1",
+                "WHERE ss.slug = %s AND s.state = 'active' "
+                # Слаг освобождают и перехватывают: доверие берём у канала,
+                # который несёт его сейчас, а не у первого попавшегося.
+                "ORDER BY (s.slug = ss.slug) DESC, ss.seen_at DESC, "
+                "s.peer_id DESC LIMIT 1",
                 (slug,),
             )
             row = await cur.fetchone()

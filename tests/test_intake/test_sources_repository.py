@@ -162,3 +162,35 @@ async def test_remember_slug_is_idempotent(monkeypatch, repo):
     q, p = conn.cur.sql[0]
     assert "ON CONFLICT DO NOTHING" in q and p == (7, "new")
     assert conn.commits == 1
+
+
+def _order_by(q: str) -> str:
+    return " ".join(q.split("ORDER BY")[1].split("LIMIT")[0].split())
+
+
+async def test_trust_for_channel_prefers_current_owner_of_the_slug(monkeypatch, repo):
+    # слаг мог достаться другому каналу: выигрывает тот, у кого он сейчас в source.slug
+    conn = _patch(monkeypatch, [(0.3,)])
+    await repo.trust_for_channel("taken")
+    order = _order_by(conn.cur.sql[0][0])
+    assert order.startswith("(s.slug = ss.slug) DESC")
+    assert "ss.seen_at DESC" in order and "s.peer_id DESC" in order
+
+
+async def test_trust_for_channel_renamed_channel_found_by_old_slug(monkeypatch, repo):
+    # переименованный канал: старый слаг только в истории, фильтр — по source_slug
+    conn = _patch(monkeypatch, [(0.8,)])
+    assert await repo.trust_for_channel("old_name") == 0.8
+    q = conn.cur.sql[0][0]
+    assert "WHERE ss.slug = %s" in q and "s.state = 'active'" in q
+    assert "WHERE s.slug" not in q
+
+
+async def test_by_slug_is_deterministic_when_slug_is_shared(monkeypatch, repo):
+    conn = _patch(monkeypatch, [_row()])
+    await repo.by_slug("taken")
+    q, p = conn.cur.sql[0]
+    assert "WHERE slug = %s" in q and p == ("taken",)
+    order = _order_by(q)
+    assert order.startswith("(state = 'active') DESC")
+    assert "added_at DESC" in order and "peer_id DESC" in order
