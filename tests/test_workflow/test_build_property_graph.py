@@ -165,7 +165,6 @@ async def test_channel_trust_opens_the_conflict_path_without_group_table(monkeyp
     assert rel.properties["polarity"] == "negated"
 
 
-
 def test_build_property_graph_writes_without_retry_wrapper():
     # importlib, not ``import ... as``: the package re-exports the activity
     # FUNCTION under the same name, so ``import a.b.c as m`` binds the function.

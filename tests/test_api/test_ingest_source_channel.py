@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import psycopg.errors
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -14,7 +15,6 @@ from tests.test_intake.test_dedup import no_duplicate
 
 def _api_key_header() -> dict[str, str]:
     return {"X-API-Key": settings.api.keys_list[0]}
-
 
 
 @pytest.mark.asyncio
@@ -99,3 +99,47 @@ async def test_ingest_resolves_channel_trust_into_params(
         lookup.assert_awaited_once_with(channel)
     else:
         lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [RuntimeError("pg hiccup"), psycopg.errors.UndefinedTable("relation \"source\" does not exist")],
+)
+async def test_ingest_survives_failing_channel_trust_lookup(error: Exception) -> None:
+    """Доверие на канал — необязательное уточнение: сбой реестра (миграция не
+    накатана, сеть) не ломает приём, канал остаётся, доверие = None, документ
+    ставится в очередь."""
+    from src.api.main import app
+    from src.intake.repository import IntakeRepository
+    from src.intake.sources.repository import SourceRepository
+
+    stub_storage = MagicMock()
+    stub_storage.put_object.return_value = "s3://bucket/key"
+    submit = AsyncMock()
+
+    with (
+        patch(
+            "src.intake.api.ingest.build_minio_storage",
+            return_value=stub_storage,
+        ),
+        patch("src.intake.api.ingest.get_temporal_client", new=AsyncMock()),
+        patch("src.intake.api.ingest.submit_document", new=submit),
+        no_duplicate(),
+        patch.object(IntakeRepository, "accept_document", new=AsyncMock()),
+        patch.object(SourceRepository, "trust_for_channel", new=AsyncMock(side_effect=error)),
+    ):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            resp = await ac.post(
+                "/api/v1/ingest",
+                headers=_api_key_header(),
+                files={"file": ("tg_acme_9.txt", b"hi", "text/plain")},
+                data={"group": "news", "channel": "acme"},
+            )
+
+    assert resp.status_code == 202, resp.text
+    submit.assert_awaited_once()
+    params = submit.call_args.args[1]
+    assert params.channel == "acme"
+    assert params.channel_trust is None

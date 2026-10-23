@@ -251,6 +251,24 @@ async def upload_document(
             f"unknown group {group!r}; allowed: {sorted(GROUP_SET)}",
         )
 
+    # Личное доверие к каналу снимается здесь, при приёме: ядро реестр не
+    # читает (граница контуров), а позднее изменение доверия не должно
+    # перештамповывать принятое.  Пустой канал или канал без строки в
+    # реестре → None, поведение прежнее (доверие по группе).  Это
+    # необязательное уточнение, поэтому любой сбой реестра (миграция не
+    # накатана, Postgres моргнул) даёт None, а не 500; и снимаем его до
+    # загрузки тела, чтобы сбой не оставил в хранилище сироту.
+    channel_trust: float | None = None
+    if channel:
+        try:
+            channel_trust = await SourceRepository(graph=graph).trust_for_channel(channel)
+        except Exception as exc:  # реестр не должен ломать приём
+            logger.warning(
+                "ingest channel trust lookup failed  channel={c}  err={e}",
+                c=channel,
+                e=exc,
+            )
+
     # Optional ingest priority (rabbitmq backend only). Higher = served first;
     # manual channel reingest posts PRIO_BACKFILL (0). None → live default.
     # Validate against the queue's advertised max so an out-of-range value 422s
@@ -488,15 +506,6 @@ async def upload_document(
     judge_model = cfg.model_for("judge")
     search_model = cfg.model_for("search")
     env_name = settings.analytics.env_name
-
-    # Личное доверие к каналу снимается здесь, при приёме: ядро реестр не
-    # читает (граница контуров), а позднее изменение доверия не должно
-    # перештамповывать принятое.  Пустой канал или канал без строки в
-    # реестре → None, поведение прежнее (доверие по группе).
-    channel_trust = (
-        await SourceRepository(graph=graph).trust_for_channel(channel)
-        if channel else None
-    )
 
     client = await get_temporal_client()
     params = IngestParams(

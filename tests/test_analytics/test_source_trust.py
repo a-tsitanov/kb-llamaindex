@@ -33,6 +33,12 @@ def test_channel_trust_beats_the_group_table(trust_table):
     assert trust_for("news", channel_trust=0.9) == pytest.approx(0.9)
 
 
+def test_zero_channel_trust_is_present_and_beats_the_group(trust_table):
+    # 0.0 — это заданное «не доверяем каналу», а не «значения нет»:
+    # оно перебивает групповое доверие выше нуля.
+    assert trust_for("news", channel_trust=0.0) == 0.0
+
+
 def test_no_channel_trust_falls_back_to_the_group(trust_table):
     assert trust_for("news", channel_trust=None) == pytest.approx(0.2)
     assert trust_for("") == pytest.approx(0.5)
