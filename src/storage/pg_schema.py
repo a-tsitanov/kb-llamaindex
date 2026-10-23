@@ -178,6 +178,44 @@ CREATE INDEX IF NOT EXISTS document_download_principal_idx
 """
 
 
+# Реестр источников Telegram-фидера: какие каналы подключены, с каким
+# доверием и в какой группе.  Личность канала — числовой `peer_id`, а не
+# слаг: слаг производный от юзернейма/названия, и канал его меняет, а
+# `peer_id` Telegram не меняет никогда.  Ключ по слагу при переименовании
+# породил бы второй «канал» и осиротил историю.  Поэтому слаги вынесены в
+# `source_slug` — по ним отчёт собирает документы, записанные под прежними
+# именами (`documents.source_channel` хранит слаг на момент приёма).
+#
+# `state='left'` вместо DELETE: из канала вышли, но принятые документы и
+# доверие к нему остаются объяснимыми; повторное подключение поднимает ту же
+# строку.  `trust NULL` = «как у группы», это не ноль.
+_SOURCE_DDL = """
+CREATE TABLE IF NOT EXISTS source (
+    peer_id    BIGINT PRIMARY KEY,
+    slug       TEXT NOT NULL,
+    title      TEXT NOT NULL DEFAULT '',
+    group_name TEXT NOT NULL,
+    trust      DOUBLE PRECISION,
+    state      TEXT NOT NULL DEFAULT 'active'
+               CHECK (state IN ('active','left')),
+    added_by   TEXT NOT NULL DEFAULT '',
+    added_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    left_at    TIMESTAMPTZ,
+    note       TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS source_slug (
+    peer_id BIGINT NOT NULL,
+    slug    TEXT NOT NULL,
+    seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (peer_id, slug)
+);
+
+-- Поиск доверия идёт от слага документа к каналу.
+CREATE INDEX IF NOT EXISTS source_slug_slug_idx ON source_slug (slug);
+"""
+
+
 # Backfill source_channel for historical Telegram rows from the filename
 # embedded in `path` ({doc_id}/tg_<channel>_<msgid>.txt). Greedy .+ so
 # tg_a_b_123.txt -> channel 'a_b', msgid '123'. Only touches still-empty TG
@@ -531,6 +569,7 @@ GRAPH_DDL: list[str] = [
     # уже существующей таблицы documents.
     _DOC_PROCESSING_DDL,
     _DOCUMENT_DOWNLOAD_DDL,
+    _SOURCE_DDL,
     _INGEST_METRICS_DDL,
     _BACKFILL_SOURCE_CHANNEL_SQL,
     _FACT_SUPERSEDE_DDL,
