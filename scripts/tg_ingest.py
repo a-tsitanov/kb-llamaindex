@@ -68,6 +68,7 @@ from src.intake.sources.folders import (
     resolve_folders,
     resolve_group_map,
 )
+from src.intake.sources.messages import ingest_form, message_to_doc
 
 # How many chars of each message body to echo in the per-message "sent" log
 # (visibility into WHAT news is ingested each round). Override via TG_LOG_PREVIEW_CHARS.
@@ -81,14 +82,7 @@ _PREVIEW_CHARS = int(os.environ.get("TG_LOG_PREVIEW_CHARS", "200"))
 # же: политика ответов приёма у всех фидеров одна.
 
 
-def _message_to_doc(msg: Any, channel: str) -> tuple[str, str, str] | None:
-    """Map a Telethon message → (filename, text, document_date), or None if empty."""
-    text = (getattr(msg, "message", None) or "").strip()
-    if not text:
-        return None
-    filename = f"tg_{channel.lstrip('@')}_{msg.id}.txt"
-    document_date = msg.date.date().isoformat()
-    return filename, text, document_date
+_message_to_doc = message_to_doc  # прежнее имя: на него ссылаются тесты
 
 
 def client_headers(graph: str | None) -> dict[str, str]:
@@ -138,17 +132,10 @@ async def post_ingest(
     ``on_duplicate`` уходит в форму только когда задан: пустое значение
     оставляет серверное умолчание (`reject` для обычного POST).
     """
-    data: dict[str, str] = {"document_date": document_date}
-    if queue:
-        data["queue"] = queue
-    if group:
-        data["group"] = group
-    if priority is not None:
-        data["priority"] = str(priority)
-    if channel:
-        data["channel"] = channel
-    if on_duplicate:
-        data["on_duplicate"] = on_duplicate
+    data = ingest_form(
+        document_date, queue=queue, group=group, priority=priority,
+        channel=channel, on_duplicate=on_duplicate,
+    )
     res = await post_document(
         http, api_base, api_key,
         filename=filename, content=text.encode("utf-8"), data=data,
