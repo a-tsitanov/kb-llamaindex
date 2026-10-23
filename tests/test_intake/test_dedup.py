@@ -127,6 +127,7 @@ async def _post(
     from src.api import auth
     from src.api.main import app
     from src.intake.repository import IntakeRepository
+    from src.intake.sources.repository import SourceRepository
 
     storage = MagicMock()
     storage.put_object.side_effect = lambda key, *_a, **_k: f"s3://kb-uploads/{key}"
@@ -150,6 +151,8 @@ async def _post(
         ),
         patch("src.intake.api.ingest.submit_document", submit),
         patch.object(IntakeRepository, "record_duplicate_sighting", sighting),
+        # Реестр источников — не предмет этих тестов (пустой реестр).
+        patch.object(SourceRepository, "trust_for_channel", AsyncMock(return_value=None)),
     ):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:

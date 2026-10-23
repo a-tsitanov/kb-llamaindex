@@ -15,15 +15,28 @@ an unconfigured deployment behaves exactly as before: every source equal.
 
 from __future__ import annotations
 
+import math
+
 from src.config import settings
 
 
-def trust_for(group: str) -> float:
-    """Trust of a document group, clamped to [0, 1].
+def trust_for(group: str, channel_trust: float | None = None) -> float:
+    """Trust of a document, clamped to [0, 1].
 
-    Lookup is case-insensitive and whitespace-tolerant; an unknown or empty
-    group gets the configured default.
+    ``channel_trust`` — личное доверие к каналу, уже разрешённое вызывающим
+    (модуль чистый: реестра не знает).  Оно побеждает групповое; нечисловое
+    или нефинитное значение игнорируется и работает групповой путь.
+
+    Group lookup is case-insensitive and whitespace-tolerant; an unknown or
+    empty group gets the configured default.
     """
+    if channel_trust is not None:
+        try:
+            own = float(channel_trust)
+        except (TypeError, ValueError):
+            own = math.nan
+        if math.isfinite(own):
+            return max(0.0, min(1.0, own))
     table = settings.signals.source_trust or {}
     key = (group or "").strip().lower()
     raw = table.get(key, settings.signals.source_trust_default)

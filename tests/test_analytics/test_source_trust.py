@@ -29,6 +29,25 @@ def test_out_of_range_trust_is_clamped(monkeypatch):
     assert trust_for("y") == 0.0
 
 
+def test_channel_trust_beats_the_group_table(trust_table):
+    assert trust_for("news", channel_trust=0.9) == pytest.approx(0.9)
+
+
+def test_no_channel_trust_falls_back_to_the_group(trust_table):
+    assert trust_for("news", channel_trust=None) == pytest.approx(0.2)
+    assert trust_for("") == pytest.approx(0.5)
+
+
+def test_channel_trust_is_clamped(trust_table):
+    assert trust_for("news", channel_trust=7.0) == 1.0
+    assert trust_for("news", channel_trust=-1.0) == 0.0
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), "abc"])
+def test_unusable_channel_trust_falls_back_to_the_group(trust_table, bad):
+    assert trust_for("news", channel_trust=bad) == pytest.approx(0.2)
+
+
 # ── claim consensus ─────────────────────────────────────────────────────────
 
 _CLAIMS = [

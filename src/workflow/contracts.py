@@ -122,6 +122,15 @@ class IngestParams(_Frozen):
     # Channel group (news/analytics/.../data or "" = ungrouped). Stamped
     # onto each chunk's doc_group metadata for search filter/rerank/synth.
     group: str = ""
+    # Канал-источник и его личное доверие (0..1) из реестра источников.
+    # Число снимается на приёме (/ingest), а не читается в активности:
+    # ядро не импортирует приём (граница контуров), и «доверие действует
+    # только вперёд» — поздняя смена доверия не перештамповывает уже
+    # принятые документы.  None = у канала своего доверия нет, действует
+    # групповое.  Оба поля с умолчаниями: летящие сообщения очереди
+    # десериализуются по-прежнему.
+    channel: str = ""
+    channel_trust: float | None = None
     graph_id: str = DEFAULT_GRAPH_ID
     # Re-ingest of an already-known document: the entity-watch journals are
     # still written, but the monitor sweep raises no events from them.
@@ -138,6 +147,9 @@ class Ctx(_Frozen):
     doc_date_epoch: int | None = None
     inserted_at_epoch: int | None = None
     group: str = ""
+    # Канал и его доверие, снятые на приёме (см. IngestParams.channel_trust).
+    channel: str = ""
+    channel_trust: float | None = None
     graph_id: str = DEFAULT_GRAPH_ID
     backfill: bool = False
 

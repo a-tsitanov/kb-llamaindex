@@ -31,6 +31,7 @@ from src.api.graph_dep import resolve_graph, resolve_graph_write
 from src.config import settings
 from src.intake.queue.priorities import PRIO_LIVE
 from src.intake.repository import ON_DUPLICATE, CanonicalDoc, IntakeRepository
+from src.intake.sources.repository import SourceRepository
 from src.intake.submit import submit_document
 from src.retrieval.date_filters import iso_to_epoch_days, today_epoch_days
 from src.retrieval.groups import GROUP_SET
@@ -488,6 +489,15 @@ async def upload_document(
     search_model = cfg.model_for("search")
     env_name = settings.analytics.env_name
 
+    # Личное доверие к каналу снимается здесь, при приёме: ядро реестр не
+    # читает (граница контуров), а позднее изменение доверия не должно
+    # перештамповывать принятое.  Пустой канал или канал без строки в
+    # реестре → None, поведение прежнее (доверие по группе).
+    channel_trust = (
+        await SourceRepository(graph=graph).trust_for_channel(channel)
+        if channel else None
+    )
+
     client = await get_temporal_client()
     params = IngestParams(
         doc_id=str(doc_id), path=s3_uri,
@@ -510,6 +520,8 @@ async def upload_document(
         doc_date_epoch=doc_date_epoch,
         inserted_at_epoch=inserted_at_epoch,
         group=group,
+        channel=channel,
+        channel_trust=channel_trust,
         graph_id=graph.id,
         backfill=backfill,
     )

@@ -105,6 +105,67 @@ async def test_trust_conflicts_are_resolved_and_logged_when_policy_configured(
     assert recorded[0][0]["new_doc_id"] == "doc-new"
 
 
+@pytest.mark.asyncio
+async def test_channel_trust_opens_the_conflict_path_without_group_table(monkeypatch):
+    """Документ из доверенного канала разрешает противоречия, даже когда
+    таблица групп пуста; число берётся из ctx.channel_trust."""
+    from types import SimpleNamespace
+
+    from src.config import settings
+    from src.graph.edge_conflicts import StoredEdge
+
+    monkeypatch.setattr(settings.signals, "source_trust", {})
+    monkeypatch.setattr(settings.signals, "source_trust_default", 0.5)
+
+    n = MagicMock(node_id="a")
+    n.metadata = {}
+    rel = SimpleNamespace(
+        source_id="Иванов", target_id="ООО Ромашка", label="WORKS_AT",
+        properties={"polarity": "negated"},
+    )
+    staging = MagicMock()
+    staging.read_pickle.return_value = ([], [rel], [n])
+    graph_store = MagicMock()
+
+    class _PG:
+        async def record_fact_conflicts(self, rows):
+            pass
+
+    ctx = Ctx(
+        doc_id="doc-new", local_path="/x", cleanup_dir=None, workflow_run_id="r",
+        group="news", channel="acme", channel_trust=0.95,
+    )
+    parsed = Parsed(ctx=ctx, nodes_uri="s3://kb-staging/r/parsed.pkl", chunk_count=1)
+    kg = KGExtracted(parsed=parsed, nodes_with_kg_uri="s3://kb-staging/r/kg.pkl")
+    merged = Merged(kg=kg, merged_entities_uri="s3://kb-staging/r/merged.pkl")
+
+    with patch(
+        "src.workflow.activities.build_property_graph.build_staging_store",
+        return_value=staging,
+    ), patch(
+        "src.workflow.activities.build_property_graph.build_graph_store",
+        return_value=graph_store,
+    ), patch(
+        "src.graph.edge_conflicts.load_stored_edges",
+        return_value={("Иванов", "ООО Ромашка"): StoredEdge("affirmed", 0.5, "doc-old")},
+    ) as load, patch(
+        "src.storage.postgres.AsyncPostgres", return_value=_PG(),
+    ), patch(
+        "src.analytics.source_trust.trust_for", wraps=__import__(
+            "src.analytics.source_trust", fromlist=["trust_for"],
+        ).trust_for,
+    ) as tf, patch(
+        "src.workflow.activities.build_property_graph.activity"
+    ):
+        await build_property_graph(merged)
+
+    load.assert_called_once()
+    tf.assert_called_once_with("news", 0.95)
+    # 0.95 > 0.5 stored: the document's own belief wins.
+    assert rel.properties["polarity"] == "negated"
+
+
+
 def test_build_property_graph_writes_without_retry_wrapper():
     # importlib, not ``import ... as``: the package re-exports the activity
     # FUNCTION under the same name, so ``import a.b.c as m`` binds the function.

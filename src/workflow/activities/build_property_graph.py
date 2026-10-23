@@ -112,8 +112,15 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
         # belief (see src/graph/edge_conflicts.py).  Gated on the trust table
         # being configured at all — with no policy there is nothing to resolve,
         # and skipping spares the batch its read-back.
+        # Ворота — по документу: таблица групп может быть пуста, но документ
+        # из канала с личным доверием обязан разрешать противоречия.  Число
+        # приехало в ctx.channel_trust, снятое на приёме: активность не читает
+        # реестр источников — это граница контуров (ядро не знает приём).
         edge_conflicts: list[dict] = []
-        if relations and settings.signals.source_trust:
+        if relations and (
+            settings.signals.source_trust
+            or merged.kg.parsed.ctx.channel_trust is not None
+        ):
             from dataclasses import asdict
 
             from src.analytics.source_trust import trust_for
@@ -126,7 +133,10 @@ async def build_property_graph(merged: Merged) -> GraphBuilt:
             relations, conflicts = resolve_edge_conflicts(
                 relations,
                 stored_edges,
-                doc_trust=trust_for(merged.kg.parsed.ctx.group),
+                doc_trust=trust_for(
+                    merged.kg.parsed.ctx.group,
+                    merged.kg.parsed.ctx.channel_trust,
+                ),
                 doc_id=merged.kg.parsed.ctx.doc_id,
                 ingest_epoch=today_epoch_days(),
             )
