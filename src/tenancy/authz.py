@@ -27,12 +27,17 @@ class Action(StrEnum):
     ``DOWNLOAD_ORIGINAL`` is deliberately NOT part of ``READ``: handing out
     the source file is a stronger right than reading what was extracted
     from it.
+
+    ``SOURCES`` is narrower than ``ADMIN`` and NOT implied by it: it lets a
+    key register Telegram channels on the feeder, i.e. act through a real
+    Telegram account.  It is granted only by naming it.
     """
 
     READ = "read"
     WRITE = "write"
     DOWNLOAD_ORIGINAL = "download_original"
     ADMIN = "admin"
+    SOURCES = "sources"
 
 
 ALL_ACTIONS: frozenset[str] = frozenset(a.value for a in Action)

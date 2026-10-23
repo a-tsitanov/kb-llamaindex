@@ -73,7 +73,7 @@ A key authenticates **and** authorizes (spec 2026-10-18; this cancels "keys auth
 | Field | Meaning |
 |---|---|
 | `tenant_id` | Whose key it is. A graph belongs to a tenant too; a key never sees another tenant's graph. |
-| `scopes` | Any of `read`, `write`, `download_original`, `admin`. Handing out the source file is NOT part of `read`. |
+| `scopes` | Any of `read`, `write`, `download_original`, `admin`, `sources`. Handing out the source file is NOT part of `read`. `sources` (register Telegram channels on the feeder) is NOT part of `admin` either: it is decided by `authorize` and ignores `AUTHZ_MODE`. |
 | `graph_ids` | `NULL` = every graph of the tenant; a list narrows the key to those ids. |
 
 Tenants and keys are created **only** by CLI — there is no HTTP route, by design:
