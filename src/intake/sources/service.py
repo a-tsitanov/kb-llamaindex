@@ -50,7 +50,8 @@ async def apply_proposal(
     `skipped`, уже подключённые остаются в `connected` и в реестре.
     Любой сбой по каналу (папка, `RPCError`, реестр) кладёт его в `skipped` и
     не роняет вызов; если вступление уже состоялось, оно отменяется `leave`,
-    а провал отмены оговаривается в причине. `FloodWait` на чтении истории
+    а провал отмены оговаривается в причине. Канал, уже активный в реестре,
+    не отменяется: там членство старше этого вызова. `FloodWait` на чтении истории
     оставляет канал в `connected` и отмечает его в `partial`.
     `bootstrapped` считает документы, принятые приёмом как новые
     (дубликат и сбой в счёт не идут).
@@ -74,7 +75,14 @@ async def apply_proposal(
             skipped.append((peer_id, _flood_reason(flood)))
             continue
         joined = False
+        # Канал уже активен в реестре — значит в нём состоит не этот вызов, а
+        # прошлое подключение. Откат тогда запрещён: выйдя, мы оставили бы
+        # активную строку о канале, из которого нас нет, и свип ждал бы
+        # сообщений, которых не будет.
+        was_active = False
         try:
+            known = await repo.get(peer_id)
+            was_active = known is not None and known.state == "active"
             await ops.join(peer_id)
             joined = True
             await ops.add_to_folder(peer_id, item.group_name)
@@ -84,7 +92,11 @@ async def apply_proposal(
         except Exception as exc:  # сбой одного канала не должен ронять обход
             if isinstance(exc, FloodWait):
                 flood = exc
-            reason = await _rollback(ops, peer_id, joined, _reason(exc))
+            reason = _reason(exc)
+            if joined and was_active:
+                reason += "; канал уже был в реестре, из канала не выходим"
+            else:
+                reason = await _rollback(ops, peer_id, joined, reason)
             skipped.append((peer_id, reason))
             continue
         connected.append(peer_id)

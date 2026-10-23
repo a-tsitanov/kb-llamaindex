@@ -1,6 +1,7 @@
 """apply_proposal на фейковых TelegramOps, реестре и клиенте приёма."""
 
 import datetime as dt
+from types import SimpleNamespace
 
 import pytest
 
@@ -62,6 +63,10 @@ class _Repo:
         self.log = log
         self.rows = {}
         self.fail_on = set(fail_on)
+
+    async def get(self, peer_id):
+        row = self.rows.get(peer_id)
+        return None if row is None else SimpleNamespace(**row, peer_id=peer_id)
 
     async def add(self, peer_id, slug, title, group_name, *, added_by):
         self.log.append(("add", peer_id))
@@ -236,6 +241,22 @@ async def test_failed_rollback_asks_for_manual_cleanup(posts):
     assert res.connected == [] and repo.rows == {}
     assert ("leave", 1) in log
     assert "ручная чистка" in dict(res.skipped)[1]
+
+
+async def test_folder_failure_on_a_registered_channel_keeps_the_membership(posts):
+    """Повторное подключение известного канала: папка не далась, но строка
+    реестра активна. Выйти нельзя — реестр говорил бы «активен» о канале,
+    из которого нас уже нет, и свип ждал бы сообщений вечно."""
+    log, store, p, ops, repo = _kit([_item(1, group="digest")], no_folder={"digest"})
+    repo.rows[1] = {
+        "slug": "chan", "title": "T1", "group_name": "digest", "added_by": "bob",
+        "state": "active", "trust": 0.5, "note": "",
+    }
+    res = await _apply(store, ops, repo, p)
+    assert res.connected == []
+    assert ("leave", 1) not in log
+    assert repo.rows[1]["state"] == "active"
+    assert "из канала не выходим" in dict(res.skipped)[1]
 
 
 async def test_other_join_error_skips_the_peer_and_continues(posts):
