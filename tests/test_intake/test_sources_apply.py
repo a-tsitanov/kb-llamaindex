@@ -387,3 +387,44 @@ async def test_cancel_after_the_folder_add_also_cleans_the_folder(posts):
     with pytest.raises(asyncio.CancelledError):
         await task
     assert ("leave", 1) in log and ("unfolder", 1, "digest") in log
+
+
+async def test_result_carries_the_highest_bootstrapped_id_per_peer(posts):
+    _log, store, p, ops, repo = _kit([_item(1, "a"), _item(2, "b"), _item(3, "c")])
+    ops.hist[1] = [_Msg(12), _Msg(11)]
+    ops.hist[2] = [_Msg(7, "   ")]  # пустое: курсор идёт, как у свипа
+    # у 3 истории нет
+    seen = []
+    p2 = p
+    res = await apply_proposal(
+        store, ops, repo, p2.id, p2.code, [1, 2, 3], added_by="alice", bootstrap=100,
+        http="HTTP", api_base="http://api", api_key="k",
+        on_cursor=lambda peer, last: seen.append((peer, last)),
+    )
+    assert dict(res.cursors) == {1: 12, 2: 7}
+    assert seen == [(1, 12), (2, 7)]
+
+
+async def test_cursors_default_to_empty_and_skip_peers_without_history(posts):
+    _log, store, p, ops, repo = _kit([_item(1)])
+    res = await _apply(store, ops, repo, p, bootstrap=0)
+    assert dict(res.cursors) == {}
+    _log, store, p, ops, repo = _kit([_item(1)])
+    res = await _apply(store, ops, repo, p)
+    assert dict(res.cursors) == {}
+
+
+async def test_cursor_stops_before_the_first_failed_post(posts):
+    _log, store, p, ops, repo = _kit([_item(1, "alpha")])
+    ops.hist[1] = [_Msg(3), _Msg(2), _Msg(1)]
+    posts.outcomes["tg_alpha_2.txt"] = FAILED
+    res = await _apply(store, ops, repo, p)
+    assert dict(res.cursors) == {1: 1}  # свип повторит с сообщения 2
+
+
+async def test_cursor_is_absent_when_the_first_post_failed(posts):
+    _log, store, p, ops, repo = _kit([_item(1, "alpha")])
+    ops.hist[1] = [_Msg(2), _Msg(1)]
+    posts.outcomes["tg_alpha_1.txt"] = FAILED
+    res = await _apply(store, ops, repo, p)
+    assert dict(res.cursors) == {}

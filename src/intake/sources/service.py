@@ -10,11 +10,13 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable, Mapping
+from types import MappingProxyType
 from typing import Any, NamedTuple
 
 from loguru import logger
 
-from src.intake.client import SENT, post_document
+from src.intake.client import FAILED, SENT, post_document
 from src.intake.sources.messages import ingest_form, message_to_doc
 from src.intake.sources.proposals import (
     CONNECT,
@@ -57,6 +59,12 @@ class ApplyResult(NamedTuple):
     bootstrapped: int
     # подключены (есть в connected), но историю дочитал не весь обход
     partial: tuple[tuple[int, str], ...] | list[tuple[int, str]] = ()
+    # peer_id -> наибольший id сообщения, который подтянула история при
+    # подключении. Курсор свипа должен стать не меньше: иначе первый же
+    # раунд перечитал бы и перепостил те же сообщения (получив 409 на каждое
+    # и ложное «канал репостит сам себя»). Канала, чья история ничего не
+    # дала, здесь нет.
+    cursors: Mapping[int, int] = MappingProxyType({})
 
 
 async def apply_proposal(
@@ -73,6 +81,7 @@ async def apply_proposal(
     api_base: str,
     api_key: str,
     graph: str | None = None,
+    on_cursor: Callable[[int, int], None] | None = None,
 ) -> ApplyResult:
     """Вступить, положить в папку, записать в реестр и подтянуть историю.
 
@@ -86,6 +95,12 @@ async def apply_proposal(
     оставляет канал в `connected` и отмечает его в `partial`.
     `bootstrapped` считает документы, принятые приёмом как новые
     (дубликат и сбой в счёт не идут).
+
+    ``cursors`` в результате и ``on_cursor(peer_id, last_id)`` (вызывается
+    сразу после истории канала, до перехода к следующему) называют, докуда
+    дочитана история: фидер переносит это в курсор свипа. Курсор идёт до
+    первого сбоя отправки (свип повторит его с этого сообщения) и включает
+    пустые сообщения и дубликаты, как и курсор свипа.
     """
     proposal = store.take(proposal_id, code, CONNECT)
     by_peer = {it.peer_id: it for it in proposal.items}
@@ -95,6 +110,7 @@ async def apply_proposal(
     skipped: list[tuple[int, str]] = []
     partial: list[tuple[int, str]] = []
     bootstrapped = 0
+    cursors: dict[int, int] = {}
     flood: FloodWait | None = None
 
     for peer_id in wanted:
@@ -159,11 +175,16 @@ async def apply_proposal(
             flood = exc
             partial.append((peer_id, f"история не подтянута: {_flood_reason(exc)}"))
             continue
-        bootstrapped += await _bootstrap(
+        sent, cursor = await _bootstrap(
             messages, item.slug or str(peer_id), item.group_name,
             http=http, api_base=api_base, api_key=api_key, graph=graph,
         )
-    return ApplyResult(connected, skipped, bootstrapped, partial)
+        bootstrapped += sent
+        if cursor is not None:
+            cursors[peer_id] = cursor
+            if on_cursor is not None:
+                on_cursor(peer_id, cursor)
+    return ApplyResult(connected, skipped, bootstrapped, partial, cursors)
 
 
 async def move_source(
@@ -414,14 +435,21 @@ def _flood_reason(exc: FloodWait) -> str:
 async def _bootstrap(
     messages: list[Any], slug: str, group: str,
     *, http: Any, api_base: str, api_key: str, graph: str | None,
-) -> int:
+) -> tuple[int, int | None]:
     """Отправить сообщения так же, как свип (`scripts/tg_ingest.py::sync_round`):
     от старых к новым, имя и дата — `message_to_doc`, поля — `ingest_form`
-    (`channel` без «@», `group` папки)."""
+    (`channel` без «@», `group` папки).
+
+    Возвращает (принято приёмом новыми, курсор). Курсор — наибольший id среди
+    сообщений до первого сбоя отправки; `None`, если не дошло ни до одного."""
     sent = 0
+    cursor: int | None = None
+    failed = False
     for msg in sorted(messages, key=lambda m: m.id):
         doc = message_to_doc(msg, slug)
         if doc is None:
+            if not failed:
+                cursor = msg.id
             continue
         filename, text, document_date = doc
         res = await post_document(
@@ -430,8 +458,12 @@ async def _bootstrap(
             data=ingest_form(document_date, group=group, channel=slug.lstrip("@")),
             graph=graph,
         )
+        if res.outcome == FAILED:
+            failed = True  # свип повторит с этого сообщения
+        elif not failed:
+            cursor = msg.id
         if res.outcome == SENT:
             sent += 1
         else:
             logger.info("bootstrap {f}: {o}", f=filename, o=res.outcome)
-    return sent
+    return sent, cursor

@@ -68,6 +68,8 @@ class IngestTarget:
     api_key: str
     bootstrap: int = 100
     graph: str | None = None
+    # (peer_id, last_id): хозяин свипа переносит курсор истории в своё состояние
+    on_cursor: Callable[[int, int], None] | None = None
 
 
 def _translate(exc: Exception) -> ToolError | None:
@@ -279,6 +281,7 @@ def build_sources_mcp(
                 added_by=current_principal() or "feeder-mcp",
                 bootstrap=target.bootstrap, http=target.http,
                 api_base=target.api_base, api_key=target.api_key, graph=target.graph,
+                on_cursor=target.on_cursor,
             )
             return {
                 "connected": res.connected,

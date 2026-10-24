@@ -345,6 +345,8 @@ async def sync_round(
         entry = state.setdefault(
             key, {"last_id": 0, "title": getattr(dialog, "title", "") or slug},
         )
+        if not entry.get("title"):  # запись могла завести подключение источника
+            entry["title"] = getattr(dialog, "title", "") or slug
         last_id = int(entry.get("last_id", 0) or 0)
         group = group_map.get(dialog.id, "")
         try:
@@ -402,6 +404,20 @@ async def sync_round(
     return tally
 
 
+def seed_cursor(
+    state: dict, save: Callable[[], None], peer_id: int, last_id: int, title: str = "",
+) -> None:
+    """Перенести курсор истории, подтянутой при подключении, в состояние свипа.
+
+    Без этого первый же раунд видел бы ``last_id <= 0``, перечитывал те же
+    сообщения и получал 409 на каждое. Курсор только растёт: свип мог уйти
+    дальше, пока шло подключение.
+    """
+    entry = state.setdefault(str(peer_id), {"last_id": 0, "title": title})
+    entry["last_id"] = max(int(entry.get("last_id", 0) or 0), last_id)
+    save()
+
+
 def start_sources_mcp(
     tg: Any,
     lock: asyncio.Lock,
@@ -414,6 +430,7 @@ def start_sources_mcp(
     state: dict,
     round_status: dict,
     env: Any = None,
+    save: Callable[[], None] | None = None,
 ) -> asyncio.Task | None:
     """Поднять MCP источников задачей рядом со свипом; без ``TG_SOURCES_MCP_PORT`` — ничего.
 
@@ -456,6 +473,10 @@ def start_sources_mcp(
                 ingest=mcp_server.IngestTarget(
                     http=http, api_base=api_base, api_key=api_key,
                     bootstrap=bootstrap_limit, graph=graph,
+                    on_cursor=(
+                        None if save is None
+                        else lambda peer, last: seed_cursor(state, save, peer, last)
+                    ),
                 ),
                 status=status,
             )
@@ -604,6 +625,7 @@ def main() -> int:
                 tg, lock, http=http, api_base=args.api_base, api_key=args.api_key,
                 graph=args.graph, bootstrap_limit=args.bootstrap_limit,
                 state=state, round_status=round_status,
+                save=lambda: save_state(state_path, state),
             )
             async def _round() -> tuple[int, dict]:
                 nonlocal missing_warned

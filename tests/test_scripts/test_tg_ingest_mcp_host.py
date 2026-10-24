@@ -191,3 +191,43 @@ async def test_failed_round_is_recorded_with_its_reason_and_reraised():
     lr = status["last_round"]
     assert lr["ok"] is False and "flood storm" in lr["error"] and lr["finished_at"]
     assert not lock.locked()
+
+
+def test_seed_cursor_creates_the_entry_and_saves():
+    state, saved = {}, []
+    T.seed_cursor(state, lambda: saved.append(1), -1001, 55, "Новости")
+    assert state == {"-1001": {"last_id": 55, "title": "Новости"}}
+    assert saved == [1]
+
+
+def test_seed_cursor_never_moves_the_cursor_back():
+    state, saved = {"7": {"last_id": 90, "title": "t"}}, []
+    T.seed_cursor(state, lambda: saved.append(1), 7, 55)
+    assert state["7"]["last_id"] == 90 and saved == [1]
+
+
+async def test_host_wires_the_bootstrap_cursor_into_the_sweep_state(monkeypatch):
+    rec = _Rec()
+    rec.install(monkeypatch)
+    state, saved = {}, []
+    _tg, _lock, task = _start(
+        {"TG_SOURCES_MCP_PORT": "9105"}, state=state, save=lambda: saved.append(1),
+    )
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    on_cursor = rec.built[0].kw["ingest"].on_cursor
+    on_cursor(-1001, 42)
+    assert state["-1001"]["last_id"] == 42 and saved == [1]
+    rec.release.set()
+    await task
+
+
+async def test_host_without_save_has_no_cursor_callback(monkeypatch):
+    rec = _Rec()
+    rec.install(monkeypatch)
+    _tg, _lock, task = _start({"TG_SOURCES_MCP_PORT": "9105"})
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert rec.built[0].kw["ingest"].on_cursor is None
+    rec.release.set()
+    await task
