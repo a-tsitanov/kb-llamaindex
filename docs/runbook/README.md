@@ -19,7 +19,7 @@
 | [`admission-control.md`](admission-control.md) | Допуск документов (opt-in `INGEST_ADMISSION_*`): синглтон `IngestSchedulerWorkflow`, ≤K в работе, FIFO, выбор K | Очередь забивается документами с первых стадий; хочешь «документ до конца, потом следующий» |
 | [`leiden-diagnostics.md`](leiden-diagnostics.md) | Почему Leiden «не находит сообществ» на 50k: различение ошибки детекции / пустого графа / синглтонов; диагностика (`SHOW STATS`, `/admin/graph/components`, прямой прогон leidenalg); взвешенный Leiden | Перестройка сообществ даёт 0; тюнинг `COMMUNITY_*` |
 | [`message-stats.md`](message-stats.md) | Статистика обработанных сообщений по `documents.source_channel`/`source_group`: `GET /api/v1/stats/{messages,timeline}` + CLI `scripts.message_stats {channels,groups,timeline}` | Нужны counts по каналам/группам/времени; проверка историчных данных (`source_group` пуст до фичи) |
-| [`feeder-sources.md`](feeder-sources.md) | MCP источников в процессе фидера: петля «пробел → поиск → список → код → подключение», десять инструментов, право `sources`, доверие только вперёд, папки не создаются, «канал молчит — где смотреть» | Подключаешь канал в Telegram-фидер из харнесса; разбираешься, почему канал молчит |
+| [`feeder-sources.md`](feeder-sources.md) | MCP источников в процессе фидера: петля «пробел → поиск → список → код → подключение», одиннадцать инструментов, право `sources`, доверие только вперёд, папки не создаются, «канал молчит — где смотреть» | Подключаешь канал в Telegram-фидер из харнесса; разбираешься, почему канал молчит |
 
 ## Архитектурные документы (не runbook'и)
 

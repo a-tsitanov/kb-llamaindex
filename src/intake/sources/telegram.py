@@ -168,21 +168,36 @@ class TelegramOps:
 
     async def discover(
         self, topic: str, *, limit: int = 10, days: int = 30, scan: int = 300,
-        min_hits: int = 2, min_participants: int = 500,
+        min_hits: int = 2, min_participants: int = 500, enrich: bool = True,
     ) -> DiscoverResult:
         """Каналы, которые ПИШУТ о теме за последние `days` дней.
 
         Глобальный поиск по сообщениям (только каналы-вещание): сообщения
         группируются по каналу, ранжирование — по числу различных дней с
         упоминаниями (регулярность), затем по числу сообщений и аудитории.
+        Окно соблюдается и здесь: сервер `min_date` может проигнорировать, а
+        старые посты раздули бы счётчики и съели бюджет `scan`. Одно сообщение
+        считается один раз, даже если страницы пересеклись.
+
+        `SearchGlobal` отдаёт каналы «урезанными» (min) — без
+        `participants_count`, поэтому порог аудитории по ним не работает.
+        `enrich=True` после отбора `limit` каналов добирает аудиторию отдельным
+        `GetFullChannelRequest` на каждый (не больше `limit` запросов), затем
+        применяет `min_participants` — только к уже ИЗВЕСТНЫМ числам — и
+        пересортировывает. Это запрос на кандидата, поэтому его можно отключить
+        (`enrich=False`), если важна скорость или лимиты Telegram.
+
         `FloodWait` наружу не летит: поиск только читает, частичный ответ
-        полезен — он отдаётся с `partial=True` и `wait_seconds`.
+        полезен — он отдаётся с `partial=True` и `wait_seconds` (в том числе
+        если лимит пришёл при добирании аудитории).
         """
         tl = _tl()
         min_date = datetime.now(UTC) - timedelta(days=days)
         stats: dict[int, dict[str, Any]] = {}
         chats: dict[int, Any] = {}
+        counted: set[tuple[int, int]] = set()
         seen = 0
+        fetched = 0
         partial = False
         wait: int | None = None
         rate, peer, msg_id = 0, tl.types.InputPeerEmpty(), 0
@@ -202,19 +217,28 @@ class TelegramOps:
             msgs = [m for m in getattr(res, "messages", []) if getattr(m, "date", None)]
             if not msgs:
                 break
+            fetched += len(msgs)
             for c in getattr(res, "chats", []):
                 chats[c.id] = c
-            for m in msgs[: scan - seen]:
+            if max(m.date for m in msgs) < min_date:
+                break  # вся страница старше окна, дальше только старее
+            for m in msgs:
+                if seen >= scan:
+                    break
                 cid = getattr(m.peer_id, "channel_id", None)
-                if cid is None:
+                if cid is None or m.date < min_date or (cid, m.id) in counted:
                     continue
+                counted.add((cid, m.id))
                 st = stats.setdefault(cid, {"hits": 0, "days": set(), "last": None})
                 st["hits"] += 1
                 day = m.date.astimezone(UTC)
                 st["days"].add(day.date())
                 if st["last"] is None or day > st["last"]:
                     st["last"] = day
-            seen += min(len(msgs), scan - seen)
+                seen += 1
+            tl_msgs = tl.types.messages.MessagesSlice
+            if not isinstance(res, tl_msgs) or res.count <= fetched:
+                break  # обычный `Messages` или всё выдано: следующей страницы нет
             last = msgs[-1]
             next_rate = getattr(res, "next_rate", None)
             last_cid = getattr(last.peer_id, "channel_id", None)
@@ -228,7 +252,7 @@ class TelegramOps:
             if nxt[0] == rate and nxt[2] == msg_id and nxt[1] == peer:
                 break  # смещения не сдвинулись: страница та же
             rate, peer, msg_id = nxt
-        found: list[Discovered] = []
+        found: list[tuple[Discovered, Any]] = []
         for cid, st in stats.items():
             chat = chats.get(cid)
             if chat is None or not getattr(chat, "broadcast", False):
@@ -239,21 +263,60 @@ class TelegramOps:
                 continue
             if st["hits"] < min_hits:
                 continue
-            count = getattr(chat, "participants_count", None)
-            if count is not None and count < min_participants:
-                continue
-            found.append(Discovered(
+            found.append((Discovered(
                 peer_id=tl.tg_utils.get_peer_id(chat),
                 slug=f"@{chat.username}",
                 title=getattr(chat, "title", "") or "",
-                participants=count,
+                participants=getattr(chat, "participants_count", None),
                 hits=st["hits"],
                 active_days=len(st["days"]),
                 last_post=st["last"].date().isoformat() if st["last"] else "",
                 verified=bool(getattr(chat, "verified", False)),
-            ))
-        found.sort(key=lambda d: (-d.active_days, -d.hits, -(d.participants or 0)))
-        return DiscoverResult(found[:limit], seen, partial, wait)
+            ), chat))
+
+        def rank(d: Discovered) -> tuple[int, int, int, int]:
+            return (-d.active_days, -d.hits, -(d.participants or 0), d.peer_id)
+
+        found.sort(key=lambda pair: rank(pair[0]))
+        top = found[:limit]
+        if enrich:
+            enriched: list[Discovered] = []
+            stop = False
+            for d, chat in top:
+                if not stop:
+                    try:
+                        count = await self._participants(chat)
+                    except FloodWait as exc:
+                        partial, wait, stop = True, exc.seconds, True
+                        count = None
+                    if count is not None:
+                        d = d._replace(participants=count)
+                enriched.append(d)
+            result = enriched
+        else:
+            result = [d for d, _ in top]
+        result = [
+            d for d in result
+            if d.participants is None or d.participants >= min_participants
+        ]
+        result.sort(key=rank)
+        return DiscoverResult(result, seen, partial, wait)
+
+    async def _participants(self, chat: Any) -> int | None:
+        """Аудитория канала одним `GetFullChannelRequest`; `None` — не вышло
+        (приватный, удалён, пустой ответ). `FloodWait` пробрасывается."""
+        tl = _tl()
+        try:
+            async with self._guard():
+                full = await self._client(tl.functions.channels.GetFullChannelRequest(
+                    tl.types.InputChannel(chat.id, chat.access_hash),
+                ))
+        except FloodWait:
+            raise
+        except Exception:  # один сбойный канал не должен ронять весь поиск
+            return None
+        count = getattr(getattr(full, "full_chat", None), "participants_count", None)
+        return count if isinstance(count, int) else None
 
     async def resolve(self, handle: str) -> Candidate | None:
         username = _normalize_handle(handle)

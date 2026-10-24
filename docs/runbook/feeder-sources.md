@@ -50,6 +50,11 @@ uv run python -m scripts.tenant_admin key --tenant <арендатор> --owner 
    restricted и без каналов без `@слага`); `sources_search(query)` ищет по
    названию, `sources_resolve(@слаг)` — по слагу. `connected` показывает,
    что канал уже в реестре.
+
+   Что когда брать: **тема** («кто пишет про дроны») — `sources_discover`;
+   `sources_search` — только когда уже известно название или слаг канала.
+   Живая проверка на реальном аккаунте: поиск по названию с темой вместо
+   имени не вернул ничего полезного — поэтому `sources_discover` и существует.
 3. `sources_propose(action="connect", channels=[{peer_id, slug, title, group}])`
    возвращает `proposal_id`, элементы и **одноразовый код**. В телеграм
    ничего не пишется.
@@ -72,7 +77,7 @@ uv run python -m scripts.tenant_admin key --tenant <арендатор> --owner 
 |---|---|---|
 | `sources_list()` | подключённые каналы: группа, доверие, `in_folder` (`true` / `false` / `null`: лежит ли канал в своей папке сейчас; `null` — папка собрана по признаку «все каналы» / «все группы» и по явному составу не ответить; признак не различает вид канала, поэтому папка с флагом только «все группы» тоже даёт `null` для канала-вещания, хотя его она не покрывает) и список папок аккаунта | нет |
 | `sources_search(query, limit=10)` | поиск публичных каналов | нет |
-| `sources_discover(topic, limit=10, days=30)` | каналы по тому, что они пишут о теме за `days` дней: `hits`, `active_days` (регулярность, по ней ранжирование), `last_post`, `connected`. `partial=true` + `wait_seconds` — скан оборван лимитом Telegram (FloodWait), список неполон | нет |
+| `sources_discover(topic, limit=10, days=30)` | каналы по тому, что они пишут о теме за `days` дней: `hits`, `active_days` (регулярность, по ней ранжирование), `last_post`, `verified`, `participants`, `connected`. `partial=true` + `wait_seconds` — скан оборван лимитом Telegram (FloodWait), список неполон, в ответ добавляется ключ `note` с этим объяснением. Границы: `days` 1..365, `limit` 1..50, пустая тема — пустой ответ | нет |
 | `sources_resolve(handle)` | канал по `@слагу` или ссылке; `candidate: null` — не найден | нет |
 | `sources_propose(action, channels)` | предложение `connect` / `move` / `leave` и код | выдаёт |
 | `sources_apply(proposal_id, code, peer_ids=None)` | подключить (`peer_ids` лишь сужает набор) | да |
@@ -131,3 +136,18 @@ uv run python -m scripts.tenant_admin key --tenant <арендатор> --owner 
 | документы приняты, а в графе пусто | `source_report`: `fate` (completed/failed/skipped), `origin` (перепосты не дают новых связей) |
 | уведомления подписки не приходят | это контур наблюдения, не источники: [`watch.md`](watch.md) |
 | сервер не отвечает | в логе `tg-ingest` строка «MCP источников упал»: свип при этом продолжает работу (в том числе при занятом порте: uvicorn выходит через `SystemExit`, хостинг его ловит); причина — порт занят или нет Postgres |
+
+## Поля кандидата `sources_discover`
+
+| Поле | Смысл |
+|---|---|
+| `hits` | сколько сообщений о теме найдено в окне (одно сообщение считается один раз) |
+| `active_days` | в скольких различных днях окна были упоминания; главный ключ ранжирования |
+| `last_post` | дата последнего найденного сообщения |
+| `verified` | признак верификации Telegram |
+| `participants` | аудитория. Глобальный поиск отдаёт каналы без неё, поэтому число добирается отдельным запросом `GetFullChannelRequest` на каждого из отобранных `limit` кандидатов; сбойный канал остаётся с `null`, порог `min_participants` режет только каналы с известным числом |
+
+Добирание аудитории — это до `limit` дополнительных запросов к Telegram; в
+`TelegramOps.discover` его выключает `enrich=False`. FloodWait при добирании
+останавливает его, ответ помечается `partial=true`, найденные кандидаты
+сохраняются.

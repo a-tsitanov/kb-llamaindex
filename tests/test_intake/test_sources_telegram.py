@@ -1,6 +1,7 @@
 """TelegramOps на фейковом клиенте: какой TL-запрос и с чем построен."""
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 from telethon import utils as tg_utils
@@ -475,7 +476,7 @@ class _PagedClient(_Client):
 async def test_discover_builds_broadcast_only_windowed_request():
     client = _PagedClient([_page([_msg(10, 1), _msg(9, 1, 1)], [_dchan(1)])])
     ops, _ = _ops(client)
-    res = await ops.discover("дроны", days=7)
+    res = await ops.discover("дроны", days=7, enrich=False)
     req = client.requests[0]
     assert req.q == "дроны" and req.broadcasts_only is True
     assert isinstance(req.filter, types.InputMessagesFilterEmpty)
@@ -495,7 +496,7 @@ async def test_discover_paginates_with_offsets_from_previous_response():
         _page([_msg(7, 1)], chats),
     ])
     ops, _ = _ops(client)
-    res = await ops.discover("x")
+    res = await ops.discover("x", enrich=False)
     assert len(client.requests) == 3  # третья — пустая страница, конец
     second = client.requests[1]
     assert second.offset_rate == 555 and second.offset_id == 8
@@ -507,11 +508,11 @@ async def test_discover_paginates_with_offsets_from_previous_response():
 
 @pytest.mark.asyncio
 async def test_discover_scan_cap_stops_even_if_more_available():
-    pages = [_page([_msg(100 - i, 1) for i in range(5)], [_dchan(1)], next_rate=i + 1)
-             for i in range(10)]
+    pages = [_page([_msg(1000 - p * 10 - i, 1) for i in range(5)], [_dchan(1)], next_rate=p + 1)
+             for p in range(10)]
     client = _PagedClient(pages)
     ops, _ = _ops(client)
-    res = await ops.discover("x", scan=7)
+    res = await ops.discover("x", scan=7, enrich=False)
     assert res.scanned == 7
     assert len(client.requests) == 2
     assert res.candidates[0].hits == 7
@@ -529,7 +530,7 @@ async def test_discover_drops_junk_and_keeps_unknown_audience():
     msgs.append(_msg(99, 4))
     client = _PagedClient([_page(msgs, chats)])
     ops, _ = _ops(client)
-    res = await ops.discover("x")
+    res = await ops.discover("x", enrich=False)
     assert sorted(d.slug for d in res.candidates) == ["@u", "@unk"]
     unk = next(d for d in res.candidates if d.slug == "@unk")
     assert unk.participants is None
@@ -542,10 +543,10 @@ async def test_discover_ranks_by_active_days_before_hits():
     msgs += [_msg(40 + d, 2, d) for d in range(5)]
     client = _PagedClient([_page(msgs, chats)])
     ops, _ = _ops(client)
-    res = await ops.discover("x", limit=1)
+    res = await ops.discover("x", limit=1, enrich=False)
     assert [d.slug for d in res.candidates] == ["@steady"]
     assert res.candidates[0].active_days == 5
-    full = await _ops(_PagedClient([_page(msgs, chats)]))[0].discover("x")
+    full = await _ops(_PagedClient([_page(msgs, chats)]))[0].discover("x", enrich=False)
     assert [d.slug for d in full.candidates] == ["@steady", "@burst"]
 
 
@@ -556,7 +557,179 @@ async def test_discover_floodwait_returns_partial_result():
         _page([_msg(10, 1), _msg(9, 1)], chats, next_rate=5), _flood(42),
     ])
     ops, lock = _ops(client)
-    res = await ops.discover("x")
+    res = await ops.discover("x", enrich=False)
     assert res.partial is True and res.wait_seconds == 42
     assert [d.slug for d in res.candidates] == ["@u"]
     assert not lock.locked()
+
+
+# ---------- discover: доработка (аудитория, окно, дубли, конец выдачи) ----------
+
+
+def _full(count):
+    return SimpleNamespace(full_chat=SimpleNamespace(participants_count=count))
+
+
+class _EnrichClient(_PagedClient):
+    """Как `_PagedClient`, плюс `GetFullChannelRequest`: ответ по id канала."""
+
+    def __init__(self, pages, full):
+        super().__init__(pages)
+        self.full = full
+        self.full_requests = []
+
+    async def __call__(self, request):
+        if isinstance(request, functions.channels.GetFullChannelRequest):
+            self.calls += 1
+            self.requests.append(request)
+            self.full_requests.append(request.channel.channel_id)
+            out = self.full[request.channel.channel_id]
+            if isinstance(out, Exception):
+                raise out
+            return out
+        return await super().__call__(request)
+
+
+def _unknown_audience_page():
+    chats = [_dchan(1, "big", participants=None), _dchan(2, "small", participants=None)]
+    msgs = [_msg(10 + k, 1, k) for k in range(2)] + [_msg(20 + k, 2, k) for k in range(3)]
+    return _page(msgs, chats)
+
+
+@pytest.mark.asyncio
+async def test_discover_enrichment_fills_audience_and_resorts():
+    client = _EnrichClient([_unknown_audience_page()], {1: _full(9000), 2: _full(700)})
+    ops, _ = _ops(client)
+    res = await ops.discover("x")
+    assert sorted(client.full_requests) == [1, 2]
+    assert {d.slug: d.participants for d in res.candidates} == {"@big": 9000, "@small": 700}
+    # у @small больше дней — выше; перестановка по аудитории проверяется ниже
+    assert [d.slug for d in res.candidates] == ["@small", "@big"]
+
+
+@pytest.mark.asyncio
+async def test_discover_enrichment_resorts_on_audience_tiebreak():
+    chats = [_dchan(1, "a", participants=None), _dchan(2, "b", participants=None)]
+    msgs = [_msg(10, 1), _msg(11, 1), _msg(20, 2), _msg(21, 2)]
+    client = _EnrichClient([_page(msgs, chats)], {1: _full(600), 2: _full(9000)})
+    res = await _ops(client)[0].discover("x")
+    assert [d.slug for d in res.candidates] == ["@b", "@a"]
+
+
+@pytest.mark.asyncio
+async def test_discover_enrichment_failure_of_one_keeps_the_rest():
+    client = _EnrichClient(
+        [_unknown_audience_page()], {1: RuntimeError("private"), 2: _full(700)},
+    )
+    res = await _ops(client)[0].discover("x")
+    got = {d.slug: d.participants for d in res.candidates}
+    assert got == {"@big": None, "@small": 700}
+    assert res.partial is False
+
+
+@pytest.mark.asyncio
+async def test_discover_enrichment_floodwait_is_partial_and_keeps_candidates():
+    client = _EnrichClient([_unknown_audience_page()], {1: _full(9000), 2: _flood(33)})
+    ops, lock = _ops(client)
+    # порядок запросов: сначала @small (больше дней), он и ловит FloodWait
+    res = await ops.discover("x")
+    assert res.partial is True and res.wait_seconds == 33
+    assert sorted(d.slug for d in res.candidates) == ["@big", "@small"]
+    assert client.full_requests == [2]  # на FloodWait остальных не опрашиваем
+    assert all(d.participants is None for d in res.candidates)
+    assert not lock.locked()
+
+
+@pytest.mark.asyncio
+async def test_discover_min_participants_applies_only_to_known_counts():
+    chats = [_dchan(i, n, participants=None) for i, n in ((1, "a"), (2, "b"), (3, "c"))]
+    msgs = [_msg(i * 10 + k, i) for i in (1, 2, 3) for k in (1, 2)]
+    client = _EnrichClient(
+        [_page(msgs, chats)], {1: _full(100), 2: RuntimeError("x"), 3: _full(5000)},
+    )
+    res = await _ops(client)[0].discover("x", min_participants=500)
+    assert sorted(d.slug for d in res.candidates) == ["@b", "@c"]
+    # без обогащения порог по неизвестному числу не режет ничего
+    client2 = _EnrichClient([_page(msgs, chats)], {})
+    res2 = await _ops(client2)[0].discover("x", min_participants=500, enrich=False)
+    assert len(res2.candidates) == 3
+
+
+@pytest.mark.asyncio
+async def test_discover_enrich_false_makes_no_extra_request():
+    client = _EnrichClient([_unknown_audience_page()], {})
+    res = await _ops(client)[0].discover("x", enrich=False)
+    assert client.full_requests == [] and len(res.candidates) == 2
+    assert all(d.participants is None for d in res.candidates)
+
+
+@pytest.mark.asyncio
+async def test_discover_enriches_at_most_limit_candidates():
+    chats = [_dchan(i, f"c{i}", participants=None) for i in range(1, 6)]
+    msgs = [_msg(i * 10 + k, i) for i in range(1, 6) for k in (1, 2)]
+    client = _EnrichClient([_page(msgs, chats)], {i: _full(1000) for i in range(1, 6)})
+    res = await _ops(client)[0].discover("x", limit=2)
+    assert len(res.candidates) == 2 and len(client.full_requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_discover_skips_messages_older_than_window():
+    chats = [_dchan(1, "fresh"), _dchan(2, "stale")]
+    msgs = [_msg(10, 1, 1), _msg(11, 1, 2), _msg(20, 2, 40), _msg(21, 2, 41)]
+    client = _PagedClient([_page(msgs, chats)])
+    res = await _ops(client)[0].discover("x", days=30, enrich=False)
+    assert [(d.slug, d.hits) for d in res.candidates] == [("@fresh", 2)]
+    assert res.scanned == 2  # устаревшие бюджет скана не едят
+
+
+@pytest.mark.asyncio
+async def test_discover_stops_when_page_is_entirely_out_of_window():
+    chats = [_dchan(1)]
+    client = _PagedClient([
+        _page([_msg(10, 1, 40), _msg(9, 1, 41)], chats, next_rate=5),
+        _page([_msg(8, 1, 1), _msg(7, 1, 2)], chats),
+    ])
+    res = await _ops(client)[0].discover("x", days=30, enrich=False)
+    assert len(client.requests) == 1 and res.candidates == []
+
+
+@pytest.mark.asyncio
+async def test_discover_does_not_count_a_message_twice():
+    chats = [_dchan(1)]
+    client = _PagedClient([
+        _page([_msg(10, 1), _msg(9, 1)], chats, next_rate=5),
+        _page([_msg(9, 1), _msg(8, 1)], chats),
+    ])
+    res = await _ops(client)[0].discover("x", enrich=False)
+    assert res.candidates[0].hits == 3 and res.scanned == 3
+
+
+@pytest.mark.asyncio
+async def test_discover_stops_when_response_is_not_a_slice():
+    chats = [_dchan(1)]
+    plain = types.messages.Messages(
+        messages=[_msg(10, 1), _msg(9, 1)], chats=chats, users=[], topics=[],
+    )
+    client = _PagedClient([plain])
+    res = await _ops(client)[0].discover("x", enrich=False)
+    assert len(client.requests) == 1 and res.candidates[0].hits == 2
+
+
+@pytest.mark.asyncio
+async def test_discover_stops_when_count_is_exhausted():
+    chats = [_dchan(1)]
+    page = types.messages.MessagesSlice(
+        messages=[_msg(10, 1), _msg(9, 1)], chats=chats, users=[], count=2,
+        next_rate=5, topics=[],
+    )
+    client = _PagedClient([page])
+    await _ops(client)[0].discover("x", enrich=False)
+    assert len(client.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_discover_ties_break_on_peer_id():
+    chats = [_dchan(2, "two"), _dchan(1, "one")]
+    msgs = [_msg(10, 2), _msg(11, 2), _msg(20, 1), _msg(21, 1)]
+    res = await _ops(_PagedClient([_page(msgs, chats)]))[0].discover("x", enrich=False)
+    assert [d.peer_id for d in res.candidates] == sorted(d.peer_id for d in res.candidates)

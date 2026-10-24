@@ -224,8 +224,16 @@ def build_sources_mcp(
         по сообщениям); `sources_search` ищет по названию. Ранжирование — по числу
         дней с упоминаниями. `partial=true`: скан оборван лимитом запросов
         Telegram (FloodWait, `wait_seconds`), список неполон. `connected` — уже
-        в реестре."""
+        в реестре. Поля кандидата: `hits` — сообщений о теме, `active_days` — дней
+        с упоминаниями, `last_post` — дата последнего, `verified`, `participants` —
+        аудитория (добирается отдельным запросом, может остаться null). Границы:
+        `days` 1..365, `limit` 1..50; пустая тема — пустой ответ."""
         _, repo = await _enter()
+        topic = topic.strip()
+        if not topic:
+            return {"candidates": [], "scanned": 0, "partial": False, "wait_seconds": None}
+        days = max(1, min(days, 365))
+        limit = max(1, min(limit, 50))
         with _translated():
             res = await ops.discover(topic, limit=limit, days=days)
             active = {r.peer_id for r in await repo.list_active()}

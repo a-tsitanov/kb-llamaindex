@@ -74,6 +74,7 @@ class Ops:
     async def discover(self, topic, *, limit=10, days=30, **kw):
         self._f("discover")
         self.discover_args = (topic, limit, days)
+        self.discover_kw = kw
         return DiscoverResult(
             [Discovered(5, "@five", "Five", 100, 4, 3, "2026-10-20", False),
              Discovered(6, "@six", "Six", None, 2, 2, "2026-10-19", True)],
@@ -278,6 +279,19 @@ async def test_discover_partial_says_rate_limited(env):
     out = await env.call("sources_discover", topic="x")
     assert out["partial"] is True and out["wait_seconds"] == 30
     assert "FloodWait" in out["note"]
+
+
+async def test_discover_clamps_days_and_limit(env):
+    await env.call("sources_discover", topic="x", limit=10_000, days=-5)
+    assert env.ops.discover_args == ("x", 50, 1)
+    await env.call("sources_discover", topic="x", limit=0, days=99_999)
+    assert env.ops.discover_args == ("x", 1, 365)
+
+
+async def test_discover_blank_topic_is_empty_and_touches_no_telegram(env):
+    out = await env.call("sources_discover", topic="   ")
+    assert out == {"candidates": [], "scanned": 0, "partial": False, "wait_seconds": None}
+    assert "discover" not in env.log
 
 
 async def test_resolve_unknown_handle_is_none(env):
