@@ -1,6 +1,6 @@
 # Контуры, слои и потоки данных
 
-Как устроено приложение: шесть слоёв, три контура, пять процессов,
+Как устроено приложение: шесть слоёв, три контура, пять видов процессов,
 21 таблица в схеме графа и 5 общих. Этот документ — текстовый источник
 истины; визуальная версия того же — артефакт
 <https://claude.ai/artifact/CC7fm7Mp1DePjHrWbnqanB> (приватный).
@@ -86,7 +86,7 @@
 | `worker` | `python -m src.workflow.worker` | 9 пулов, по процессу на пул (`WORKER_GROUPS` выбирает, какие поднять) |
 | `ingest-consumer` | `python -m src.intake.queue.consumer` | читает очереди приёма с prefetch = K и стартует воркфлоу документа |
 | `mcp-search` / `mcp-tools` / `mcp-stats` | `python -m src.mcp.*_server` | инструменты агента; граф привязан к соединению, параметром инструмента не бывает |
-| MCP источников фидера | внутри процесса `tg-ingest` (`src/intake/sources/mcp_server.py`, порт `TG_SOURCES_MCP_PORT`, только loopback) | управление каналами аккаунта Telegram; живёт в процессе фидера, потому что один токен — один поллер; право `sources` на граф фидера, запись в аккаунт — только по коду подтверждения. См. [`runbook/feeder-sources.md`](runbook/feeder-sources.md) |
+| `tg-ingest` | `python -m scripts.tg_ingest` | фидер Telegram: свип папок аккаунта и `POST /ingest` на каждое сообщение; заносит переименования каналов в реестр. Внутри него же MCP источников (`src/intake/sources/mcp_server.py`, порт `TG_SOURCES_MCP_PORT`, только loopback) — не отдельный процесс: один токен — один поллер; право `sources` на граф фидера, запись в аккаунт — только по коду подтверждения. См. [`runbook/feeder-sources.md`](runbook/feeder-sources.md) |
 
 ### Пулы воркера
 

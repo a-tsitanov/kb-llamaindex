@@ -24,7 +24,9 @@ class _Ops:
     def __init__(
         self, log, flood_on=None, flood_at="join", history=None, no_folder=(),
         leave_fails=False, unfolder_fails=False, folder_gate=None,
+        already_in_folder=False,
     ):
+        self.already_in_folder = already_in_folder  # add_to_folder -> False
         self.log = log
         self.unfolder_fails = unfolder_fails
         self.folder_gate = folder_gate  # asyncio.Event: add_to_folder ждёт его
@@ -50,6 +52,7 @@ class _Ops:
             self.log.append(("folder-wait", peer_id))
             await self.folder_gate.wait()
         self.log.append(("folder", peer_id, folder))
+        return not self.already_in_folder
 
     async def remove_from_folder(self, peer_id, folder):
         self.log.append(("unfolder", peer_id, folder))
@@ -399,10 +402,10 @@ async def test_result_carries_the_highest_bootstrapped_id_per_peer(posts):
     res = await apply_proposal(
         store, ops, repo, p2.id, p2.code, [1, 2, 3], added_by="alice", bootstrap=100,
         http="HTTP", api_base="http://api", api_key="k",
-        on_cursor=lambda peer, last: seen.append((peer, last)),
+        on_cursor=lambda peer, last, title: seen.append((peer, last)),
     )
     assert dict(res.cursors) == {1: 12, 2: 7}
-    assert seen == [(1, 12), (2, 7)]
+    assert seen == [(1, 11), (1, 12), (2, 7)]  # по сообщению, как свип
 
 
 async def test_cursors_default_to_empty_and_skip_peers_without_history(posts):
@@ -428,3 +431,43 @@ async def test_cursor_is_absent_when_the_first_post_failed(posts):
     posts.outcomes["tg_alpha_1.txt"] = FAILED
     res = await _apply(store, ops, repo, p)
     assert dict(res.cursors) == {}
+
+
+async def test_bootstrap_seeds_the_cursor_per_message(posts):
+    _log, store, p, ops, repo = _kit([_item(1, "alpha")])
+    ops.hist[1] = [_Msg(3), _Msg(2, "   "), _Msg(1)]
+    seen = []
+    await apply_proposal(
+        store, ops, repo, p.id, p.code, [1], added_by="a", bootstrap=100,
+        http="H", api_base="http://api", api_key="k",
+        on_cursor=lambda peer, last, title: seen.append((peer, last, title)),
+    )
+    assert seen == [(1, 1, "T1"), (1, 2, "T1"), (1, 3, "T1")]
+
+
+async def test_bootstrap_cursor_callback_skips_the_failed_message_and_after(posts):
+    _log, store, p, ops, repo = _kit([_item(1, "alpha")])
+    ops.hist[1] = [_Msg(4), _Msg(3), _Msg(2), _Msg(1)]
+    posts.outcomes["tg_alpha_3.txt"] = FAILED
+    seen = []
+    await apply_proposal(
+        store, ops, repo, p.id, p.code, [1], added_by="a", bootstrap=100,
+        http="H", api_base="http://api", api_key="k",
+        on_cursor=lambda peer, last, title: seen.append(last),
+    )
+    assert seen == [1, 2]
+
+
+async def test_rollback_keeps_a_folder_membership_it_did_not_create(posts):
+    log, store, p, ops, repo = _kit([_item(1)], already_in_folder=True)
+    repo.fail_on = {1}
+    res = await _apply(store, ops, repo, p)
+    assert res.skipped and ("leave", 1) in log
+    assert not any(c[0] == "unfolder" for c in log)
+
+
+async def test_rollback_removes_a_folder_membership_it_created(posts):
+    log, store, p, ops, repo = _kit([_item(1)])
+    repo.fail_on = {1}
+    await _apply(store, ops, repo, p)
+    assert ("unfolder", 1, "news") in log

@@ -512,7 +512,7 @@ def start_sources_mcp(
                     bootstrap=bootstrap, graph=graph,
                     on_cursor=(
                         None if save is None
-                        else lambda peer, last: seed_cursor(state, save, peer, last)
+                        else lambda peer, last, title: seed_cursor(state, save, peer, last, title)
                     ),
                 ),
                 status=status,
@@ -685,19 +685,21 @@ def main() -> int:
                         )
                         missing_warned = True
                     dialogs = [d for d in dialogs if dialog_in_folders(d, spec)]
-                if mcp_task is not None:  # реестр ведётся, только пока включён MCP
-                    try:
-                        from src.intake.sources.repository import SourceRepository
-                        from src.tenancy.context import DEFAULT_GRAPH_ID, cli_graph_context
+                # Без условия на MCP: /ingest читает реестр для доверия каждого
+                # документа и при выключенном MCP, и переименование без записи
+                # слепило бы доверие уже подключённых каналов навсегда.
+                try:
+                    from src.intake.sources.repository import SourceRepository
+                    from src.tenancy.context import DEFAULT_GRAPH_ID, cli_graph_context
 
-                        await sync_renames(
-                            SourceRepository(
-                                graph=cli_graph_context(args.graph or DEFAULT_GRAPH_ID),
-                            ),
-                            dialogs,
-                        )
-                    except Exception as exc:  # имена — уточнение, а не условие свипа
-                        logger.warning("tg_ingest: имена каналов в реестре не обновлены: {e!r}", e=exc)
+                    await sync_renames(
+                        SourceRepository(
+                            graph=cli_graph_context(args.graph or DEFAULT_GRAPH_ID),
+                        ),
+                        dialogs,
+                    )
+                except Exception as exc:  # имена — уточнение, а не условие свипа
+                    logger.warning("tg_ingest: имена каналов в реестре не обновлены: {e!r}", e=exc)
                 tally = await sync_round(
                     tg,
                     http,

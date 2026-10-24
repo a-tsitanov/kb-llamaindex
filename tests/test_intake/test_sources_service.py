@@ -406,9 +406,25 @@ async def test_leave_leaves_marks_left_and_ignores_ingest(ingest):
     log, store, p, ops, repo = _kit(action=LEAVE)
     repo.rows[1]["trust"] = 0.7
     await leave_source(store, ops, repo, p.id, p.code, 1)
-    assert log == [("leave", 1), ("mark_left", 1)]
+    assert log == [("leave", 1), ("remove_folder", 1, "news"), ("mark_left", 1)]
     assert repo.rows[1]["state"] == "left" and repo.rows[1]["trust"] == 0.7
     assert ingest == [] and _only_account_calls(log) == []
+
+
+async def test_leave_removes_the_channel_from_its_folder(ingest):
+    log, store, p, ops, repo = _kit(action=LEAVE)
+    await leave_source(store, ops, repo, p.id, p.code, 1)
+    assert ("remove_folder", 1, "news") in log
+    assert log.index(("leave", 1)) < log.index(("remove_folder", 1, "news"))
+
+
+@pytest.mark.parametrize(
+    "exc", [FolderNotEditable("x", folder="news"), FolderNotFound("news"), RuntimeError("упало")],
+)
+async def test_leave_survives_a_failed_folder_removal(ingest, exc):
+    log, store, p, ops, repo = _kit(action=LEAVE, fail={"remove_folder": exc})
+    await leave_source(store, ops, repo, p.id, p.code, 1)
+    assert repo.rows[1]["state"] == "left"  # выход не откатывается
 
 
 async def test_leave_telegram_failure_keeps_the_row_active(ingest):
@@ -450,7 +466,7 @@ async def test_leave_unknown_or_left_channel_does_not_burn_the_code(ingest):
             await leave_source(store, ops, repo, p.id, p.code, other)
     assert log == []
     await leave_source(store, ops, repo, p.id, p.code, 1)
-    assert log == [("leave", 1), ("mark_left", 1)]
+    assert log == [("leave", 1), ("remove_folder", 1, "news"), ("mark_left", 1)]
     assert repo.rows[1]["state"] == "left"
 
 

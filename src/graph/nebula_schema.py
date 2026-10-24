@@ -87,11 +87,13 @@ SCHEMA_DDL: list[str] = [
     # belief was retired (0 = never contradicted).  Both are written by
     # src/graph/edge_conflicts.py; the retired belief itself lives in the
     # `fact_supersede` Postgres log, not on the edge.
+    # source_trust намеренно БЕЗ DEFAULT: ребро, у которого доверие не писали,
+    # читается как NULL («неизвестно»), а не как выдуманный 0.0.
     "CREATE EDGE IF NOT EXISTS `RELATED` ("
     "rel_type string DEFAULT '', polarity string DEFAULT '', "
     "valid_from string DEFAULT '', valid_to string DEFAULT '', weight double DEFAULT 1.0, "
     "created_at int DEFAULT 0, first_doc_id string DEFAULT '', "
-    "source_trust double DEFAULT 0.0, superseded_at int DEFAULT 0);",
+    "source_trust double, superseded_at int DEFAULT 0);",
     "CREATE EDGE IF NOT EXISTS `MENTIONS` (doc_id string DEFAULT '');",
     "CREATE EDGE IF NOT EXISTS `IN_COMMUNITY` (level int DEFAULT 0);",
     "CREATE EDGE IF NOT EXISTS `PARENT_OF` ();",
@@ -306,12 +308,15 @@ def ensure_schema(
     )
 
     # 3b-4. RELATED conflict-resolution columns for EXISTING spaces
-    # (source_trust/superseded_at — see edge_conflicts.py).  Pre-existing edges
-    # get source_trust 0.0, i.e. "unknown provenance", so the first trusted
-    # write wins over them; no backfill needed.
+    # (source_trust/superseded_at — see edge_conflicts.py).  Новое пространство
+    # получает source_trust без DEFAULT (NULL = «неизвестно») из CREATE EDGE.
+    # Пространство, где колонка уже создана с DEFAULT 0.0, остаётся как есть:
+    # ALTER ... ADD на существующую колонку падает и глотается (fail-open), а
+    # менять DEFAULT нельзя без ALTER ... CHANGE и перезаписи схемы.  Там рёбра,
+    # написанные до доверия, несут 0.0 и неотличимы от настоящего нуля; бэкфилла нет.
     _execute_with_retry(
         session,
-        "ALTER EDGE `RELATED` ADD (source_trust double DEFAULT 0.0, "
+        "ALTER EDGE `RELATED` ADD (source_trust double, "
         "superseded_at int DEFAULT 0);",
         attempts=1, delay_s=0,
     )

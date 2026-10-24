@@ -69,7 +69,7 @@ class IngestTarget:
     bootstrap: int = 100
     graph: str | None = None
     # (peer_id, last_id): хозяин свипа переносит курсор истории в своё состояние
-    on_cursor: Callable[[int, int], None] | None = None
+    on_cursor: Callable[[int, int, str], None] | None = None
 
 
 def _translate(exc: Exception) -> ToolError | None:

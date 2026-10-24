@@ -216,7 +216,7 @@ async def test_host_wires_the_bootstrap_cursor_into_the_sweep_state(monkeypatch)
     await asyncio.sleep(0)
     await asyncio.sleep(0)
     on_cursor = rec.built[0].kw["ingest"].on_cursor
-    on_cursor(-1001, 42)
+    on_cursor(-1001, 42, "Пять")
     assert state["-1001"]["last_id"] == 42 and saved == [1]
     rec.release.set()
     await task

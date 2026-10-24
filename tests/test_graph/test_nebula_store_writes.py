@@ -267,9 +267,10 @@ def test_upsert_relations_writes_weight_from_properties():
     store.upsert_relations([rel])
     blob = "\n".join(sess.executed)
     assert ("INSERT EDGE `RELATED` (rel_type, polarity, valid_from, valid_to, weight, "
-            "created_at, first_doc_id, source_trust, superseded_at) VALUES") in blob
-    # weight, then created_at=0, first_doc_id="", source_trust=0.0, superseded_at=0
-    assert '7.0, 0, "", 0.0, 0)' in blob
+            "created_at, first_doc_id, superseded_at) VALUES") in blob
+    # weight, then created_at=0, first_doc_id="", superseded_at=0 (доверие неизвестно)
+    assert '7.0, 0, "", 0)' in blob
+    assert "source_trust" not in blob.split("INSERT EDGE `RELATED`")[1]
 
 
 def test_upsert_relations_defaults_weight_to_one_when_absent():
@@ -278,8 +279,8 @@ def test_upsert_relations_defaults_weight_to_one_when_absent():
     rel = SimpleNamespace(source_id="a", target_id="b", label="WORKS_AT", properties={})
     store.upsert_relations([rel])
     blob = "\n".join(sess.executed)
-    # default weight 1.0, then created_at=0, first_doc_id="", trust/supersede zeros
-    assert '1.0, 0, "", 0.0, 0)' in blob
+    # default weight 1.0, then created_at=0, first_doc_id="", supersede zero
+    assert '1.0, 0, "", 0)' in blob
 
 
 def test_upsert_relations_rel_type_is_a_value_not_identifier():
@@ -392,7 +393,7 @@ def test_upsert_relations_batches_into_multi_values_statements(monkeypatch):
     for stmt in inserts:
         assert stmt.startswith(
             "INSERT EDGE `RELATED` (rel_type, polarity, valid_from, valid_to, weight, "
-            "created_at, first_doc_id, source_trust, superseded_at) VALUES "
+            "created_at, first_doc_id, superseded_at) VALUES "
         )
     assert inserts[0].count(" -> ") == 2
     assert inserts[1].count(" -> ") == 2
@@ -468,3 +469,19 @@ def _fail_fetch(orig):
                                    keys=lambda: [], row_size=lambda: 0)
         return orig(stmt, *a, **k)
     return run
+
+
+def test_upsert_relations_known_trust_is_written_unknown_is_not():
+    sess = _FakeSession()
+    store = _store_with_session(sess)
+    known = SimpleNamespace(source_id="a", target_id="b", label="X",
+                            properties={"source_trust": 0.0})
+    unknown = SimpleNamespace(source_id="c", target_id="d", label="X", properties={})
+    store.upsert_relations([known, unknown])
+    inserts = [s for s in sess.executed if s.startswith("INSERT EDGE `RELATED`")]
+    with_trust = [s for s in inserts if "source_trust" in s.split("VALUES")[0]]
+    without = [s for s in inserts if "source_trust" not in s.split("VALUES")[0]]
+    assert len(with_trust) == 1 and len(without) == 1
+    # настоящий записанный 0.0 пишется как есть, неизвестное — не пишется
+    assert '0.0, 0)' in with_trust[0] and entity_vid("a") in with_trust[0]
+    assert entity_vid("c") in without[0] and entity_vid("a") not in without[0]

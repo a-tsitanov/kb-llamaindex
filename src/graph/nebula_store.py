@@ -284,7 +284,7 @@ class NebulaGraphStore:
             def row(
                 r: Any,
                 _preserved: dict[tuple[str, str], tuple[Any, Any, Any, Any]] = preserved,
-            ) -> str:
+            ) -> tuple[bool, str]:
                 rel_type = getattr(r, "label", "") or ""
                 props = getattr(r, "properties", {}) or {}
                 src = entity_vid(getattr(r, "source_id", ""))
@@ -300,14 +300,17 @@ class NebulaGraphStore:
                 # Conflict-resolution columns: written by edge_conflicts.py.
                 # When this batch skipped that pass (fail-open), fall back to
                 # what the edge already carries instead of resetting the trust
-                # that backs the stored belief.
+                # that backs the stored belief.  Доверие НЕИЗВЕСТНО (конфликтный
+                # путь не шёл, на ребре ничего нет) — колонку не пишем вовсе:
+                # выдуманный 0.0 читался бы как «оператор не доверяет».
                 st = props.get("source_trust")
-                if st is None:
-                    st = (prev[2] if prev else 0.0) or 0.0
+                if st is None and prev:
+                    st = prev[2]
                 sa = props.get("superseded_at")
                 if sa is None:
                     sa = (prev[3] if prev else 0) or 0
-                return (
+                trust_sql = "" if st is None else f"{float(st)}, "
+                return st is not None, (
                     f"{_q(src)} -> {_q(tgt)}:("
                     f"{_q(rel_type)}, "
                     f"{_q(props.get('polarity', ''))}, "
@@ -316,18 +319,25 @@ class NebulaGraphStore:
                     f"{_q(props.get('valid_from') or '')}, "
                     f"{_q(props.get('valid_to') or '')}, "
                     f"{float(props.get('weight', 1.0) or 1.0)}, "
-                    f"{ca}, {_q(fdi)}, {float(st)}, {int(sa)})"
+                    f"{ca}, {_q(fdi)}, {trust_sql}{int(sa)})"
                 )
 
-            stmt = (
-                "INSERT EDGE `RELATED` "
-                "(rel_type, polarity, valid_from, valid_to, weight, created_at, first_doc_id, "
-                "source_trust, superseded_at) "
-                "VALUES "
-                + ", ".join(row(r) for r in chunk)
-                + ";"
-            )
-            self._exec(stmt)
+            # Список колонок один на INSERT: рёбра с известным доверием и без
+            # него уходят разными операторами (порядок внутри группы сохранён).
+            rows = [row(r) for r in chunk]
+            for with_trust in (True, False):
+                values = [sql for has, sql in rows if has is with_trust]
+                if not values:
+                    continue
+                cols = (
+                    "rel_type, polarity, valid_from, valid_to, weight, created_at, "
+                    "first_doc_id, "
+                    + ("source_trust, " if with_trust else "")
+                    + "superseded_at"
+                )
+                self._exec(
+                    f"INSERT EDGE `RELATED` ({cols}) VALUES " + ", ".join(values) + ";"
+                )
         return created
 
     # --- raw nGQL (Phase 2 read path builds on this) --------------------

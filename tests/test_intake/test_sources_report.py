@@ -145,7 +145,7 @@ async def test_slugs_matched_case_insensitively(monkeypatch) -> None:
     for sql, _params in cur.sql[2:]:
         if "source_channel" not in sql:
             continue
-        assert "lower(d.source_channel) = ANY" in sql
+        assert "ltrim(lower(d.source_channel), '@') = ANY" in sql
         assert "d.source_channel = ANY" not in sql
     # слаги в параметре: нижний регистр, без «@»; фейк SQL не исполняет
     assert cur.sql[2][1][0] == ["mychan", "old"]

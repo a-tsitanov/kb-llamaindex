@@ -164,6 +164,8 @@ class SourceRepository:
                 "SELECT s.trust FROM source_slug ss "
                 "JOIN source s ON s.peer_id = ss.peer_id "
                 "WHERE ss.slug = %s AND s.state = 'active' "
+                # `ltrim(lower(..), '@')` — SQL-копия правила `channel_key.normalize_slug`
+                # (вторая — `_MINE` в report.py); правишь Python — правь обе.
                 # Слаг освобождают и перехватывают: доверие берём у канала,
                 # который несёт его сейчас, а не у первого попавшегося.
                 "ORDER BY (COALESCE(NULLIF(ltrim(lower(s.slug), '@'), ''), "

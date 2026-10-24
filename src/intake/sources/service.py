@@ -81,7 +81,7 @@ async def apply_proposal(
     api_base: str,
     api_key: str,
     graph: str | None = None,
-    on_cursor: Callable[[int, int], None] | None = None,
+    on_cursor: Callable[[int, int, str], None] | None = None,
 ) -> ApplyResult:
     """Вступить, положить в папку, записать в реестр и подтянуть историю.
 
@@ -96,11 +96,14 @@ async def apply_proposal(
     `bootstrapped` считает документы, принятые приёмом как новые
     (дубликат и сбой в счёт не идут).
 
-    ``cursors`` в результате и ``on_cursor(peer_id, last_id)`` (вызывается
-    сразу после истории канала, до перехода к следующему) называют, докуда
-    дочитана история: фидер переносит это в курсор свипа. Курсор идёт до
-    первого сбоя отправки (свип повторит его с этого сообщения) и включает
-    пустые сообщения и дубликаты, как и курсор свипа.
+    ``cursors`` в результате и ``on_cursor(peer_id, last_id, title)`` называют, докуда
+    дочитана история: фидер переносит это в курсор свипа. ``on_cursor``
+    вызывается ПОСЛЕ КАЖДОГО сообщения (как свип, который двигает ``last_id``
+    и сохраняет состояние на каждом), поэтому раунд свипа, взявший замок
+    посреди истории, видит курсор не дальше одного сообщения от настоящего, а
+    не пустую запись. Курсор идёт до первого сбоя отправки (свип повторит его
+    с этого сообщения) и включает пустые сообщения и дубликаты, как и курсор
+    свипа.
     """
     proposal = store.take(proposal_id, code, CONNECT)
     by_peer = {it.peer_id: it for it in proposal.items}
@@ -134,8 +137,10 @@ async def apply_proposal(
             await ops.join(peer_id)
             joined = True
             logger.info("sources: вступили в {p} ({s})", p=peer_id, s=item.slug)
-            await ops.add_to_folder(peer_id, item.group_name)
-            in_folder = True
+            added_to_folder = await ops.add_to_folder(peer_id, item.group_name)
+            # add_to_folder сам говорит, изменил ли он папку: канал, лежавший там
+            # руками, откат не трогает (как was_in_old в move_source)
+            in_folder = added_to_folder
             await repo.add(
                 peer_id, item.slug, item.title, item.group_name, added_by=added_by,
             )
@@ -178,12 +183,14 @@ async def apply_proposal(
         sent, cursor = await _bootstrap(
             messages, item.slug or str(peer_id), item.group_name,
             http=http, api_base=api_base, api_key=api_key, graph=graph,
+            on_cursor=(
+                None if on_cursor is None
+                else lambda last, _peer=peer_id, _t=item.title: on_cursor(_peer, last, _t)
+            ),
         )
         bootstrapped += sent
         if cursor is not None:
             cursors[peer_id] = cursor
-            if on_cursor is not None:
-                on_cursor(peer_id, cursor)
     return ApplyResult(connected, skipped, bootstrapped, partial, cursors)
 
 
@@ -314,13 +321,27 @@ async def leave_source(
     неизвестный или уже вышедший канал (`LookupError`) — нет.
 
     Строка и уже принятые документы остаются, доверие тоже; приём не
-    вызывается вовсе. Сбой выхода оставляет строку активной. Если выход
+    вызывается вовсе. После выхода канал снимается с папки его группы (best-effort:
+    сбой снятия — предупреждение в логе, выход остаётся в силе). Сбой выхода
+    оставляет строку активной. Если выход
     удался, а реестр не записался, поднимается ошибка реестра: аккаунт уже
     вне канала, строка ещё `active`, повтор вызова потребует нового кода.
     """
-    await _active_row(repo, peer_id)
+    row = await _active_row(repo, peer_id)
     _bind(store.take(proposal_id, code, LEAVE), peer_id)
     await ops.leave(peer_id)
+    # Выход не снимает канал с папки пользователя: без этого папка продолжала
+    # бы его перечислять, а sources_list — показывать «лежит в папке». Снятие
+    # добровольное: сбой пишется в лог, выход не отменяется.
+    try:
+        await ops.remove_from_folder(peer_id, row.group_name)
+    except FolderNotFound:
+        pass  # папки уже нет — снимать не с чего
+    except Exception as exc:
+        logger.warning(
+            "sources: вышли из {p}, но из папки {f!r} он не снят: {e!r}",
+            p=peer_id, f=row.group_name, e=exc,
+        )
     if not await repo.mark_left(peer_id):
         raise SourceNotFound(f"источник {peer_id} пропал из реестра при выходе")
 
@@ -435,13 +456,16 @@ def _flood_reason(exc: FloodWait) -> str:
 async def _bootstrap(
     messages: list[Any], slug: str, group: str,
     *, http: Any, api_base: str, api_key: str, graph: str | None,
+    on_cursor: Callable[[int], None] | None = None,
 ) -> tuple[int, int | None]:
     """Отправить сообщения так же, как свип (`scripts/tg_ingest.py::sync_round`):
     от старых к новым, имя и дата — `message_to_doc`, поля — `ingest_form`
     (`channel` без «@», `group` папки).
 
     Возвращает (принято приёмом новыми, курсор). Курсор — наибольший id среди
-    сообщений до первого сбоя отправки; `None`, если не дошло ни до одного."""
+    сообщений до первого сбоя отправки; `None`, если не дошло ни до одного.
+    ``on_cursor(id)`` вызывается после каждого сообщения, продвинувшего курсор
+    (успех, дубликат, пустое), и никогда — для сбойного и всех после него."""
     sent = 0
     cursor: int | None = None
     failed = False
@@ -450,6 +474,8 @@ async def _bootstrap(
         if doc is None:
             if not failed:
                 cursor = msg.id
+                if on_cursor is not None:
+                    on_cursor(cursor)
             continue
         filename, text, document_date = doc
         res = await post_document(
@@ -462,6 +488,8 @@ async def _bootstrap(
             failed = True  # свип повторит с этого сообщения
         elif not failed:
             cursor = msg.id
+            if on_cursor is not None:
+                on_cursor(cursor)
         if res.outcome == SENT:
             sent += 1
         else:

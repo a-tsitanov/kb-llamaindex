@@ -304,7 +304,8 @@ def test_related_ddl_has_conflict_resolution_columns():
     # source_trust/superseded_at back src/graph/edge_conflicts.py: a fresh space
     # gets them from CREATE EDGE, an existing one from the ALTER below.
     related_ddl = next(s for s in SCHEMA_DDL if "CREATE EDGE IF NOT EXISTS `RELATED`" in s)
-    assert "source_trust double DEFAULT 0.0" in related_ddl
+    assert "source_trust double," in related_ddl
+    assert "source_trust double DEFAULT" not in related_ddl
     assert "superseded_at int DEFAULT 0" in related_ddl
 
 
@@ -312,5 +313,5 @@ def test_ensure_schema_alters_related_with_conflict_columns():
     fake = _FakeSession()
     ensure_schema(fake, _G)
     joined = "\n".join(fake.statements)
-    assert ("ALTER EDGE `RELATED` ADD (source_trust double DEFAULT 0.0, "
+    assert ("ALTER EDGE `RELATED` ADD (source_trust double, "
             "superseded_at int DEFAULT 0);") in joined

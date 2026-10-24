@@ -37,11 +37,14 @@ _STATUS = (
     "THEN 'duplicate' ELSE d.status END)"
 )
 _WINDOW = "d.created_at >= NOW() - make_interval(days => %s)"
-_MINE = "lower(d.source_channel) = ANY(%s)"
+# Правило ключа — `channel_key.normalize_slug` (без «@», в нижнем регистре);
+# это его SQL-копия, и вторая — `ltrim(lower(s.slug), '@')` в repository.py.
+# Менять правило в одном месте нельзя: поправьте Python и обе копии.
+_MINE = "ltrim(lower(d.source_channel), '@') = ANY(%s)"
 
 
 def _forms(slugs: list[str]) -> list[str]:
-    """Слаги для ``lower(d.source_channel) = ANY(%s)``: без ``@``, в нижнем регистре."""
+    """Слаги для ``ltrim(lower(d.source_channel), '@') = ANY(%s)``: без ``@``, в нижнем регистре."""
     return sorted({normalize_slug(s) for s in slugs} - {""})
 
 
