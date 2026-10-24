@@ -422,7 +422,7 @@ async def test_leave_removes_the_channel_from_its_folder(ingest):
     "exc", [FolderNotEditable("x", folder="news"), FolderNotFound("news"), RuntimeError("упало")],
 )
 async def test_leave_survives_a_failed_folder_removal(ingest, exc):
-    log, store, p, ops, repo = _kit(action=LEAVE, fail={"remove_folder": exc})
+    _log, store, p, ops, repo = _kit(action=LEAVE, fail={"remove_folder": exc})
     await leave_source(store, ops, repo, p.id, p.code, 1)
     assert repo.rows[1]["state"] == "left"  # выход не откатывается
 
