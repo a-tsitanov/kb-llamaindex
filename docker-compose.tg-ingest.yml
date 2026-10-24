@@ -39,6 +39,7 @@
 #   TG_SOURCES_MCP_PORT      — port of the sources MCP server INSIDE this process
 #                              (docs/runbook/feeder-sources.md); empty = server off.
 #                              Published on 127.0.0.1 ONLY (never on 0.0.0.0).
+#   TG_SOURCES_BOOTSTRAP     — глубина истории нового канала в sources_apply; default 100
 #   KB_MCP_REQUIRE_AUTH      — as for the mcp-* services; default true.  The sources
 #                              tools refuse every call without a token, so `false`
 #                              turns the server into a closed door, not an open one.
@@ -73,6 +74,9 @@ services:
       # В контейнере слушаем все интерфейсы (иначе docker publish не достучится);
       # наружу порт выходит лишь через публикацию на 127.0.0.1 ниже.
       TG_SOURCES_MCP_HOST: 0.0.0.0
+      # Сколько последних сообщений тянет sources_apply новому каналу; отдельно
+      # от TG_INGEST_BOOTSTRAP_LIMIT (тот — про первый взгляд свипа).
+      TG_SOURCES_BOOTSTRAP: ${TG_SOURCES_BOOTSTRAP:-100}
       KB_MCP_REQUIRE_AUTH: ${KB_MCP_REQUIRE_AUTH:-true}
       # Токен MCP проверяется по public.api_keys, реестр источников и отчёт
       # читают Postgres графа — тем же набором, что у mcp-*.
@@ -112,9 +116,10 @@ services:
     # api not-yet-ready just logs + retries.
     depends_on:
       api: {condition: service_started}
-      # public.api_keys и таблицы графа должны быть мигрированы до первого
-      # вызова MCP (как у mcp-*).
-      init: {condition: service_completed_successfully}
+      # init здесь НЕ ждём: без MCP фидер БД не читает (реестр читается лениво),
+      # а перезапуск tg-ingest не должен гонять миграции. Таблицы source и
+      # source_slug создаёт setup_db, он должен быть выполнен до первого вызова
+      # инструмента (docs/runbook/feeder-sources.md).
     # Deliver SIGINT on `docker stop` → the script's KeyboardInterrupt path
     # logs a clean "stopped by user" (state is saved per-message regardless).
     stop_signal: SIGINT

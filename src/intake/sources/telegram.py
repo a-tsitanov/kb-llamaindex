@@ -42,6 +42,15 @@ def _tl() -> SimpleNamespace:
     )
 
 
+class FolderMembers(set):
+    """Явный состав папки (`peer_id`) и признак `by_category`: папка ещё включает
+    каналы по категории («все каналы» / «все группы»), которых в наборе нет."""
+
+    def __init__(self, ids=(), *, by_category: bool = False) -> None:
+        super().__init__(ids)
+        self.by_category = by_category
+
+
 class Candidate(NamedTuple):
     peer_id: int
     slug: str
@@ -172,8 +181,12 @@ class TelegramOps:
             filters = await self._filters()
         return [t for f in filters if (t := filter_title(f).strip())]
 
-    async def folders_with_members(self) -> dict[str, set[int]]:
+    async def folders_with_members(self) -> dict[str, FolderMembers]:
         """Название папки -> `peer_id` её каналов; фильтры читаются ОДНИМ запросом.
+
+        Папка, собранная по признаку «все каналы» / «все группы», явного
+        состава не имеет: её `FolderMembers.by_category` истинно, и отсутствие
+        канала в наборе значит «неизвестно», а не «нет».
 
         Для листинга: по запросу на каждую группу один FloodWait ронял бы весь
         список. Общий список (chatlist) читается как обычная папка.
@@ -181,7 +194,10 @@ class TelegramOps:
         async with self._guard():
             filters = await self._filters()
         return {
-            t: self._member_ids(f)
+            t: FolderMembers(
+                self._member_ids(f),
+                by_category=bool(getattr(f, "broadcasts", False) or getattr(f, "groups", False)),
+            )
             for f in filters
             if (t := filter_title(f).strip()) and hasattr(f, "include_peers")
         }

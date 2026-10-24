@@ -40,7 +40,7 @@ def _start(env, **over):
     tg, lock = object(), asyncio.Lock()
     kw = dict(
         http=object(), api_base="http://api", api_key="k", graph=None,
-        bootstrap_limit=100, state={}, round_status={}, env=env,
+        state={}, round_status={}, env=env,
     )
     kw.update(over)
     return tg, lock, T.start_sources_mcp(tg, lock, **kw)
@@ -271,3 +271,18 @@ async def test_channel_that_lost_its_username_is_a_rename_too():
     repo = _RenameRepo([_row(-1001, "@five")])
     await T.sync_renames(repo, [_dialog(-1001)])
     assert repo.remembered == [(-1001, "", "")]
+
+
+@pytest.mark.parametrize(("raw", "depth"), [
+    (None, 100), ("", 100), ("0", 0), ("25", 25), ("junk", 100),
+])
+async def test_apply_bootstrap_is_its_own_knob_defaulting_to_100(monkeypatch, raw, depth):
+    rec = _Rec()
+    rec.install(monkeypatch)
+    env = {"TG_SOURCES_MCP_PORT": "9105", "TG_INGEST_BOOTSTRAP_LIMIT": "0"}
+    if raw is not None:
+        env["TG_SOURCES_BOOTSTRAP"] = raw
+    _, _, task = _start(env)
+    await asyncio.sleep(0)
+    assert rec.built[0].kw["ingest"].bootstrap == depth
+    task.cancel()

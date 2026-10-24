@@ -455,7 +455,6 @@ def start_sources_mcp(
     api_base: str,
     api_key: str,
     graph: str | None,
-    bootstrap_limit: int,
     state: dict,
     round_status: dict,
     env: Any = None,
@@ -481,6 +480,15 @@ def start_sources_mcp(
     # по умолчанию только loopback; в контейнере compose задаёт 0.0.0.0, а
     # наружу порт публикуется лишь на 127.0.0.1 хоста
     host = (env.get("TG_SOURCES_MCP_HOST") or "").strip() or "127.0.0.1"
+    # Глубина истории новой подписки — своя, не TG_INGEST_BOOTSTRAP_LIMIT: та
+    # настроена под первый взгляд свипа (0 = ничего не тянуть), а спека обещает
+    # подписке 100 последних сообщений.
+    raw_depth = (env.get("TG_SOURCES_BOOTSTRAP") or "").strip()
+    try:
+        bootstrap = int(raw_depth) if raw_depth else 100
+    except ValueError:
+        logger.error("tg_ingest: TG_SOURCES_BOOTSTRAP={p!r} не число — берём 100", p=raw_depth)
+        bootstrap = 100
 
     async def _host() -> None:
         try:
@@ -501,7 +509,7 @@ def start_sources_mcp(
                 graph or DEFAULT_GRAPH_ID,
                 ingest=mcp_server.IngestTarget(
                     http=http, api_base=api_base, api_key=api_key,
-                    bootstrap=bootstrap_limit, graph=graph,
+                    bootstrap=bootstrap, graph=graph,
                     on_cursor=(
                         None if save is None
                         else lambda peer, last: seed_cursor(state, save, peer, last)
@@ -652,7 +660,7 @@ def main() -> int:
             round_status: dict = {"last_round": None}
             mcp_task = start_sources_mcp(
                 tg, lock, http=http, api_base=args.api_base, api_key=args.api_key,
-                graph=args.graph, bootstrap_limit=args.bootstrap_limit,
+                graph=args.graph,
                 state=state, round_status=round_status,
                 save=lambda: save_state(state_path, state),
             )
@@ -718,6 +726,9 @@ def main() -> int:
             finally:
                 if mcp_task is not None:
                     mcp_task.cancel()
+                    # дождаться отмены: иначе --once выходит с «Task was destroyed
+                    # but it is pending»
+                    await asyncio.gather(mcp_task, return_exceptions=True)
 
     async def _run_reingest() -> int:
         import httpx

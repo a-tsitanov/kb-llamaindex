@@ -110,15 +110,6 @@ class SourceRepository:
     async def get(self, peer_id: int) -> SourceRow | None:
         return await self._one("peer_id = %s", peer_id)
 
-    async def by_slug(self, slug: str) -> SourceRow | None:
-        """Источник по ТЕКУЩЕМУ слагу (``source.slug``), не по историческим."""
-        # Слаг в source не уникален: порядок делает выбор детерминированным
-        # (действующий канал, затем самый поздно подключённый).
-        return await self._one(
-            "slug = %s", slug,
-            " ORDER BY (state = 'active') DESC, added_at DESC, peer_id DESC LIMIT 1",
-        )
-
     async def list_active(self) -> list[SourceRow]:
         async with self._conn() as conn, conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
@@ -182,15 +173,6 @@ class SourceRepository:
             )
             row = await cur.fetchone()
         return row[0] if row else None
-
-    async def slugs_of(self, peer_id: int) -> list[str]:
-        async with self._conn() as conn, conn.cursor() as cur:
-            await cur.execute(
-                "SELECT slug FROM source_slug WHERE peer_id = %s ORDER BY slug",
-                (peer_id,),
-            )
-            rows = await cur.fetchall()
-        return [r[0] for r in rows]
 
     async def remember_slug(
         self, peer_id: int, slug: str, *, display: str | None = None,

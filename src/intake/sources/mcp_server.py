@@ -138,6 +138,16 @@ def _row(r: SourceRow) -> dict[str, Any]:
     }
 
 
+def _in_folder(peer_id: int, members: set[int] | None) -> bool | None:
+    """True — канал в явном составе папки; None — состав неизвестен (папка
+    собрана по категории и канала в явном списке нет); False — его там нет."""
+    if members is not None and peer_id in members:
+        return True
+    if members is not None and getattr(members, "by_category", False):
+        return None
+    return False
+
+
 def build_sources_mcp(
     ops: TelegramOps,
     repo_factory: Callable[[Any], SourceRepository],
@@ -177,7 +187,10 @@ def build_sources_mcp(
     @mcp.tool
     async def sources_list() -> dict[str, Any]:
         """Подключённые каналы: группа, доверие и `in_folder` — лежит ли канал
-        в своей папке Telegram прямо сейчас (False = расхождение: убрали руками)."""
+        в своей папке Telegram прямо сейчас: true; false = расхождение (убрали
+        руками); null = неизвестно (папка включает каналы по признаку «все каналы» /
+        «все группы», канала в её явном списке нет, но она могла взять его
+        по категории)."""
         _, repo = await _enter()
         with _translated():
             rows = await repo.list_active()
@@ -187,8 +200,8 @@ def build_sources_mcp(
             folders = list(by_folder)
             return {
                 "sources": [
-                    {**_row(r), "in_folder": r.peer_id in members.get(
-                        r.group_name.strip().casefold(), set())}
+                    {**_row(r), "in_folder": _in_folder(
+                        r.peer_id, members.get(r.group_name.strip().casefold()))}
                     for r in rows
                 ],
                 "folders": folders,
@@ -295,13 +308,21 @@ def build_sources_mcp(
         """Переложить канал в папку, одобренную в предложении `move`, по коду."""
         _, repo = await _enter()
         with _translated():
-            approved = approved_moves.pop(proposal_id, None)
+            # Одобрение читается, а не вынимается: move_source берёт код только
+            # после проверок папки и реестра, и безопасный отказ не должен
+            # стоить одобрения. Снимаем его, когда предложения больше нет.
+            approved = approved_moves.get(proposal_id)
             if approved is None or peer_id not in approved:
                 # погасить предложение и отказать единым BadProposal
                 store.take(proposal_id, code, MOVE)
                 raise BadProposal("предложения нет, оно просрочено или не для этого канала")
             folder = approved[peer_id]
-            await move_source(store, ops, repo, proposal_id, code, peer_id, folder)
+            try:
+                await move_source(store, ops, repo, proposal_id, code, peer_id, folder)
+            finally:
+                # код взят (удачно или BadProposal) — предложение погашено
+                if not store.is_live(proposal_id):
+                    approved_moves.pop(proposal_id, None)
             return {"moved": True, "peer_id": peer_id, "folder": folder}
 
     @mcp.tool

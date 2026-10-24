@@ -90,14 +90,11 @@ async def test_add_is_an_upsert_that_reactivates_a_left_channel(monkeypatch, rep
     assert "note" not in q.split("DO UPDATE")[1]
 
 
-async def test_get_and_by_slug(monkeypatch, repo):
+async def test_get_reads_by_peer_id(monkeypatch, repo):
     conn = _patch(monkeypatch, [_row()])
     got = await repo.get(7)
     assert isinstance(got, SourceRow) and got.slug == "news"
     assert "WHERE peer_id = %s" in conn.cur.sql[0][0]
-    await repo.by_slug("news")
-    assert "WHERE slug = %s" in conn.cur.sql[1][0]
-    assert conn.cur.sql[1][1] == ("news",)
 
 
 async def test_get_missing_is_none(monkeypatch, repo):
@@ -152,11 +149,6 @@ async def test_trust_for_channel_none_when_trust_unset(monkeypatch, repo):
     assert await repo.trust_for_channel("news") is None
 
 
-async def test_slugs_of(monkeypatch, repo):
-    _patch(monkeypatch, [("a",), ("b",)])
-    assert await repo.slugs_of(7) == ["a", "b"]
-
-
 async def test_remember_slug_is_idempotent(monkeypatch, repo):
     conn = _patch(monkeypatch)
     await repo.remember_slug(7, "new")
@@ -185,16 +177,6 @@ async def test_trust_for_channel_renamed_channel_found_by_old_slug(monkeypatch, 
     q = conn.cur.sql[0][0]
     assert "WHERE ss.slug = %s" in q and "s.state = 'active'" in q
     assert "WHERE s.slug" not in q
-
-
-async def test_by_slug_is_deterministic_when_slug_is_shared(monkeypatch, repo):
-    conn = _patch(monkeypatch, [_row()])
-    await repo.by_slug("taken")
-    q, p = conn.cur.sql[0]
-    assert "WHERE slug = %s" in q and p == ("taken",)
-    order = _order_by(q)
-    assert order.startswith("(state = 'active') DESC")
-    assert "added_at DESC" in order and "peer_id DESC" in order
 
 
 @pytest.mark.parametrize(

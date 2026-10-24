@@ -71,7 +71,9 @@ class ProposalStore:
             raise SourceInputError(f"действие {action!r} не из {sorted(ACTIONS)}")
         if not items:
             raise SourceInputError("пустое предложение")
-        for it in items:
+        # Группа значима только там, где её выбирают (подключение, перенос); при
+        # выходе она берётся из строки реестра, а та могла уйти из набора.
+        for it in items if action != LEAVE else ():
             if it.group_name not in GROUP_SET:
                 raise SourceInputError(
                     f"группа {it.group_name!r} не из {sorted(GROUP_SET)}"

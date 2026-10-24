@@ -378,6 +378,19 @@ async def test_folders_with_members_reads_filters_once():
 
 
 @pytest.mark.asyncio
+async def test_folders_with_members_flags_category_folders():
+    flagged = _folder(2, "news", include=[10])
+    flagged.broadcasts = True
+    client = _Client({functions.messages.GetDialogFiltersRequest: [
+        flagged, _folder(3, "digest", include=[11]),
+    ]})
+    ops, _ = _ops(client)
+    out = await ops.folders_with_members()
+    assert out["news"] == {_pid(10)} and out["news"].by_category is True
+    assert out["digest"].by_category is False
+
+
+@pytest.mark.asyncio
 async def test_folders_with_members_floodwait_and_lock():
     ops, _ = _ops(_Client(dict(_FLOOD_RESPONSES)))
     with pytest.raises(FloodWait):

@@ -9,6 +9,7 @@ from src.intake.sources.proposals import (
     BadProposal,
     ProposalItem,
     ProposalStore,
+    SourceInputError,
 )
 
 
@@ -120,3 +121,15 @@ def test_mismatched_action_is_rejected_and_burns_the_proposal():
     # код, нацеленный на чужое действие, — злоупотребление: предложение погашено
     with pytest.raises(BadProposal):
         store.take(p.id, p.code, CONNECT)
+
+
+def test_leave_does_not_validate_the_group():
+    store = ProposalStore()
+    assert store.create([ProposalItem(1, "@a", "A", "drifted")], LEAVE).action == LEAVE
+
+
+def test_connect_and_move_still_validate_the_group():
+    store = ProposalStore()
+    for action in (CONNECT, MOVE):
+        with pytest.raises(SourceInputError):
+            store.create([ProposalItem(1, "@a", "A", "drifted")], action)

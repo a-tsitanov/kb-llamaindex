@@ -554,3 +554,60 @@ async def test_feeder_status_marks_folders_stale_after_a_timeout(monkeypatch):
     finally:
         lock.release()
     assert out["folders"] == ["news", "digest"] and out["folders_state"] == "stale"
+
+
+async def test_move_refused_before_the_code_keeps_the_approval_and_a_retry_succeeds(monkeypatch):
+    approved: dict = {}
+    e = Env(monkeypatch, approved_moves=approved)
+    e.repo.seed(7, "news")
+    p = await e.call(
+        "sources_propose", action="move", channels=[{"peer_id": 7, "group": "digest"}],
+    )
+    # канал ушёл руками между предложением и переносом: отказ до кода
+    e.repo.rows[7].state = "left"
+    with pytest.raises(ToolError):
+        await e.call("source_move", proposal_id=p["proposal_id"], code=p["code"], peer_id=7)
+    assert p["proposal_id"] in approved and e.store.is_live(p["proposal_id"])
+    e.repo.rows[7].state = "active"
+    res = await e.call("source_move", proposal_id=p["proposal_id"], code=p["code"], peer_id=7)
+    assert res["folder"] == "digest"
+    assert approved == {}
+
+
+async def test_move_with_wrong_code_drops_the_approval_with_the_proposal(monkeypatch):
+    approved: dict = {}
+    e = Env(monkeypatch, approved_moves=approved)
+    e.repo.seed(7, "news")
+    p = await e.call(
+        "sources_propose", action="move", channels=[{"peer_id": 7, "group": "digest"}],
+    )
+    with pytest.raises(ToolError, match="код"):
+        await e.call("source_move", proposal_id=p["proposal_id"], code="WRONG1", peer_id=7)
+    assert approved == {}
+
+
+async def test_sources_list_folder_built_on_category_flag_is_unknown_not_false(monkeypatch):
+    from src.intake.sources.telegram import FolderMembers
+
+    e = Env(monkeypatch)
+
+    async def members():
+        return {
+            "news": FolderMembers({1}, by_category=True),
+            "digest": FolderMembers(set()),
+        }
+
+    e.ops.folders_with_members = members
+    e.repo.seed(1, "news")      # явно в папке
+    e.repo.seed(2, "news")      # папка «все каналы»: по составу не ответить
+    e.repo.seed(3, "digest")    # обычная папка без канала
+    out = await e.call("sources_list")
+    by = {s["peer_id"]: s["in_folder"] for s in out["sources"]}
+    assert by == {1: True, 2: None, 3: False}
+
+
+async def test_channel_with_out_of_set_group_can_still_be_proposed_for_leaving(env):
+    env.repo.seed(7, "drifted")
+    p = await env.call("sources_propose", action="leave", channels=[{"peer_id": 7}])
+    res = await env.call("source_leave", proposal_id=p["proposal_id"], code=p["code"], peer_id=7)
+    assert res == {"left": True, "peer_id": 7}

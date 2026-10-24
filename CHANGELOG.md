@@ -24,9 +24,29 @@ loosely (Added / Changed / Fixed / Notes per stage).
   `asyncio.Lock` на раунд свипа и инструменты; падение сервера логируется и
   свип продолжается. Без порта сервер не поднимается, поведение прежнее.
 - `docker-compose.tg-ingest.yml`: порт публикуется только на `127.0.0.1`,
-  `KB_MCP_REQUIRE_AUTH` как у `mcp-*`, Postgres-окружение, `init` в
-  `depends_on`.
+  `KB_MCP_REQUIRE_AUTH` как у `mcp-*`, Postgres-окружение,
+  `TG_SOURCES_BOOTSTRAP` (глубина истории нового канала, по умолчанию 100;
+  не зависит от `TG_INGEST_BOOTSTRAP_LIMIT`). Зависимости от `init` у
+  `tg-ingest` нет: без MCP фидер базу не читает, перезапуск миграций не гоняет.
 - Runbook `docs/runbook/feeder-sources.md`.
+- **Две новые таблицы графа: `source` и `source_slug`** (`src/storage/pg_schema.py`).
+  Их создаёт `setup_db`: до первого вызова инструмента нужно выполнить
+  `uv run python -m scripts.setup_db` (в стеке это делает сервис `init`).
+  Пустой реестр = прежнее поведение системы.
+- **Новое право ключа `sources`** (`Action.SOURCES`). `_FULL_SCOPES_SQL` в
+  `scripts/setup_db.py` теперь включает его, поэтому на свежей базе легаси-ключи
+  из `API_KEYS` (`legacy-env`) получают `sources` сразу. На уже существующей
+  базе их права не пересматриваются (маркер `authz_grandfather_v1`, вставка
+  `ON CONFLICT DO NOTHING`): нужен новый ключ
+  `scripts.tenant_admin key ... --scopes sources`. Подробности — в runbook.
+- **Изменён контракт `IngestParams` / `Ctx` / `trust_for`**: у `IngestParams` и
+  `Ctx` появились `channel` и `channel_trust` (личное доверие, снятое на
+  приёме), `trust_for(group, channel_trust=None)` предпочитает личное число
+  групповому. Это меняет запись графа: при противоречии побеждает большее
+  доверие, у ребра без записанного доверия сравнение идёт с
+  `SIGNALS_SOURCE_TRUST_DEFAULT`, а не с нулём. Доверие действует только вперёд.
+- `telethon` добавлен в extra `dev` (`pyproject.toml`), чтобы тесты фидера
+  шли без extra `tg`.
 
 ### Notes
 - Доверие действует только вперёд: записанные связи не перештамповываются.
