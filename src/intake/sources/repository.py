@@ -14,6 +14,7 @@ from typing import Any, NamedTuple
 import psycopg
 from psycopg.rows import dict_row
 
+from src.intake.sources.channel_key import channel_key, normalize_slug
 from src.storage.pg_scope import graph_connection, search_path_sql
 from src.tenancy.context import GraphContext
 
@@ -71,7 +72,10 @@ class SourceRepository:
         должно молча стирать настроенное.
 
         Строка источника и строка слага пишутся одной транзакцией: канал
-        без слага в истории не нашёл бы свои документы в отчёте.
+        без слага в истории не нашёл бы свои документы в отчёте.  В
+        ``source.slug`` остаётся имя как его дал телеграм (``@Five``), а в
+        ``source_slug`` пишется ключ (``channel_key``): так же называет канал
+        фидер в ``documents.source_channel``.
         """
         async with self._conn() as conn:
             async with conn.cursor() as cur:
@@ -89,7 +93,7 @@ class SourceRepository:
                 await cur.execute(
                     "INSERT INTO source_slug (peer_id, slug) VALUES (%s, %s) "
                     "ON CONFLICT DO NOTHING",
-                    (peer_id, slug),
+                    (peer_id, channel_key(slug, peer_id)),
                 )
             await conn.commit()
 
@@ -158,7 +162,12 @@ class SourceRepository:
         Идёт через ``source_slug``: документ записан под слагом на момент
         приёма, а канал мог уже сменить имя.  Покинутый канал и неизвестный
         слаг дают None — вызывающий откатывается к групповому доверию.
+        ``slug`` — как в документе (без «@»); к ключу его приводит
+        ``normalize_slug``, регистр и «@» значения не имеют.
         """
+        key = normalize_slug(slug)
+        if not key:
+            return None
         async with self._conn() as conn, conn.cursor() as cur:
             await cur.execute(
                 "SELECT s.trust FROM source_slug ss "
@@ -166,9 +175,10 @@ class SourceRepository:
                 "WHERE ss.slug = %s AND s.state = 'active' "
                 # Слаг освобождают и перехватывают: доверие берём у канала,
                 # который несёт его сейчас, а не у первого попавшегося.
-                "ORDER BY (s.slug = ss.slug) DESC, ss.seen_at DESC, "
+                "ORDER BY (COALESCE(NULLIF(ltrim(lower(s.slug), '@'), ''), "
+                "s.peer_id::text) = ss.slug) DESC, ss.seen_at DESC, "
                 "s.peer_id DESC LIMIT 1",
-                (slug,),
+                (key,),
             )
             row = await cur.fetchone()
         return row[0] if row else None
@@ -182,13 +192,24 @@ class SourceRepository:
             rows = await cur.fetchall()
         return [r[0] for r in rows]
 
-    async def remember_slug(self, peer_id: int, slug: str) -> None:
-        """Записать слаг в историю канала; повтор не ошибка."""
+    async def remember_slug(
+        self, peer_id: int, slug: str, *, display: str | None = None,
+    ) -> None:
+        """Записать ключ слага в историю канала; повтор не ошибка.
+
+        ``display`` — новое человеческое имя: если оно дано, ``source.slug``
+        обновляется в той же транзакции (канал переименовали).
+        """
         async with self._conn() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
                     "INSERT INTO source_slug (peer_id, slug) VALUES (%s, %s) "
                     "ON CONFLICT DO NOTHING",
-                    (peer_id, slug),
+                    (peer_id, channel_key(slug, peer_id)),
                 )
+                if display is not None:
+                    await cur.execute(
+                        "UPDATE source SET slug = %s WHERE peer_id = %s",
+                        (display, peer_id),
+                    )
             await conn.commit()

@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from src.intake.sources import repository as repo_mod
+from src.intake.sources.channel_key import normalize_slug
 from src.intake.sources.repository import SourceRepository, SourceRow
 from src.tenancy.context import default_graph_context
 
@@ -173,7 +174,7 @@ async def test_trust_for_channel_prefers_current_owner_of_the_slug(monkeypatch, 
     conn = _patch(monkeypatch, [(0.3,)])
     await repo.trust_for_channel("taken")
     order = _order_by(conn.cur.sql[0][0])
-    assert order.startswith("(s.slug = ss.slug) DESC")
+    assert order.startswith("(COALESCE(NULLIF(ltrim(lower(s.slug), '@'), ''), s.peer_id::text) = ss.slug) DESC")
     assert "ss.seen_at DESC" in order and "s.peer_id DESC" in order
 
 
@@ -194,3 +195,35 @@ async def test_by_slug_is_deterministic_when_slug_is_shared(monkeypatch, repo):
     order = _order_by(q)
     assert order.startswith("(state = 'active') DESC")
     assert "added_at DESC" in order and "peer_id DESC" in order
+
+
+@pytest.mark.parametrize(
+    "slug,expected",
+    [("@Five", "five"), ("five", "five"), ("FIVE", "five"), ("", "-1007")],
+)
+async def test_registry_key_equals_the_key_of_what_the_feeder_posts(
+    monkeypatch, repo, slug, expected,
+):
+    """Круг: ключ в source_slug == ключ того, что фидер кладёт в ``channel``."""
+    conn = _patch(monkeypatch, [(0.9,)])
+    await repo.add(-1007, slug, "Five", "g", added_by="me")
+    (_q1, p1), (_q2, p2) = conn.cur.sql
+    assert p1[1] == slug  # человеческое имя остаётся в source.slug
+    stored_key = p2[1]
+    assert stored_key == expected
+    # так фидер называет канал в документах: слаг без «@», иначе peer_id
+    posted_channel = (slug or str(-1007)).lstrip("@")
+    assert normalize_slug(posted_channel) == stored_key
+    # доверие по «голой» форме документа находит строку
+    conn.cur.sql.clear()
+    assert await repo.trust_for_channel(posted_channel) == 0.9
+    assert conn.cur.sql[0][1] == (stored_key,)
+
+
+async def test_remember_slug_stores_the_key_and_can_rename_the_display(monkeypatch, repo):
+    conn = _patch(monkeypatch)
+    await repo.remember_slug(7, "@NewName", display="@NewName")
+    (_q1, p1), (q2, p2) = conn.cur.sql
+    assert p1 == (7, "newname")
+    assert "UPDATE source SET slug" in q2 and p2 == ("@NewName", 7)
+    assert conn.commits == 1

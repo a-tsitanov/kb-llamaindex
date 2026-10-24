@@ -63,6 +63,7 @@ from loguru import logger
 
 from src.intake.client import DUPLICATE, FAILED, SENT, post_document
 from src.intake.queue.priorities import PRIO_BACKFILL
+from src.intake.sources.channel_key import normalize_slug
 from src.intake.sources.folders import (
     dialog_slug,
     filter_title,
@@ -210,12 +211,12 @@ async def reingest_channels(
     получило бы 409, то есть режим стал бы молчаливым no-op'ом.  `version`
     воспроизводит дорасщепленческое поведение дословно (новый doc_id, новый
     комплект чанков) плюс ссылка ``duplicate_of`` на первый документ."""
-    by_slug = {dialog_slug(d).lstrip("@").casefold(): d for d in dialogs}
+    by_slug = {normalize_slug(dialog_slug(d)): d for d in dialogs}
     by_id = {str(d.id): d for d in dialogs}
     tally: Counter = Counter()
     errors: list[str] = []
     for token in channels:
-        dialog = by_slug.get(token.lstrip("@").casefold()) or by_id.get(token)
+        dialog = by_slug.get(normalize_slug(token)) or by_id.get(token)
         if dialog is None:
             errors.append(f"{token}: not found among account dialogs")
             continue

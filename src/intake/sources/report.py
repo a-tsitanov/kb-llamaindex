@@ -25,6 +25,7 @@ from typing import Any
 
 from psycopg.rows import dict_row
 
+from src.intake.sources.channel_key import normalize_slug
 from src.storage.pg_scope import graph_connection
 from src.tenancy.context import GraphContext
 
@@ -41,7 +42,7 @@ _MINE = "lower(d.source_channel) = ANY(%s)"
 
 def _forms(slugs: list[str]) -> list[str]:
     """Слаги для ``lower(d.source_channel) = ANY(%s)``: без ``@``, в нижнем регистре."""
-    return sorted({s.lstrip("@").casefold() for s in slugs} - {""})
+    return sorted({normalize_slug(s) for s in slugs} - {""})
 
 
 def _ratio(a: int, b: int) -> float:
