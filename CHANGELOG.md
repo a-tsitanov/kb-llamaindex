@@ -62,6 +62,15 @@ loosely (Added / Changed / Fixed / Notes per stage).
 - `telethon` добавлен в extra `dev` (`pyproject.toml`), чтобы тесты фидера
   шли без extra `tg`.
 
+- **`sources_discover(topic, limit, days)`** (одиннадцатый инструмент) и
+  `TelegramOps.discover`: тематический поиск каналов по сообщениям за окно
+  (`messages.SearchGlobalRequest`, `broadcasts_only`), агрегат по каналу
+  (`hits`, `active_days`, `last_post`), отсев scam/fake/restricted, каналов без
+  username, с малым числом попаданий и известной аудиторией ниже порога;
+  ранжирование по числу дней с упоминаниями. `FloodWait` не бросается: ответ
+  частичный (`partial`, `wait_seconds`). `sources_search` по-прежнему ищет по
+  названию.
+
 ### Notes
 - Доверие действует только вперёд: записанные связи не перештамповываются.
 - Папки агент не создаёт; допустимые группы — `GROUP_SET`.

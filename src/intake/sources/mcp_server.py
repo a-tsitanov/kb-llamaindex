@@ -219,6 +219,33 @@ def build_sources_mcp(
             ]}
 
     @mcp.tool
+    async def sources_discover(topic: str, limit: int = 10, days: int = 30) -> dict[str, Any]:
+        """Каналы по тому, ЧТО они пишут о теме за `days` дней (глобальный поиск
+        по сообщениям); `sources_search` ищет по названию. Ранжирование — по числу
+        дней с упоминаниями. `partial=true`: скан оборван лимитом запросов
+        Telegram (FloodWait, `wait_seconds`), список неполон. `connected` — уже
+        в реестре."""
+        _, repo = await _enter()
+        with _translated():
+            res = await ops.discover(topic, limit=limit, days=days)
+            active = {r.peer_id for r in await repo.list_active()}
+            out: dict[str, Any] = {
+                "candidates": [
+                    {**d._asdict(), "connected": d.peer_id in active}
+                    for d in res.candidates
+                ],
+                "scanned": res.scanned,
+                "partial": res.partial,
+                "wait_seconds": res.wait_seconds,
+            }
+            if res.partial:
+                out["note"] = (
+                    "скан оборван лимитом запросов Telegram (FloodWait): "
+                    "список неполон, повторите позже"
+                )
+            return out
+
+    @mcp.tool
     async def sources_resolve(handle: str) -> dict[str, Any]:
         """Канал по `@слагу` или ссылке t.me; `candidate: null` — не найден."""
         _, repo = await _enter()

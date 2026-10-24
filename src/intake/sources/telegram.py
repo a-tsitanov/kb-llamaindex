@@ -13,6 +13,7 @@ import asyncio
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from functools import cache
 from types import SimpleNamespace
 from typing import Any, NamedTuple
@@ -57,6 +58,26 @@ class Candidate(NamedTuple):
     title: str
     participants: int | None
     public: bool
+
+
+class Discovered(NamedTuple):
+    """Канал, найденный по тому, о чём он пишет (а не по названию)."""
+
+    peer_id: int
+    slug: str
+    title: str
+    participants: int | None
+    hits: int
+    active_days: int
+    last_post: str
+    verified: bool
+
+
+class DiscoverResult(NamedTuple):
+    candidates: list[Discovered]
+    scanned: int
+    partial: bool
+    wait_seconds: int | None
 
 
 class FloodWait(RuntimeError):
@@ -144,6 +165,95 @@ class TelegramOps:
             res = await self._client(_tl().functions.contacts.SearchRequest(q=query, limit=limit))
         found = [_candidate(c) for c in res.chats if _is_public_channel(c)]
         return found[:limit]
+
+    async def discover(
+        self, topic: str, *, limit: int = 10, days: int = 30, scan: int = 300,
+        min_hits: int = 2, min_participants: int = 500,
+    ) -> DiscoverResult:
+        """Каналы, которые ПИШУТ о теме за последние `days` дней.
+
+        Глобальный поиск по сообщениям (только каналы-вещание): сообщения
+        группируются по каналу, ранжирование — по числу различных дней с
+        упоминаниями (регулярность), затем по числу сообщений и аудитории.
+        `FloodWait` наружу не летит: поиск только читает, частичный ответ
+        полезен — он отдаётся с `partial=True` и `wait_seconds`.
+        """
+        tl = _tl()
+        min_date = datetime.now(UTC) - timedelta(days=days)
+        stats: dict[int, dict[str, Any]] = {}
+        chats: dict[int, Any] = {}
+        seen = 0
+        partial = False
+        wait: int | None = None
+        rate, peer, msg_id = 0, tl.types.InputPeerEmpty(), 0
+        while seen < scan:
+            request = tl.functions.messages.SearchGlobalRequest(
+                q=topic, filter=tl.types.InputMessagesFilterEmpty(),
+                min_date=min_date, max_date=None, offset_rate=rate,
+                offset_peer=peer, offset_id=msg_id, limit=min(100, scan - seen),
+                broadcasts_only=True,
+            )
+            try:
+                async with self._guard():
+                    res = await self._client(request)
+            except FloodWait as exc:
+                partial, wait = True, exc.seconds
+                break
+            msgs = [m for m in getattr(res, "messages", []) if getattr(m, "date", None)]
+            if not msgs:
+                break
+            for c in getattr(res, "chats", []):
+                chats[c.id] = c
+            for m in msgs[: scan - seen]:
+                cid = getattr(m.peer_id, "channel_id", None)
+                if cid is None:
+                    continue
+                st = stats.setdefault(cid, {"hits": 0, "days": set(), "last": None})
+                st["hits"] += 1
+                day = m.date.astimezone(UTC)
+                st["days"].add(day.date())
+                if st["last"] is None or day > st["last"]:
+                    st["last"] = day
+            seen += min(len(msgs), scan - seen)
+            last = msgs[-1]
+            next_rate = getattr(res, "next_rate", None)
+            last_cid = getattr(last.peer_id, "channel_id", None)
+            holder = chats.get(last_cid)
+            next_peer = (
+                tl.types.InputPeerChannel(last_cid, holder.access_hash)
+                if holder is not None and hasattr(holder, "access_hash")
+                else tl.types.InputPeerEmpty()
+            )
+            nxt = (next_rate if next_rate is not None else rate, next_peer, last.id)
+            if nxt[0] == rate and nxt[2] == msg_id and nxt[1] == peer:
+                break  # смещения не сдвинулись: страница та же
+            rate, peer, msg_id = nxt
+        found: list[Discovered] = []
+        for cid, st in stats.items():
+            chat = chats.get(cid)
+            if chat is None or not getattr(chat, "broadcast", False):
+                continue
+            if not getattr(chat, "username", None):
+                continue
+            if any(getattr(chat, f, False) for f in ("scam", "fake", "restricted")):
+                continue
+            if st["hits"] < min_hits:
+                continue
+            count = getattr(chat, "participants_count", None)
+            if count is not None and count < min_participants:
+                continue
+            found.append(Discovered(
+                peer_id=tl.tg_utils.get_peer_id(chat),
+                slug=f"@{chat.username}",
+                title=getattr(chat, "title", "") or "",
+                participants=count,
+                hits=st["hits"],
+                active_days=len(st["days"]),
+                last_post=st["last"].date().isoformat() if st["last"] else "",
+                verified=bool(getattr(chat, "verified", False)),
+            ))
+        found.sort(key=lambda d: (-d.active_days, -d.hits, -(d.participants or 0)))
+        return DiscoverResult(found[:limit], seen, partial, wait)
 
     async def resolve(self, handle: str) -> Candidate | None:
         username = _normalize_handle(handle)

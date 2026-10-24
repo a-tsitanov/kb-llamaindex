@@ -424,3 +424,139 @@ async def test_folder_members_matches_the_title_the_same_way_as_edits(monkeypatc
     with pytest.raises(FolderNotFound) as ei:
         await ops.folder_members("memes")
     assert ei.value.folder == "memes"
+
+
+# ---------- discover: поиск каналов по тому, о чём они пишут ----------
+
+from datetime import UTC, datetime, timedelta  # noqa: E402
+
+NOW = datetime.now(UTC)
+
+
+def _dchan(cid, username="u", participants=1000, **flags):
+    ch = _chan(cid, username if username else None, participants=participants)
+    for k, v in flags.items():
+        setattr(ch, k, v)
+    return ch
+
+
+def _msg(mid, cid, day=0):
+    return types.Message(
+        id=mid, peer_id=types.PeerChannel(cid), date=NOW - timedelta(days=day),
+        message="дроны",
+    )
+
+
+def _page(msgs, chats, next_rate=None):
+    return types.messages.MessagesSlice(
+        messages=msgs, chats=chats, users=[], count=999, next_rate=next_rate, topics=[],
+    )
+
+
+class _PagedClient(_Client):
+    """Страницы глобального поиска отдаются по очереди; пустая страница — конец."""
+
+    def __init__(self, pages):
+        super().__init__()
+        self.pages = list(pages)
+
+    async def __call__(self, request):
+        if isinstance(request, functions.messages.SearchGlobalRequest):
+            self.calls += 1
+            self.requests.append(request)
+            out = self.pages.pop(0) if self.pages else _page([], [])
+            if isinstance(out, Exception):
+                raise out
+            return out
+        return await super().__call__(request)
+
+
+@pytest.mark.asyncio
+async def test_discover_builds_broadcast_only_windowed_request():
+    client = _PagedClient([_page([_msg(10, 1), _msg(9, 1, 1)], [_dchan(1)])])
+    ops, _ = _ops(client)
+    res = await ops.discover("дроны", days=7)
+    req = client.requests[0]
+    assert req.q == "дроны" and req.broadcasts_only is True
+    assert isinstance(req.filter, types.InputMessagesFilterEmpty)
+    assert req.max_date is None and req.min_date.tzinfo is not None
+    assert abs((NOW - timedelta(days=7)) - req.min_date) < timedelta(seconds=30)
+    assert [d.slug for d in res.candidates] == ["@u"]
+    assert res.candidates[0].hits == 2 and res.candidates[0].active_days == 2
+    assert res.candidates[0].last_post == NOW.date().isoformat()
+    assert res.scanned == 2 and not res.partial and res.wait_seconds is None
+
+
+@pytest.mark.asyncio
+async def test_discover_paginates_with_offsets_from_previous_response():
+    chats = [_dchan(1), _dchan(2, "w")]
+    client = _PagedClient([
+        _page([_msg(10, 1), _msg(8, 2)], chats, next_rate=555),
+        _page([_msg(7, 1)], chats),
+    ])
+    ops, _ = _ops(client)
+    res = await ops.discover("x")
+    assert len(client.requests) == 3  # третья — пустая страница, конец
+    second = client.requests[1]
+    assert second.offset_rate == 555 and second.offset_id == 8
+    assert isinstance(second.offset_peer, types.InputPeerChannel)
+    assert second.offset_peer.channel_id == 2 and second.offset_peer.access_hash == 14
+    assert res.scanned == 3
+    assert {d.slug: d.hits for d in res.candidates} == {"@u": 2}
+
+
+@pytest.mark.asyncio
+async def test_discover_scan_cap_stops_even_if_more_available():
+    pages = [_page([_msg(100 - i, 1) for i in range(5)], [_dchan(1)], next_rate=i + 1)
+             for i in range(10)]
+    client = _PagedClient(pages)
+    ops, _ = _ops(client)
+    res = await ops.discover("x", scan=7)
+    assert res.scanned == 7
+    assert len(client.requests) == 2
+    assert res.candidates[0].hits == 7
+
+
+@pytest.mark.asyncio
+async def test_discover_drops_junk_and_keeps_unknown_audience():
+    chats = [
+        _dchan(1), _dchan(2, "s", scam=True), _dchan(3, None),
+        _dchan(4, "one"), _dchan(5, "tiny", participants=50),
+        _dchan(6, "unk", participants=None), _dchan(7, "fk", fake=True),
+        _dchan(8, "rs", restricted=True),
+    ]
+    msgs = [_msg(i * 10 + k, i) for i in (1, 2, 3, 5, 6, 7, 8) for k in (1, 2)]
+    msgs.append(_msg(99, 4))
+    client = _PagedClient([_page(msgs, chats)])
+    ops, _ = _ops(client)
+    res = await ops.discover("x")
+    assert sorted(d.slug for d in res.candidates) == ["@u", "@unk"]
+    unk = next(d for d in res.candidates if d.slug == "@unk")
+    assert unk.participants is None
+
+
+@pytest.mark.asyncio
+async def test_discover_ranks_by_active_days_before_hits():
+    chats = [_dchan(1, "burst"), _dchan(2, "steady")]
+    msgs = [_msg(i, 1) for i in range(20, 30)]
+    msgs += [_msg(40 + d, 2, d) for d in range(5)]
+    client = _PagedClient([_page(msgs, chats)])
+    ops, _ = _ops(client)
+    res = await ops.discover("x", limit=1)
+    assert [d.slug for d in res.candidates] == ["@steady"]
+    assert res.candidates[0].active_days == 5
+    full = await _ops(_PagedClient([_page(msgs, chats)]))[0].discover("x")
+    assert [d.slug for d in full.candidates] == ["@steady", "@burst"]
+
+
+@pytest.mark.asyncio
+async def test_discover_floodwait_returns_partial_result():
+    chats = [_dchan(1)]
+    client = _PagedClient([
+        _page([_msg(10, 1), _msg(9, 1)], chats, next_rate=5), _flood(42),
+    ])
+    ops, lock = _ops(client)
+    res = await ops.discover("x")
+    assert res.partial is True and res.wait_seconds == 42
+    assert [d.slug for d in res.candidates] == ["@u"]
+    assert not lock.locked()

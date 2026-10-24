@@ -17,13 +17,15 @@ from src.intake.sources.proposals import ProposalStore
 from src.intake.sources.service import AmbiguousMove
 from src.intake.sources.telegram import (
     Candidate,
+    Discovered,
+    DiscoverResult,
     FloodWait,
     FolderNotEditable,
     FolderNotFound,
 )
 
 TOOLS = (
-    "sources_list", "sources_search", "sources_resolve", "sources_propose",
+    "sources_list", "sources_search", "sources_discover", "sources_resolve", "sources_propose",
     "sources_apply", "source_move", "source_leave", "source_trust_set",
     "source_report", "feeder_status",
 )
@@ -31,6 +33,7 @@ TOOLS = (
 ARGS = {
     "sources_list": {},
     "sources_search": {"query": "q"},
+    "sources_discover": {"topic": "t"},
     "sources_resolve": {"handle": "@a"},
     "sources_propose": {"action": "leave", "channels": [{"peer_id": 1}]},
     "sources_apply": {"proposal_id": "x", "code": "ABCDEF"},
@@ -67,6 +70,17 @@ class Ops:
     async def search(self, query, limit):
         self._f("search")
         return [Candidate(5, "@five", "Five", 100, True)]
+
+    async def discover(self, topic, *, limit=10, days=30, **kw):
+        self._f("discover")
+        self.discover_args = (topic, limit, days)
+        return DiscoverResult(
+            [Discovered(5, "@five", "Five", 100, 4, 3, "2026-10-20", False),
+             Discovered(6, "@six", "Six", None, 2, 2, "2026-10-19", True)],
+            120, self.partial, 30 if self.partial else None,
+        )
+
+    partial = False
 
     async def resolve(self, handle):
         self._f("resolve")
@@ -246,6 +260,24 @@ async def test_search_marks_already_connected(env):
         "peer_id": 5, "slug": "@five", "title": "Five",
         "participants": 100, "public": True, "connected": True,
     }]
+
+
+async def test_discover_marks_connected_and_reports_scan(env):
+    env.repo.seed(5, "news")
+    out = await env.call("sources_discover", topic="дроны", limit=3, days=7)
+    assert env.ops.discover_args == ("дроны", 3, 7)
+    assert [(c["slug"], c["connected"]) for c in out["candidates"]] == [
+        ("@five", True), ("@six", False)]
+    assert out["candidates"][0]["active_days"] == 3
+    assert out["scanned"] == 120 and out["partial"] is False
+    assert out["wait_seconds"] is None and "note" not in out
+
+
+async def test_discover_partial_says_rate_limited(env):
+    env.ops.partial = True
+    out = await env.call("sources_discover", topic="x")
+    assert out["partial"] is True and out["wait_seconds"] == 30
+    assert "FloodWait" in out["note"]
 
 
 async def test_resolve_unknown_handle_is_none(env):

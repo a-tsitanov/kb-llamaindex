@@ -45,8 +45,11 @@ uv run python -m scripts.tenant_admin key --tenant <арендатор> --owner 
 ## Петля: пробел -> поиск -> список -> код -> подключение
 
 1. Пробел: харнесс видит, что тема не покрыта (`sources_list` — что уже есть).
-2. `sources_search(query)` или `sources_resolve(@слаг)` — кандидаты;
-   `connected` показывает, что канал уже в реестре.
+2. `sources_discover(topic)` — каналы, которые ПИШУТ о теме за окно
+   (глобальный поиск по сообщениям, только каналы-вещание, без scam/fake/
+   restricted и без каналов без `@слага`); `sources_search(query)` ищет по
+   названию, `sources_resolve(@слаг)` — по слагу. `connected` показывает,
+   что канал уже в реестре.
 3. `sources_propose(action="connect", channels=[{peer_id, slug, title, group}])`
    возвращает `proposal_id`, элементы и **одноразовый код**. В телеграм
    ничего не пишется.
@@ -69,6 +72,7 @@ uv run python -m scripts.tenant_admin key --tenant <арендатор> --owner 
 |---|---|---|
 | `sources_list()` | подключённые каналы: группа, доверие, `in_folder` (`true` / `false` / `null`: лежит ли канал в своей папке сейчас; `null` — папка собрана по признаку «все каналы» / «все группы» и по явному составу не ответить; признак не различает вид канала, поэтому папка с флагом только «все группы» тоже даёт `null` для канала-вещания, хотя его она не покрывает) и список папок аккаунта | нет |
 | `sources_search(query, limit=10)` | поиск публичных каналов | нет |
+| `sources_discover(topic, limit=10, days=30)` | каналы по тому, что они пишут о теме за `days` дней: `hits`, `active_days` (регулярность, по ней ранжирование), `last_post`, `connected`. `partial=true` + `wait_seconds` — скан оборван лимитом Telegram (FloodWait), список неполон | нет |
 | `sources_resolve(handle)` | канал по `@слагу` или ссылке; `candidate: null` — не найден | нет |
 | `sources_propose(action, channels)` | предложение `connect` / `move` / `leave` и код | выдаёт |
 | `sources_apply(proposal_id, code, peer_ids=None)` | подключить (`peer_ids` лишь сужает набор) | да |
