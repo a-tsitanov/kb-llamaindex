@@ -34,6 +34,7 @@ from typing import Any
 
 from loguru import logger
 
+from src.config import settings
 from src.graph.nebula_store import _q, entity_vid
 
 
@@ -77,6 +78,19 @@ def decide(
     return "new" if new_trust >= stored_trust else "stored"
 
 
+def _stored_trust(raw: Any) -> float:
+    """Доверие, записанное на ребре; НЕТ свойства — доверие по умолчанию.
+
+    Ребро без ``source_trust`` написано до того, как доверие стало
+    штамповаться, либо при пустом ``SIGNALS_SOURCE_TRUST``.  Читать его как
+    0.0 нельзя: любой документ канала с личным доверием выигрывал бы у него
+    каждое противоречие.  Настоящий записанный 0.0 остаётся нулём.
+    """
+    if raw is None or raw == "":
+        return float(settings.signals.source_trust_default)
+    return float(raw)
+
+
 def _load_stored_nebula(store: Any, pairs: list[tuple[str, str]]) -> dict:
     # Nebula collapses every label of a pair onto one rank-0 `RELATED` edge, so
     # the key is (src, tgt) — the incoming label is not part of the identity.
@@ -95,7 +109,7 @@ def _load_stored_nebula(store: Any, pairs: list[tuple[str, str]]) -> dict:
             continue
         out[key] = StoredEdge(
             polarity=str(row.get("polarity") or ""),
-            source_trust=float(row.get("source_trust") or 0.0),
+            source_trust=_stored_trust(row.get("source_trust")),
             first_doc_id=str(row.get("first_doc_id") or ""),
         )
     return out

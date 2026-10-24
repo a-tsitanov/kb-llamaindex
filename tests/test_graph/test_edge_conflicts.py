@@ -138,3 +138,55 @@ def test_load_stored_edges_nebula_keys_by_pair():
     assert out[("Иванов", "ООО Ромашка")] == StoredEdge(
         "affirmed", 0.7, "doc-old",
     )
+
+
+# ── ребро без source_trust ──────────────────────────────────────────────────
+
+def _stored_without_trust(monkeypatch, *, trust_prop):
+    from src.config import settings
+    from src.graph.nebula_store import entity_vid
+
+    monkeypatch.setattr(settings.signals, "source_trust_default", 0.5)
+    row = {
+        "s": entity_vid("Иванов"), "d": entity_vid("ООО Ромашка"),
+        "polarity": "affirmed", "first_doc_id": "doc-old",
+    }
+    if trust_prop is not ...:
+        row["source_trust"] = trust_prop
+
+    class _Store:
+        def structured_query(self, query, param_map=None):
+            return [row]
+
+    return load_stored_edges(_Store(), [_rel("Иванов", "ООО Ромашка")])
+
+
+@pytest.mark.parametrize("absent", [..., None])
+def test_edge_without_source_trust_is_not_displaced_by_zero_trust(monkeypatch, absent):
+    stored = _stored_without_trust(monkeypatch, trust_prop=absent)
+    assert stored[("Иванов", "ООО Ромашка")].source_trust == pytest.approx(0.5)
+    rel = _rel("Иванов", "ООО Ромашка", polarity="negated")
+
+    _, conflicts = resolve_edge_conflicts(
+        [rel], stored, doc_trust=0.0, doc_id="doc-new", ingest_epoch=20000,
+    )
+
+    assert [c.winner for c in conflicts] == ["stored"]
+    assert rel.properties["polarity"] == "affirmed"
+
+
+def test_edge_without_source_trust_is_displaced_by_a_trusted_document(monkeypatch):
+    stored = _stored_without_trust(monkeypatch, trust_prop=...)
+    rel = _rel("Иванов", "ООО Ромашка", polarity="negated")
+
+    _, conflicts = resolve_edge_conflicts(
+        [rel], stored, doc_trust=0.9, doc_id="doc-new", ingest_epoch=20000,
+    )
+
+    assert [c.winner for c in conflicts] == ["new"]
+    assert rel.properties["polarity"] == "negated"
+
+
+def test_a_stored_zero_trust_stays_zero(monkeypatch):
+    stored = _stored_without_trust(monkeypatch, trust_prop=0.0)
+    assert stored[("Иванов", "ООО Ромашка")].source_trust == 0.0
