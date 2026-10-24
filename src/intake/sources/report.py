@@ -13,8 +13,10 @@
 Документы канала ищутся по ВСЕМ его слагам (``source_slug``): ``@username``
 меняется, ``peer_id`` — нет, а ``documents.source_channel`` хранит слаг на
 момент приёма БЕЗ ``@`` (``tg_ingest`` и ``message_to_doc`` делают
-``lstrip('@')``).  Слаги в реестре могут быть с ``@``, поэтому в поиск
-идут обе формы.
+``lstrip('@')``).  Слаги в реестре могут быть с ``@``, а регистр у записи
+в реестре и у ``documents.source_channel`` может расходиться (фидер ищет
+канал через ``casefold``), поэтому сравнение идёт по ``lower()`` с обеих
+сторон, а в параметр уходят слаги в нижнем регистре и без ``@``.
 """
 
 from __future__ import annotations
@@ -34,16 +36,12 @@ _STATUS = (
     "THEN 'duplicate' ELSE d.status END)"
 )
 _WINDOW = "d.created_at >= NOW() - make_interval(days => %s)"
-_MINE = "d.source_channel = ANY(%s)"
+_MINE = "lower(d.source_channel) = ANY(%s)"
 
 
 def _forms(slugs: list[str]) -> list[str]:
-    """Слаги в обеих формах: как в реестре и без ``@`` (как в documents)."""
-    out: set[str] = set()
-    for s in slugs:
-        out.add(s)
-        out.add(s.lstrip("@"))
-    return sorted(x for x in out if x)
+    """Слаги для ``lower(d.source_channel) = ANY(%s)``: без ``@``, в нижнем регистре."""
+    return sorted({s.lstrip("@").casefold() for s in slugs} - {""})
 
 
 def _ratio(a: int, b: int) -> float:
@@ -67,6 +65,15 @@ async def channel_report(
 
     Пустой канал (нет слагов или документов) даёт нули, не ``None``.
     ``trust.set`` — единственное место, где ``None`` осмыслен: «как у группы».
+    ``None`` и когда строки ``source`` нет вовсе, и когда ``trust`` в ней не
+    выставлен: отчёт эти два случая не различает.
+
+    ``reposts_of`` внутренне соединяет строку-владельца (``duplicate_of``):
+    перепост с осиротевшим владельцем в список не попадёт, и сумма там может
+    быть меньше ``origin.repost``.
+
+    ``entities_per_doc`` делится на все документы-владельцы, в том числе не
+    дошедшие до графа (``failed``/``skipped``), поэтому отношение занижено.
     """
     async with graph_connection(graph) as conn, conn.cursor(row_factory=dict_row) as cur:
         # (1) Слаги пира за всю историю.
@@ -84,7 +91,8 @@ async def channel_report(
         await cur.execute(
             f"SELECT {origin} AS origin, {_STATUS} AS status, COUNT(*) AS n "
             "FROM documents d LEFT JOIN doc_processing p ON p.doc_id = d.id "
-            f"WHERE {_MINE} AND {_WINDOW} GROUP BY {origin}, {_STATUS}",
+            # GROUP BY по номерам: имя «status» совпало бы с колонкой documents.
+            f"WHERE {_MINE} AND {_WINDOW} GROUP BY 1, 2",
             (slugs, days),
         )
         fate_rows = await cur.fetchall()
@@ -98,24 +106,32 @@ async def channel_report(
         cov = await cur.fetchone() or {}
         # (5) Чьи тела канал перепостил: владелец → его канал.
         await cur.execute(
-            "SELECT o.source_channel AS channel, COUNT(*) AS n "
+            "SELECT lower(o.source_channel) AS channel, COUNT(*) AS n "
             "FROM documents d JOIN documents o ON o.id = d.duplicate_of "
             f"WHERE d.intake_status = 'duplicate' AND {_MINE} AND {_WINDOW} "
-            "GROUP BY o.source_channel ORDER BY n DESC, o.source_channel LIMIT 10",
+            "GROUP BY lower(o.source_channel) "
+            "ORDER BY n DESC, lower(o.source_channel) LIMIT 10",
             (slugs, days),
         )
         reposts = await cur.fetchall()
-        # (6) Вытеснения фактов в обе стороны.  doc_id в журнале — TEXT.
-        await cur.execute(
-            "SELECT "
-            "COUNT(*) FILTER (WHERE d.id::text = s.new_doc_id) AS displaced_others, "
-            "COUNT(*) FILTER (WHERE d.id::text = s.stored_doc_id) AS displaced_by_others "
-            "FROM fact_supersede s JOIN documents d "
-            "  ON d.id::text IN (s.new_doc_id, s.stored_doc_id) "
-            f"WHERE {_MINE} AND s.decided_at >= NOW() - make_interval(days => %s)",
-            (slugs, days),
+        # (6) Вытеснения фактов в обе стороны, двумя отдельными выборками.
+        # Окно — по возрасту ДОКУМЕНТА канала (d.created_at), как у всех
+        # остальных чисел отчёта, а не по s.decided_at: иначе числитель
+        # displacement_rate и его знаменатель считали бы разные периоды.
+        # «Вытеснил» — документ канала новый (s.new_doc_id) и перебил
+        # сохранённый факт; «вытеснен» — документ канала сохранённый
+        # (s.stored_doc_id) и его перебили.  Раздельные соединения не
+        # считают событие внутри одного канала дважды в одном направлении.
+        # doc_id в журнале — TEXT; пустой '' (DEFAULT) ничему не равен.
+        sup_sql = (
+            "SELECT COUNT(*) AS n FROM fact_supersede s JOIN documents d "
+            "ON d.id::text = s.{col} "
+            f"WHERE {_MINE} AND {_WINDOW}"
         )
-        sup = await cur.fetchone() or {}
+        await cur.execute(sup_sql.format(col="new_doc_id"), (slugs, days))
+        won_row = await cur.fetchone() or {}
+        await cur.execute(sup_sql.format(col="stored_doc_id"), (slugs, days))
+        lost_row = await cur.fetchone() or {}
         # (7) Отдача графу: сущности и впервые увиденные рёбра по документам.
         await cur.execute(
             "SELECT "
@@ -137,8 +153,8 @@ async def channel_report(
             owners += n
             by_status[r["status"]] = by_status.get(r["status"], 0) + n
     rows = owners + reposts_n
-    won = int(sup.get("displaced_others") or 0)
-    lost = int(sup.get("displaced_by_others") or 0)
+    won = int(won_row.get("n") or 0)
+    lost = int(lost_row.get("n") or 0)
     trust_set = src["trust"] if src else None
     return {
         "days": days,

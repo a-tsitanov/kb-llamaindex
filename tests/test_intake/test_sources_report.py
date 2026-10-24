@@ -1,7 +1,9 @@
 """Отчёт по каналу ``channel_report``: фейковое соединение с очередью наборов.
 
 Порядок наборов: слаги, доверие, судьба/происхождение, покрытие, перепосты,
-вытеснения, отдача графу — тот же, в котором их читает отчёт.
+вытеснения (два набора: «вытеснил» и «вытеснен»), отдача графу — тот же,
+в котором их читает отчёт.  Фейк не исполняет SQL: тесты закрепляют
+параметры и текст запросов, а не результат выборки.
 """
 
 from __future__ import annotations
@@ -56,7 +58,8 @@ def _sets(**over):
         "cov": [{"earliest": dt.date(2026, 9, 1), "latest": dt.date(2026, 10, 1),
                  "without_doc_date": 1}],
         "reposts": [{"channel": "big", "n": 2}],
-        "sup": [{"displaced_others": 1, "displaced_by_others": 3}],
+        "won": [{"n": 1}],
+        "lost": [{"n": 3}],
         "yld": [{"entities": 40, "new_edges": 4}],
     }
     s.update(over)
@@ -78,7 +81,7 @@ async def test_documents_gathered_by_all_slugs_both_forms(monkeypatch) -> None:
     cur = _patch(monkeypatch, _sets())
     await channel_report(default_graph_context(), 42)
     slugs_param = cur.sql[2][1][0]
-    assert {"new_name", "@new_name", "old_name"} <= set(slugs_param)
+    assert set(slugs_param) == {"new_name", "old_name"}
 
 
 async def test_origin_separates_owner_from_repost(monkeypatch) -> None:
@@ -124,7 +127,7 @@ async def test_unset_trust_stays_none(monkeypatch) -> None:
 
 
 async def test_empty_channel_gives_zeros(monkeypatch) -> None:
-    _patch(monkeypatch, [[], [], [], [], [], [], []])
+    _patch(monkeypatch, [[]] * 8)
     out = await channel_report(default_graph_context(), 42)
     assert out["volume"] == {"rows": 0, "documents": 0}
     assert out["fate"] == {} and out["reposts_of"] == []
@@ -134,3 +137,41 @@ async def test_empty_channel_gives_zeros(monkeypatch) -> None:
     assert out["coverage"]["without_doc_date"] == 0
     assert out["trust"]["set"] is None
     assert out["trust"]["measured"] == {"repost_share": 0.0, "displacement_rate": 0.0}
+
+
+async def test_slugs_matched_case_insensitively(monkeypatch) -> None:
+    cur = _patch(monkeypatch, _sets(slugs=[{"slug": "@MyChan"}, {"slug": "OLD"}]))
+    await channel_report(default_graph_context(), 42)
+    for sql, _params in cur.sql[2:]:
+        if "source_channel" not in sql:
+            continue
+        assert "lower(d.source_channel) = ANY" in sql
+        assert "d.source_channel = ANY" not in sql
+    # слаги в параметре: нижний регистр, без «@»; фейк SQL не исполняет
+    assert cur.sql[2][1][0] == ["mychan", "old"]
+    assert cur.sql[5][1][0] == ["mychan", "old"]
+    assert cur.sql[6][1][0] == ["mychan", "old"]
+
+
+async def test_supersede_directions_are_separate_single_join_queries(monkeypatch) -> None:
+    cur = _patch(monkeypatch, _sets(won=[{"n": 1}], lost=[{"n": 1}]))
+    out = await channel_report(default_graph_context(), 42)
+    won_sql, won_params = cur.sql[5]
+    lost_sql, lost_params = cur.sql[6]
+    assert "fact_supersede" in won_sql and "fact_supersede" in lost_sql
+    assert "d.id::text = s.new_doc_id" in won_sql and "stored_doc_id" not in won_sql
+    assert "d.id::text = s.stored_doc_id" in lost_sql and "new_doc_id" not in lost_sql
+    assert " IN (" not in won_sql and " IN (" not in lost_sql
+    # одно событие внутри канала: по разу в каждом направлении, не дважды в одном
+    assert out["contradictions"] == {
+        "displaced_others": 1, "displaced_by_others": 1, "total": 2,
+    }
+    assert won_params[1] == lost_params[1] == 30
+
+
+async def test_supersede_windowed_on_document_age_not_decision_time(monkeypatch) -> None:
+    cur = _patch(monkeypatch, _sets())
+    await channel_report(default_graph_context(), 42)
+    for sql, _ in cur.sql[5:7]:
+        assert "d.created_at >=" in sql
+        assert "decided_at" not in sql
