@@ -231,3 +231,43 @@ async def test_host_without_save_has_no_cursor_callback(monkeypatch):
     assert rec.built[0].kw["ingest"].on_cursor is None
     rec.release.set()
     await task
+
+
+class _RenameRepo:
+    def __init__(self, rows):
+        self.rows, self.listed, self.remembered = rows, 0, []
+
+    async def list_active(self):
+        self.listed += 1
+        return self.rows
+
+    async def remember_slug(self, peer_id, slug, *, display=None):
+        self.remembered.append((peer_id, slug, display))
+
+
+def _row(peer_id, slug):
+    return SimpleNamespace(peer_id=peer_id, slug=slug)
+
+
+def _dialog(id, username=None):
+    return SimpleNamespace(id=id, entity=SimpleNamespace(username=username))
+
+
+async def test_renamed_dialog_adds_the_new_key_and_display():
+    repo = _RenameRepo([_row(-1001, "@old_name")])
+    n = await T.sync_renames(repo, [_dialog(-1001, "New_Name")])
+    assert n == 1 and repo.listed == 1
+    assert repo.remembered == [(-1001, "@New_Name", "@New_Name")]
+
+
+async def test_unchanged_dialog_writes_nothing():
+    # регистр и «@» — не переименование
+    repo = _RenameRepo([_row(-1001, "@Five"), _row(-1002, "")])
+    n = await T.sync_renames(repo, [_dialog(-1001, "five"), _dialog(-1002), _dialog(-9, "x")])
+    assert n == 0 and repo.remembered == [] and repo.listed == 1
+
+
+async def test_channel_that_lost_its_username_is_a_rename_too():
+    repo = _RenameRepo([_row(-1001, "@five")])
+    await T.sync_renames(repo, [_dialog(-1001)])
+    assert repo.remembered == [(-1001, "", "")]

@@ -63,7 +63,7 @@ from loguru import logger
 
 from src.intake.client import DUPLICATE, FAILED, SENT, post_document
 from src.intake.queue.priorities import PRIO_BACKFILL
-from src.intake.sources.channel_key import normalize_slug
+from src.intake.sources.channel_key import channel_key, normalize_slug
 from src.intake.sources.folders import (
     dialog_slug,
     filter_title,
@@ -404,6 +404,35 @@ async def sync_round(
     return tally
 
 
+async def sync_renames(repo: Any, dialogs: list[Any]) -> int:
+    """Занести в реестр новое имя переименованного канала; вернуть их число.
+
+    Свип постит документы под ТЕКУЩИМ слагом диалога, а ``source_slug`` без
+    этого знал бы только старый ключ: отчёт и доверие ослепли бы для каждого
+    нового документа. Реестр читается один раз за раунд (``list_active``);
+    ``dialog.id`` и ``peer_id`` реестра — один и тот же размеченный id.
+    Неизменившийся канал ничего не пишет.
+    """
+    rows = {r.peer_id: r for r in await repo.list_active()}
+    renamed = 0
+    for dialog in dialogs:
+        row = rows.get(dialog.id)
+        if row is None:
+            continue
+        slug = dialog_slug(dialog)
+        # как в реестре: «@username», а у канала без username — пусто
+        display = "" if slug == str(dialog.id) else f"@{slug}"
+        if channel_key(display, dialog.id) == channel_key(row.slug, dialog.id):
+            continue
+        await repo.remember_slug(dialog.id, display, display=display)
+        logger.info(
+            "tg_ingest: канал {p} переименован {o!r} -> {n!r}",
+            p=dialog.id, o=row.slug, n=display,
+        )
+        renamed += 1
+    return renamed
+
+
 def seed_cursor(
     state: dict, save: Callable[[], None], peer_id: int, last_id: int, title: str = "",
 ) -> None:
@@ -648,6 +677,19 @@ def main() -> int:
                         )
                         missing_warned = True
                     dialogs = [d for d in dialogs if dialog_in_folders(d, spec)]
+                if mcp_task is not None:  # реестр ведётся, только пока включён MCP
+                    try:
+                        from src.intake.sources.repository import SourceRepository
+                        from src.tenancy.context import DEFAULT_GRAPH_ID, cli_graph_context
+
+                        await sync_renames(
+                            SourceRepository(
+                                graph=cli_graph_context(args.graph or DEFAULT_GRAPH_ID),
+                            ),
+                            dialogs,
+                        )
+                    except Exception as exc:  # имена — уточнение, а не условие свипа
+                        logger.warning("tg_ingest: имена каналов в реестре не обновлены: {e!r}", e=exc)
                 tally = await sync_round(
                     tg,
                     http,
