@@ -333,7 +333,10 @@ def build_sources_mcp(
         именно тогда, когда раунд долгий или завис. Папки — по возможности:
         `folders_state` = `fresh` (прочитаны сейчас), `stale` (замок занят,
         отдан список прошлого ответа) или `unavailable` (читать нечем).
-        `last_round.ok = false` — раунд упал, причина в `error`.
+        `last_round.ok = false` увидеть почти нельзя: упавший раунд
+        пробрасывает исключение и процесс фидера выходит (контейнер затем
+        перезапускается), поэтому признак провала живёт в логе, а здесь после
+        рестарта будет `last_round = null`.
         """
         nonlocal folders_cache
         await _enter()
@@ -342,7 +345,9 @@ def build_sources_mcp(
             try:
                 folders_cache = await asyncio.wait_for(ops.folders(), folders_timeout)
                 folders, state = folders_cache, "fresh"
-            except (TimeoutError, FloodWait):
+            except Exception:
+                # Папки — не предмет этого инструмента: любой их сбой (замок,
+                # FloodWait, обрыв сессии) не должен лишать оператора курсоров.
                 folders = folders_cache
                 state = "stale" if folders_cache is not None else "unavailable"
             return {

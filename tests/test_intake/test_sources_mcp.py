@@ -522,6 +522,21 @@ async def test_feeder_status_answers_while_someone_holds_the_lock(monkeypatch):
     assert out["folders_state"] == "unavailable"
 
 
+async def test_feeder_status_survives_any_folders_error(monkeypatch):
+    """Папки — не предмет диагностики: оборванная сессия или любой другой сбой
+    чтения папок не должен лишать оператора курсоров и прошлого раунда."""
+    status = {"cursors": {"-100": {"last_id": 7}}, "last_round": {"ok": True, "tally": {}}}
+    e = Env(monkeypatch, status=lambda: status)
+
+    async def broken_folders():
+        raise ConnectionError("сессия телеграма оборвалась")
+
+    e.ops.folders = broken_folders
+    out = await e.call("feeder_status")
+    assert out["cursors"] == {"-100": {"last_id": 7}}
+    assert out["folders"] is None and out["folders_state"] == "unavailable"
+
+
 async def test_feeder_status_marks_folders_stale_after_a_timeout(monkeypatch):
     lock = asyncio.Lock()
     e = Env(monkeypatch, folders_timeout=0.05)
