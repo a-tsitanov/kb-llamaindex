@@ -36,6 +36,12 @@
 #                              official,data
 #   TG_INGEST_QUEUE          — target ingest queue (only for INGEST_QUEUE_BACKEND=rabbitmq)
 #   KB_GRAPH                 — target graph id (sent as X-Graph); empty = server `default`
+#   TG_SOURCES_MCP_PORT      — port of the sources MCP server INSIDE this process
+#                              (docs/runbook/feeder-sources.md); empty = server off.
+#                              Published on 127.0.0.1 ONLY (never on 0.0.0.0).
+#   KB_MCP_REQUIRE_AUTH      — as for the mcp-* services; default true.  The sources
+#                              tools refuse every call without a token, so `false`
+#                              turns the server into a closed door, not an open one.
 
 services:
   tg-ingest:
@@ -61,6 +67,21 @@ services:
       # Read by the script as the --graph default (empty → no X-Graph → `default`).
       # A non-default graph keeps its own cursors (tg_ingest.state.<graph>.json).
       KB_GRAPH: ${KB_GRAPH:-}
+      # ── MCP источников (в этом же процессе: один токен — один поллер) ──
+      # Пусто = сервер не поднимается вовсе.
+      TG_SOURCES_MCP_PORT: ${TG_SOURCES_MCP_PORT:-}
+      KB_MCP_REQUIRE_AUTH: ${KB_MCP_REQUIRE_AUTH:-true}
+      # Токен MCP проверяется по public.api_keys, реестр источников и отчёт
+      # читают Postgres графа — тем же набором, что у mcp-*.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-kb_llamaindex}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    # Только loopback: за этим портом настоящий аккаунт Telegram.  Без порта
+    # (TG_SOURCES_MCP_PORT пуст) слушать некому, публикация безвредна.
+    ports:
+      - "127.0.0.1:${TG_SOURCES_MCP_PORT:-9105}:${TG_SOURCES_MCP_PORT:-9105}"
     # NB: every $ is doubled ($$) so Compose does NOT interpolate it at
     # config time — the expansion must happen in the CONTAINER shell against
     # the `environment:` above.  An empty --folders/--queue is a safe no-op
@@ -87,7 +108,10 @@ services:
     # The script is fail-soft (a failed POST is retried next round), so an
     # api not-yet-ready just logs + retries.
     depends_on:
-      - api
+      api: {condition: service_started}
+      # public.api_keys и таблицы графа должны быть мигрированы до первого
+      # вызова MCP (как у mcp-*).
+      init: {condition: service_completed_successfully}
     # Deliver SIGINT on `docker stop` → the script's KeyboardInterrupt path
     # logs a clean "stopped by user" (state is saved per-message regardless).
     stop_signal: SIGINT

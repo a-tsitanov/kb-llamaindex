@@ -172,6 +172,21 @@ class TelegramOps:
             filters = await self._filters()
         return [t for f in filters if (t := filter_title(f).strip())]
 
+    async def folder_members(self, folder: str) -> set[int]:
+        """`peer_id` каналов папки (включённые и закреплённые); только чтение.
+
+        Общий список (chatlist) читается как обычная папка: править его
+        нельзя, а видеть состав можно. Нет папки — `FolderNotFound`.
+        """
+        async with self._guard():
+            wanted = folder.strip().casefold()
+            for f in await self._filters():
+                if filter_title(f).strip().casefold() == wanted and hasattr(f, "include_peers"):
+                    return self._member_ids(f)
+        raise FolderNotFound(
+            f"папки {folder!r} нет в аккаунте; агент папки не создаёт", folder=folder,
+        )
+
     async def add_to_folder(self, peer_id: int, folder: str) -> bool:
         """True — состав папки изменён; False — канал в ней уже был."""
         async with self._guard():

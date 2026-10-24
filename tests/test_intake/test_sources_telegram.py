@@ -345,3 +345,21 @@ async def test_missing_folder_is_plain_not_found_not_not_editable():
     with pytest.raises(FolderNotFound) as ei:
         await ops.remove_from_folder(_pid(5), "news")
     assert not isinstance(ei.value, FolderNotEditable)
+
+
+@pytest.mark.asyncio
+async def test_folder_members_reads_include_and_pinned_without_writing():
+    news = _folder(2, "News", include=[10, 11], pinned=[12])
+    client = _Client({functions.messages.GetDialogFiltersRequest: [news]})
+    ops, _ = _ops(client)
+    assert await ops.folder_members("news") == {_pid(10), _pid(11), _pid(12)}
+    assert not any(isinstance(r, functions.messages.UpdateDialogFilterRequest) for r in client.requests)
+
+
+@pytest.mark.asyncio
+async def test_folder_members_missing_folder_names_it():
+    client = _Client({functions.messages.GetDialogFiltersRequest: [_folder(2, "news")]})
+    ops, _ = _ops(client)
+    with pytest.raises(FolderNotFound) as ei:
+        await ops.folder_members("digest")
+    assert ei.value.folder == "digest"

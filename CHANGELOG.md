@@ -8,6 +8,32 @@ with a section in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 loosely (Added / Changed / Fixed / Notes per stage).
 
+## [Feeder MCP] — 2026-10-23 — Источники Telegram из харнесса
+
+### Added
+- **MCP источников в процессе фидера** (`src/intake/sources/mcp_server.py`,
+  включается `TG_SOURCES_MCP_PORT`): `sources_list`, `sources_search`,
+  `sources_resolve`, `sources_propose`, `sources_apply`, `source_move`,
+  `source_leave`, `source_trust_set`, `source_report`, `feeder_status`.
+  Каждый инструмент первым делом зовёт `require_sources_access` (право
+  `sources` на граф фидера, не зависит от `AUTHZ_MODE`). Запись в аккаунт
+  Telegram — только по одноразовому коду из `sources_propose`.
+- `TelegramOps.folder_members` — чтение состава папки; по нему
+  `sources_list` показывает расхождение с аккаунтом (`in_folder`).
+- Хостинг в `scripts/tg_ingest.py` (`start_sources_mcp`): один клиент и один
+  `asyncio.Lock` на раунд свипа и инструменты; падение сервера логируется и
+  свип продолжается. Без порта сервер не поднимается, поведение прежнее.
+- `docker-compose.tg-ingest.yml`: порт публикуется только на `127.0.0.1`,
+  `KB_MCP_REQUIRE_AUTH` как у `mcp-*`, Postgres-окружение, `init` в
+  `depends_on`.
+- Runbook `docs/runbook/feeder-sources.md`.
+
+### Notes
+- Доверие действует только вперёд: записанные связи не перештамповываются.
+- Папки агент не создаёт; допустимые группы — `GROUP_SET`.
+- Раунд свипа держит замок на всё время: инструмент, которому нужен
+  телеграм, ждёт конца раунда.
+
 ## [Watch P2a] — 2026-10-21 — Находки живой проверки
 
 ### Fixed

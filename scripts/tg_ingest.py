@@ -55,6 +55,7 @@ import json
 import os
 from collections import Counter
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -400,6 +401,70 @@ async def sync_round(
     return tally
 
 
+def start_sources_mcp(
+    tg: Any,
+    lock: asyncio.Lock,
+    *,
+    http: Any,
+    api_base: str,
+    api_key: str,
+    graph: str | None,
+    bootstrap_limit: int,
+    state: dict,
+    round_status: dict,
+    env: Any = None,
+) -> asyncio.Task | None:
+    """Поднять MCP источников задачей рядом со свипом; без ``TG_SOURCES_MCP_PORT`` — ничего.
+
+    Сервер живёт в ЭТОМ процессе потому, что один токен — один поллер: второй
+    ``TelegramClient`` на той же сессии недопустим. Поэтому ``TelegramOps``
+    получает ТОТ ЖЕ клиент ``tg`` и ТОТ ЖЕ замок ``lock``, под которым идёт
+    раунд свипа. Падение сервера (сборка или работа) только логируется: свип
+    продолжается. Зависимость идёт scripts -> src, не наоборот.
+    """
+    env = os.environ if env is None else env
+    raw = (env.get("TG_SOURCES_MCP_PORT") or "").strip()
+    if not raw:
+        return None
+    try:
+        port = int(raw)
+    except ValueError:
+        logger.error("tg_ingest: TG_SOURCES_MCP_PORT={p!r} не число — MCP не поднят", p=raw)
+        return None
+
+    async def _host() -> None:
+        try:
+            # лениво: сервер нужен только при включённом порту
+            from src.intake.sources import mcp_server
+            from src.intake.sources.proposals import ProposalStore
+            from src.intake.sources.repository import SourceRepository
+            from src.intake.sources.telegram import TelegramOps
+            from src.tenancy.context import DEFAULT_GRAPH_ID
+
+            def status() -> dict:
+                return {"cursors": state, "last_round": round_status.get("last_round")}
+
+            mcp = mcp_server.build_sources_mcp(
+                TelegramOps(tg, lock),
+                lambda ctx: SourceRepository(graph=ctx),
+                ProposalStore(),
+                graph or DEFAULT_GRAPH_ID,
+                ingest=mcp_server.IngestTarget(
+                    http=http, api_base=api_base, api_key=api_key,
+                    bootstrap=bootstrap_limit, graph=graph,
+                ),
+                status=status,
+            )
+            logger.info("tg_ingest: MCP источников на 0.0.0.0:{p}", p=port)
+            await mcp_server.serve_sources_mcp(mcp, "0.0.0.0", port)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("tg_ingest: MCP источников упал; свип продолжается без него")
+
+    return asyncio.create_task(_host(), name="sources-mcp")
+
+
 def select_mode(args: Any) -> str:
     """Choose the run mode from parsed args: reingest wins over the legacy
     backfill, which wins over the default continuous sync."""
@@ -496,45 +561,66 @@ def main() -> int:
             httpx.AsyncClient(timeout=30.0, headers=client_headers(args.graph)) as http,
         ):
             missing_warned = False
-            while True:
-                dialogs = select_dialogs([d async for d in tg.iter_dialogs()])
-                # Folders are read every round regardless of --folders scoping:
-                # group tagging (resolve_group_map) needs the account's full
-                # folder list too, not just the ones used to scope the sync.
-                res = await tg(functions.messages.GetDialogFiltersRequest())
-                filters = getattr(res, "filters", res)  # obj in new layers, list in old
-                group_map = resolve_group_map(filters, peer_id=tg_utils.get_peer_id)
-                if folder_names:
-                    spec, missing = resolve_folders(
-                        filters, folder_names, peer_id=tg_utils.get_peer_id,
-                    )
-                    if missing and not missing_warned:
-                        logger.warning(
-                            "tg_ingest: folders not found: {m} (have: {have})",
-                            m=missing,
-                            have=[t for f in filters if (t := filter_title(f).strip())],
+            # Один процесс на телеграм-аккаунт: один токен — один поллер, второй
+            # TelegramClient на той же сессии недопустим. Поэтому MCP источников
+            # живёт здесь и делит с раундом свипа ОДИН клиент и ОДИН замок.
+            lock = asyncio.Lock()
+            round_status: dict = {"last_round": None}
+            mcp_task = start_sources_mcp(
+                tg, lock, http=http, api_base=args.api_base, api_key=args.api_key,
+                graph=args.graph, bootstrap_limit=args.bootstrap_limit,
+                state=state, round_status=round_status,
+            )
+            try:
+                while True:
+                    async with lock:
+                        dialogs = select_dialogs([d async for d in tg.iter_dialogs()])
+                        # Folders are read every round regardless of --folders scoping:
+                        # group tagging (resolve_group_map) needs the account's full
+                        # folder list too, not just the ones used to scope the sync.
+                        res = await tg(functions.messages.GetDialogFiltersRequest())
+                        filters = getattr(res, "filters", res)  # obj in new layers, list in old
+                        group_map = resolve_group_map(filters, peer_id=tg_utils.get_peer_id)
+                        if folder_names:
+                            spec, missing = resolve_folders(
+                                filters, folder_names, peer_id=tg_utils.get_peer_id,
+                            )
+                            if missing and not missing_warned:
+                                logger.warning(
+                                    "tg_ingest: folders not found: {m} (have: {have})",
+                                    m=missing,
+                                    have=[t for f in filters if (t := filter_title(f).strip())],
+                                )
+                                missing_warned = True
+                            dialogs = [d for d in dialogs if dialog_in_folders(d, spec)]
+                        tally = await sync_round(
+                            tg,
+                            http,
+                            dialogs=dialogs,
+                            state=state,
+                            save=lambda: save_state(state_path, state),
+                            api_base=args.api_base,
+                            api_key=args.api_key,
+                            queue=args.queue,
+                            bootstrap_limit=args.bootstrap_limit,
+                            group_map=group_map,
                         )
-                        missing_warned = True
-                    dialogs = [d for d in dialogs if dialog_in_folders(d, spec)]
-                tally = await sync_round(
-                    tg,
-                    http,
-                    dialogs=dialogs,
-                    state=state,
-                    save=lambda: save_state(state_path, state),
-                    api_base=args.api_base,
-                    api_key=args.api_key,
-                    queue=args.queue,
-                    bootstrap_limit=args.bootstrap_limit,
-                    group_map=group_map,
-                )
-                logger.info(
-                    "tg_ingest sync round: dialogs={d} tally={t}",
-                    d=len(dialogs), t=dict(tally),
-                )
-                if args.once:
-                    break
-                await asyncio.sleep(args.poll_interval)
+                        logger.info(
+                            "tg_ingest sync round: dialogs={d} tally={t}",
+                            d=len(dialogs), t=dict(tally),
+                        )
+                        # то, что раунд и так посчитал, — для feeder_status MCP
+                        round_status["last_round"] = {
+                            "finished_at": datetime.now(UTC).isoformat(),
+                            "dialogs": len(dialogs),
+                            "tally": dict(tally),
+                        }
+                    if args.once:
+                        break
+                    await asyncio.sleep(args.poll_interval)
+            finally:
+                if mcp_task is not None:
+                    mcp_task.cancel()
 
     async def _run_reingest() -> int:
         import httpx
