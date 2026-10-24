@@ -1,5 +1,6 @@
 """apply_proposal на фейковых TelegramOps, реестре и клиенте приёма."""
 
+import asyncio
 import datetime as dt
 from types import SimpleNamespace
 
@@ -22,9 +23,11 @@ class _Msg:
 class _Ops:
     def __init__(
         self, log, flood_on=None, flood_at="join", history=None, no_folder=(),
-        leave_fails=False,
+        leave_fails=False, unfolder_fails=False, folder_gate=None,
     ):
         self.log = log
+        self.unfolder_fails = unfolder_fails
+        self.folder_gate = folder_gate  # asyncio.Event: add_to_folder ждёт его
         self.leave_fails = leave_fails
         self.flood_on = flood_on
         self.flood_at = flood_at
@@ -43,7 +46,16 @@ class _Ops:
         if folder in self.no_folder:
             raise FolderNotFound(folder)
         self._maybe_flood("folder", peer_id)
+        if self.folder_gate is not None:
+            self.log.append(("folder-wait", peer_id))
+            await self.folder_gate.wait()
         self.log.append(("folder", peer_id, folder))
+
+    async def remove_from_folder(self, peer_id, folder):
+        self.log.append(("unfolder", peer_id, folder))
+        if self.unfolder_fails:
+            raise RuntimeError("снятие упало")
+        return True
 
     async def leave(self, peer_id):
         self.log.append(("leave", peer_id))
@@ -314,3 +326,64 @@ async def test_move_code_is_refused_by_apply_and_burned(posts):
     with pytest.raises(BadProposal):  # код погашен
         await _apply(store, ops, repo, p)
     assert log == []
+
+
+async def test_registry_failure_removes_the_channel_from_the_folder_too(posts):
+    log, store, p, ops, repo = _kit([_item(1, group="digest")])
+    repo.fail_on = {1}
+    res = await _apply(store, ops, repo, p)
+    assert ("leave", 1) in log and ("unfolder", 1, "digest") in log
+    assert dict(res.skipped)[1].endswith("вступление отменено")
+
+
+async def test_join_failure_does_not_touch_the_folder(posts):
+    log, store, p, ops, repo = _kit([_item(1, group="digest")], no_folder={"digest"})
+    await _apply(store, ops, repo, p)
+    assert not any(c[0] == "unfolder" for c in log)
+
+
+async def test_failed_folder_cleanup_names_the_leftover(posts):
+    log, store, p, ops, repo = _kit([_item(1, group="digest")], unfolder_fails=True)
+    repo.fail_on = {1}
+    res = await _apply(store, ops, repo, p)
+    why = dict(res.skipped)[1]
+    assert ("leave", 1) in log
+    assert "из папки 'digest' убрать не удалось" in why and "ручная чистка" in why
+    assert "вступление отменено" not in why
+
+
+async def test_cancelled_call_rolls_back_and_propagates(posts):
+    gate = asyncio.Event()
+    log, store, p, ops, repo = _kit([_item(1, group="digest")], folder_gate=gate)
+    task = asyncio.ensure_future(_apply(store, ops, repo, p))
+    while ("folder-wait", 1) not in log:
+        await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert ("leave", 1) in log
+    assert repo.rows == {}
+
+
+async def test_cancel_after_the_folder_add_also_cleans_the_folder(posts):
+    log, store, p, ops, repo = _kit([_item(1, group="digest")])
+    gate = asyncio.Event()
+
+    async def slow_add(peer_id, **kw):
+        log.append(("add-wait", peer_id))
+        await gate.wait()
+
+    orig = repo.add
+
+    async def add(peer_id, *a, **kw):
+        await slow_add(peer_id)
+        await orig(peer_id, *a, **kw)
+
+    repo.add = add
+    task = asyncio.ensure_future(_apply(store, ops, repo, p))
+    while ("add-wait", 1) not in log:
+        await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert ("leave", 1) in log and ("unfolder", 1, "digest") in log

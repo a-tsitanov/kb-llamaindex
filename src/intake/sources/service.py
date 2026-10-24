@@ -106,6 +106,7 @@ async def apply_proposal(
             skipped.append((peer_id, _flood_reason(flood)))
             continue
         joined = False
+        in_folder = False
         # Канал уже активен в реестре — значит в нём состоит не этот вызов, а
         # прошлое подключение. Откат тогда запрещён: выйдя, мы оставили бы
         # активную строку о канале, из которого нас нет, и свип ждал бы
@@ -116,20 +117,38 @@ async def apply_proposal(
             was_active = known is not None and known.state == "active"
             await ops.join(peer_id)
             joined = True
+            logger.info("sources: вступили в {p} ({s})", p=peer_id, s=item.slug)
             await ops.add_to_folder(peer_id, item.group_name)
+            in_folder = True
             await repo.add(
                 peer_id, item.slug, item.title, item.group_name, added_by=added_by,
             )
-        except Exception as exc:  # сбой одного канала не должен ронять обход
+        # BaseException, а не Exception: отмена вызова (клиент отвалился, пока
+        # раунд свипа держал замок) приходит как CancelledError, и без отката
+        # аккаунт остался бы в канале, о котором реестр не знает.
+        except BaseException as exc:
             if isinstance(exc, FloodWait):
                 flood = exc
             reason = _reason(exc)
             if joined and was_active:
                 reason += "; канал уже был в реестре, из канала не выходим"
             else:
-                reason = await _rollback(ops, peer_id, joined, reason)
+                reason = await _rollback(
+                    ops, peer_id, joined, reason,
+                    folder=item.group_name if in_folder else None,
+                )
+            if not isinstance(exc, Exception):
+                # отмену не глотаем: след в логе и дальше наверх
+                logger.warning(
+                    "sources: вызов прерван ({e}) на канале {p}: {r}",
+                    e=type(exc).__name__, p=peer_id, r=reason,
+                )
+                raise
             skipped.append((peer_id, reason))
             continue
+        logger.info(
+            "sources: канал {p} подключён (папка {g})", p=peer_id, g=item.group_name,
+        )
         connected.append(peer_id)
         if bootstrap <= 0:
             continue
@@ -336,7 +355,7 @@ async def _undo(op: Any, peer_id: int, folder: str) -> Exception | None:
     return None
 
 
-def _reason(exc: Exception) -> str:
+def _reason(exc: BaseException) -> str:
     if isinstance(exc, FloodWait):
         return _flood_reason(exc)
     if isinstance(exc, FolderNotFound):
@@ -344,19 +363,47 @@ def _reason(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
-async def _rollback(ops: TelegramOps, peer_id: int, joined: bool, reason: str) -> str:
+async def _rollback(
+    ops: TelegramOps, peer_id: int, joined: bool, reason: str,
+    *, folder: str | None = None,
+) -> str:
     """Выйти из канала, если вступили, а записать не удалось: членство без
-    строки реестра никто не увидит. Сбой выхода — в причину, нужна ручная чистка."""
+    строки реестра никто не увидит. Сбой выхода — в причину, нужна ручная чистка.
+
+    ``folder`` — папка, в которую канал уже успели положить: её запись тоже
+    снимается, иначе в папке пользователя остался бы канал, которого нет ни в
+    аккаунте, ни в реестре. Сбой снятия называет остаток в причине."""
     if not joined:
         return reason
+    leftovers: list[str] = []
     try:
         await ops.leave(peer_id)
     except Exception as exc:
         logger.warning("откат вступления {p} не удался: {e!r}", p=peer_id, e=exc)
-        return (
-            f"{reason}; выйти из канала не удалось ({type(exc).__name__}: {exc}), "
-            "аккаунт остался в канале — нужна ручная чистка"
+        leftovers.append(
+            f"выйти из канала не удалось ({type(exc).__name__}: {exc}), "
+            "аккаунт остался в канале"
         )
+    if folder is not None:
+        try:
+            await ops.remove_from_folder(peer_id, folder)
+        except FolderNotEditable as exc:
+            leftovers.append(
+                f"из папки {folder!r} убрать не удалось ({exc}), канал остался в папке"
+            )
+        except FolderNotFound:
+            pass  # папки уже нет — убирать нечего
+        except Exception as exc:
+            logger.warning(
+                "снятие {p} с папки {f} при откате не удалось: {e!r}",
+                p=peer_id, f=folder, e=exc,
+            )
+            leftovers.append(
+                f"из папки {folder!r} убрать не удалось "
+                f"({type(exc).__name__}: {exc}), канал остался в папке"
+            )
+    if leftovers:
+        return f"{reason}; {'; '.join(leftovers)} — нужна ручная чистка"
     return f"{reason}; вступление отменено"
 
 
