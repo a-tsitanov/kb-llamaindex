@@ -23,6 +23,8 @@ from src.intake.sources.proposals import (
     BadProposal,
     Proposal,
     ProposalStore,
+    SourceInputError,
+    SourceNotFound,
 )
 from src.intake.sources.repository import SourceRepository, SourceRow
 from src.intake.sources.telegram import (
@@ -181,7 +183,7 @@ async def move_source(
     упал и где канал теперь. Документы и курсор диалога не трогаются.
     """
     if folder not in GROUP_SET:
-        raise ValueError(f"папка {folder!r} вне допустимых групп: {sorted(GROUP_SET)}")
+        raise SourceInputError(f"папка {folder!r} вне допустимых групп: {sorted(GROUP_SET)}")
     row = await _active_row(repo, peer_id)
     _bind(store.take(proposal_id, code, MOVE), peer_id)
     old = row.group_name
@@ -215,7 +217,7 @@ async def move_source(
         ) from exc
     try:
         if not await repo.set_group(peer_id, folder):
-            raise LookupError(f"источник {peer_id} пропал из реестра при переносе")
+            raise SourceNotFound(f"источник {peer_id} пропал из реестра при переносе")
     except Exception as exc:
         readd = await _undo(ops.add_to_folder, peer_id, old) if was_in_old else None
         unadd = await _undo(ops.remove_from_folder, peer_id, folder)
@@ -280,7 +282,7 @@ async def leave_source(
     _bind(store.take(proposal_id, code, LEAVE), peer_id)
     await ops.leave(peer_id)
     if not await repo.mark_left(peer_id):
-        raise LookupError(f"источник {peer_id} пропал из реестра при выходе")
+        raise SourceNotFound(f"источник {peer_id} пропал из реестра при выходе")
 
 
 async def set_source_trust(
@@ -294,15 +296,15 @@ async def set_source_trust(
     """
     if trust is not None:
         if isinstance(trust, bool) or not isinstance(trust, (int, float)):
-            raise ValueError(f"доверие должно быть числом или None, получено {trust!r}")
+            raise SourceInputError(f"доверие должно быть числом или None, получено {trust!r}")
         if not (math.isfinite(trust) and 0.0 <= trust <= 1.0):
-            raise ValueError(f"доверие должно быть в [0, 1] или None, получено {trust!r}")
+            raise SourceInputError(f"доверие должно быть в [0, 1] или None, получено {trust!r}")
     if await repo.get(peer_id) is None:
-        raise LookupError(f"источник {peer_id} не подключён")
+        raise SourceNotFound(f"источник {peer_id} не подключён")
     await repo.set_trust(peer_id, trust)
     row = await repo.get(peer_id)
     if row is None:
-        raise LookupError(f"источник {peer_id} пропал из реестра")
+        raise SourceNotFound(f"источник {peer_id} пропал из реестра")
     return row
 
 
@@ -318,7 +320,7 @@ async def _active_row(repo: SourceRepository, peer_id: int) -> SourceRow:
     """Предложение разрешает лишь известное реестру: чужой peer_id — отказ."""
     row = await repo.get(peer_id)
     if row is None or row.state != "active":
-        raise LookupError(f"источник {peer_id} не подключён")
+        raise SourceNotFound(f"источник {peer_id} не подключён")
     return row
 
 

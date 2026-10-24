@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -36,6 +37,8 @@ from src.intake.sources.proposals import (
     BadProposal,
     ProposalItem,
     ProposalStore,
+    SourceInputError,
+    SourceNotFound,
 )
 from src.intake.sources.report import channel_report
 from src.intake.sources.repository import SourceRepository, SourceRow
@@ -100,7 +103,7 @@ def _translate(exc: Exception) -> ToolError | None:
             f"папки {exc.folder!r} нет в аккаунте; агент папки не создаёт — "
             "создайте её в клиенте телеграма"
         )
-    if isinstance(exc, (ValueError, LookupError)):
+    if isinstance(exc, (SourceInputError, SourceNotFound)):
         return ToolError(str(exc))
     return None
 
@@ -141,10 +144,13 @@ def build_sources_mcp(
     *,
     ingest: IngestTarget | None = None,
     status: Callable[[], dict[str, Any]] | None = None,
+    folders_timeout: float = 3.0,
+    approved_moves: dict[str, dict[int, str]] | None = None,
 ) -> FastMCP:
     """Собрать сервер. `repo_factory(ctx)` строит репозиторий из контекста графа,
     который вернул шов доступа; `status()` отдаёт курсоры и итог последнего
-    раунда свипа (состояние фидера, новых полей не заводит)."""
+    раунда свипа (состояние фидера, новых полей не заводит). `folders_timeout` —
+    сколько `feeder_status` ждёт список папок (он берёт замок раунда)."""
     mcp = FastMCP(
         name="kb-feeder-sources",
         instructions=(
@@ -157,7 +163,10 @@ def build_sources_mcp(
     )
     # Папка, одобренная пользователем для переноса: source_move берёт её отсюда,
     # а не из аргумента вызова, иначе код подтверждал бы одно, а делалось другое.
-    approved_moves: dict[str, dict[int, str]] = {}
+    if approved_moves is None:
+        approved_moves = {}
+    # последний удавшийся список папок для feeder_status (замок раунда может держаться долго)
+    folders_cache: list[str] | None = None
 
     async def _enter() -> tuple[Any, SourceRepository]:
         ctx = await require_sources_access(feeder_graph_id)
@@ -170,16 +179,14 @@ def build_sources_mcp(
         _, repo = await _enter()
         with _translated():
             rows = await repo.list_active()
-            folders = await ops.folders()
-            members: dict[str, set[int]] = {}
-            for g in {r.group_name for r in rows}:
-                try:
-                    members[g] = await ops.folder_members(g)
-                except FolderNotFound:
-                    members[g] = set()
+            # одно чтение фильтров на весь листинг; названия сверяются как в _find_folder
+            by_folder = await ops.folders_with_members()
+            members = {t.casefold(): ids for t, ids in by_folder.items()}
+            folders = list(by_folder)
             return {
                 "sources": [
-                    {**_row(r), "in_folder": r.peer_id in members[r.group_name]}
+                    {**_row(r), "in_folder": r.peer_id in members.get(
+                        r.group_name.strip().casefold(), set())}
                     for r in rows
                 ],
                 "folders": folders,
@@ -221,15 +228,15 @@ def build_sources_mcp(
         _, repo = await _enter()
         with _translated():
             if action not in (CONNECT, MOVE, LEAVE):
-                raise ValueError(f"действие {action!r} не из connect, move, leave")
+                raise SourceInputError(f"действие {action!r} не из connect, move, leave")
             if action != CONNECT and len(channels) != 1:
-                raise ValueError(f"для {action} в предложении ровно один канал")
+                raise SourceInputError(f"для {action} в предложении ровно один канал")
             items: list[ProposalItem] = []
             for ch in channels:
                 try:
                     peer_id = int(ch["peer_id"])
                 except (KeyError, TypeError, ValueError):
-                    raise ValueError(f"у канала нет числового peer_id: {ch!r}") from None
+                    raise SourceInputError(f"у канала нет числового peer_id: {ch!r}") from None
                 if action == CONNECT:
                     items.append(ProposalItem(
                         peer_id, str(ch.get("slug") or ""), str(ch.get("title") or ""),
@@ -238,10 +245,13 @@ def build_sources_mcp(
                     continue
                 row = await repo.get(peer_id)
                 if row is None or row.state != "active":
-                    raise LookupError(f"источник {peer_id} не подключён")
+                    raise SourceNotFound(f"источник {peer_id} не подключён")
                 group = str(ch.get("group") or "") if action == MOVE else row.group_name
                 items.append(ProposalItem(peer_id, row.slug, row.title, group))
             proposal = store.create(items, action)
+            # одобренные папки живут не дольше самого предложения
+            for pid in [p for p in approved_moves if not store.is_live(p)]:
+                del approved_moves[pid]
             if action == MOVE:
                 approved_moves[proposal.id] = {it.peer_id: it.group_name for it in items}
             return {
@@ -317,14 +327,29 @@ def build_sources_mcp(
 
     @mcp.tool
     async def feeder_status() -> dict[str, Any]:
-        """Курсоры по диалогам, итог последнего раунда свипа и найденные папки."""
+        """Курсоры по диалогам, итог последнего раунда свипа и найденные папки.
+
+        Курсоры и раунд читаются без замка и без телеграма: диагностика нужна
+        именно тогда, когда раунд долгий или завис. Папки — по возможности:
+        `folders_state` = `fresh` (прочитаны сейчас), `stale` (замок занят,
+        отдан список прошлого ответа) или `unavailable` (читать нечем).
+        `last_round.ok = false` — раунд упал, причина в `error`.
+        """
+        nonlocal folders_cache
         await _enter()
         with _translated():
             snap = status() if status is not None else {}
+            try:
+                folders_cache = await asyncio.wait_for(ops.folders(), folders_timeout)
+                folders, state = folders_cache, "fresh"
+            except (TimeoutError, FloodWait):
+                folders = folders_cache
+                state = "stale" if folders_cache is not None else "unavailable"
             return {
                 "cursors": snap.get("cursors") or {},
                 "last_round": snap.get("last_round"),
-                "folders": await ops.folders(),
+                "folders": folders,
+                "folders_state": state,
             }
 
     return mcp

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -59,11 +60,9 @@ class Ops:
         self._f("folders")
         return self._folders
 
-    async def folder_members(self, folder):
-        self._f("folder_members")
-        if folder not in self.members:
-            raise FolderNotFound(folder, folder=folder)
-        return self.members[folder]
+    async def folders_with_members(self):
+        self._f("folders_with_members")
+        return {f: set(self.members.get(f, set())) for f in self._folders}
 
     async def search(self, query, limit):
         self._f("search")
@@ -134,7 +133,7 @@ class Repo:
 
 
 class Env:
-    def __init__(self, monkeypatch, *, ops_kw=None, status=None):
+    def __init__(self, monkeypatch, *, ops_kw=None, status=None, **build_kw):
         self.log: list = []
         self.ops = Ops(self.log, **(ops_kw or {}))
         self.store = ProposalStore()
@@ -157,6 +156,7 @@ class Env:
         kw = {}
         if status is not None:
             kw["status"] = status
+        kw.update(build_kw)
         self.mcp = build_sources_mcp(self.ops, factory, self.store, "feeder", **kw)
 
     @property
@@ -220,6 +220,13 @@ async def test_sources_list_reports_group_trust_and_folder_divergence(monkeypatc
     assert by[2]["in_folder"] is False and by[2]["trust"] is None
     assert by[3]["in_folder"] is False
     assert out["folders"] == ["news", "digest"]
+    # состав всех папок читается ОДНИМ обращением, а не по запросу на группу
+    assert env_log_count(e.log, "folders_with_members") == 1
+    assert "folders" not in e.log
+
+
+def env_log_count(log, name):
+    return sum(1 for x in log if x == name)
 
 
 async def test_sources_list_missing_folder_is_divergence_not_error(monkeypatch):
@@ -401,3 +408,134 @@ async def test_feeder_status_reports_cursors_last_round_and_folders(monkeypatch)
 async def test_feeder_status_without_a_finished_round(env):
     out = await env.call("feeder_status")
     assert out["last_round"] is None and out["cursors"] == {}
+
+
+# ---------- замечания ревью ----------
+
+
+async def test_move_with_wrong_code_is_refused_and_nothing_reaches_telegram(env):
+    env.repo.seed(7, "news")
+    p = await env.call(
+        "sources_propose", action="move", channels=[{"peer_id": 7, "group": "digest"}],
+    )
+    env.log.clear()
+    with pytest.raises(ToolError, match="код не принят"):
+        await env.call("source_move", proposal_id=p["proposal_id"], code="WRONG1", peer_id=7)
+    assert not {"add_to_folder", "remove_from_folder", "join", "leave"} & set(env.log)
+    assert env.repo.rows[7].group_name == "news"
+
+
+async def test_move_with_code_issued_for_another_channel_is_refused(env):
+    env.repo.seed(7, "news")
+    env.repo.seed(8, "news")
+    p = await env.call(
+        "sources_propose", action="move", channels=[{"peer_id": 7, "group": "digest"}],
+    )
+    env.log.clear()
+    with pytest.raises(ToolError, match="код не принят"):
+        await env.call("source_move", proposal_id=p["proposal_id"], code=p["code"], peer_id=8)
+    assert not {"add_to_folder", "remove_from_folder"} & set(env.log)
+    assert env.repo.rows[8].group_name == "news"
+
+
+async def test_sources_list_reports_floodwait_instead_of_a_traceback(monkeypatch):
+    e = Env(monkeypatch, ops_kw={"fail": {"folders_with_members": FloodWait(33)}})
+    e.repo.seed(1, "news")
+    with pytest.raises(ToolError, match="33") as ei:
+        await e.call("sources_list")
+    assert type(ei.value) is ToolError
+
+
+async def test_foreign_errors_are_not_passed_to_the_harness_as_text(monkeypatch):
+    e = Env(monkeypatch)
+
+    async def boom():
+        raise KeyError("driver internals")
+
+    e.repo.list_active = boom
+    with pytest.raises(KeyError):
+        await e.call("sources_list")
+
+    async def boom2():
+        raise ValueError("asyncpg: invalid input")
+
+    e.repo.list_active = boom2
+    with pytest.raises(ValueError) as ei:
+        await e.call("sources_list")
+    assert not isinstance(ei.value, ToolError)
+
+
+async def test_own_input_errors_still_reach_the_harness(env):
+    with pytest.raises(ToolError, match="не из connect"):
+        await env.call("sources_propose", action="nope", channels=[])
+    with pytest.raises(ToolError, match="не подключён"):
+        await env.call("source_trust_set", peer_id=404, trust=0.5)
+
+
+async def test_approved_moves_are_pruned_when_used_or_expired(monkeypatch):
+    now = [0.0]
+    approved: dict = {}
+    e = Env(monkeypatch, approved_moves=approved)
+    e.store._clock = lambda: now[0]
+    e.repo.seed(7, "news")
+    e.repo.seed(8, "news")
+    p7 = await e.call(
+        "sources_propose", action="move", channels=[{"peer_id": 7, "group": "digest"}],
+    )
+    assert list(approved) == [p7["proposal_id"]]
+    # использованное предложение уходит
+    await e.call("source_move", proposal_id=p7["proposal_id"], code=p7["code"], peer_id=7)
+    assert approved == {}
+    # просроченное уходит при следующем предложении
+    await e.call(
+        "sources_propose", action="move", channels=[{"peer_id": 8, "group": "digest"}],
+    )
+    assert len(approved) == 1
+    now[0] += 10_000
+    await e.call(
+        "sources_propose", action="move", channels=[{"peer_id": 8, "group": "official"}],
+    )
+    assert len(approved) == 1
+
+
+async def test_feeder_status_answers_while_someone_holds_the_lock(monkeypatch):
+    lock = asyncio.Lock()
+    status = lambda: {  # noqa: E731
+        "cursors": {"-100": {"last_id": 1}},
+        "last_round": {"ok": True, "tally": {}},
+    }
+    e = Env(monkeypatch, status=status, folders_timeout=0.05)
+
+    async def locked_folders():
+        async with lock:
+            return ["news"]
+
+    e.ops.folders = locked_folders
+    await lock.acquire()          # свип сидит в раунде
+    try:
+        out = await asyncio.wait_for(e.call("feeder_status"), 2)
+    finally:
+        lock.release()
+    assert out["cursors"] == {"-100": {"last_id": 1}}
+    assert out["last_round"]["ok"] is True
+    assert out["folders"] is None
+    assert out["folders_state"] == "unavailable"
+
+
+async def test_feeder_status_marks_folders_stale_after_a_timeout(monkeypatch):
+    lock = asyncio.Lock()
+    e = Env(monkeypatch, folders_timeout=0.05)
+    first = await e.call("feeder_status")
+    assert first["folders"] == ["news", "digest"] and first["folders_state"] == "fresh"
+
+    async def locked_folders():
+        async with lock:
+            return ["news"]
+
+    e.ops.folders = locked_folders
+    await lock.acquire()
+    try:
+        out = await e.call("feeder_status")
+    finally:
+        lock.release()
+    assert out["folders"] == ["news", "digest"] and out["folders_state"] == "stale"

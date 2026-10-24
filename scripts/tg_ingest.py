@@ -54,7 +54,7 @@ import asyncio
 import json
 import os
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -431,6 +431,9 @@ def start_sources_mcp(
     except ValueError:
         logger.error("tg_ingest: TG_SOURCES_MCP_PORT={p!r} не число — MCP не поднят", p=raw)
         return None
+    # по умолчанию только loopback; в контейнере compose задаёт 0.0.0.0, а
+    # наружу порт публикуется лишь на 127.0.0.1 хоста
+    host = (env.get("TG_SOURCES_MCP_HOST") or "").strip() or "127.0.0.1"
 
     async def _host() -> None:
         try:
@@ -455,14 +458,44 @@ def start_sources_mcp(
                 ),
                 status=status,
             )
-            logger.info("tg_ingest: MCP источников на 0.0.0.0:{p}", p=port)
-            await mcp_server.serve_sources_mcp(mcp, "0.0.0.0", port)
+            logger.info("tg_ingest: MCP источников на {h}:{p}", h=host, p=port)
+            await mcp_server.serve_sources_mcp(mcp, host, port)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        # SystemExit: uvicorn при занятом порте делает sys.exit(1), а это
+        # BaseException — без него такой сбой ушёл бы в цикл и убил свип.
+        # Голый BaseException нельзя: отмена и KeyboardInterrupt идут выше.
+        except (Exception, SystemExit):
             logger.exception("tg_ingest: MCP источников упал; свип продолжается без него")
 
     return asyncio.create_task(_host(), name="sources-mcp")
+
+
+async def run_locked_round(
+    lock: asyncio.Lock, round_status: dict, body: Callable[[], Awaitable[tuple[int, dict]]],
+) -> None:
+    """Раунд свипа под общим замком; итог (или провал) — в ``round_status``.
+
+    ``body`` возвращает (число диалогов, tally). Провалившийся раунд тоже
+    записывается (``ok=False`` и причина), иначе ``feeder_status`` показывал бы
+    устаревший «успех»; исключение идёт дальше как и раньше.
+    """
+    async with lock:
+        try:
+            dialogs, tally = await body()
+        except Exception as exc:
+            round_status["last_round"] = {
+                "ok": False,
+                "finished_at": datetime.now(UTC).isoformat(),
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+            raise
+        round_status["last_round"] = {
+            "ok": True,
+            "finished_at": datetime.now(UTC).isoformat(),
+            "dialogs": dialogs,
+            "tally": dict(tally),
+        }
 
 
 def select_mode(args: Any) -> str:
@@ -571,50 +604,49 @@ def main() -> int:
                 graph=args.graph, bootstrap_limit=args.bootstrap_limit,
                 state=state, round_status=round_status,
             )
+            async def _round() -> tuple[int, dict]:
+                nonlocal missing_warned
+                dialogs = select_dialogs([d async for d in tg.iter_dialogs()])
+                # Folders are read every round regardless of --folders scoping:
+                # group tagging (resolve_group_map) needs the account's full
+                # folder list too, not just the ones used to scope the sync.
+                res = await tg(functions.messages.GetDialogFiltersRequest())
+                filters = getattr(res, "filters", res)  # obj in new layers, list in old
+                group_map = resolve_group_map(filters, peer_id=tg_utils.get_peer_id)
+                if folder_names:
+                    spec, missing = resolve_folders(
+                        filters, folder_names, peer_id=tg_utils.get_peer_id,
+                    )
+                    if missing and not missing_warned:
+                        logger.warning(
+                            "tg_ingest: folders not found: {m} (have: {have})",
+                            m=missing,
+                            have=[t for f in filters if (t := filter_title(f).strip())],
+                        )
+                        missing_warned = True
+                    dialogs = [d for d in dialogs if dialog_in_folders(d, spec)]
+                tally = await sync_round(
+                    tg,
+                    http,
+                    dialogs=dialogs,
+                    state=state,
+                    save=lambda: save_state(state_path, state),
+                    api_base=args.api_base,
+                    api_key=args.api_key,
+                    queue=args.queue,
+                    bootstrap_limit=args.bootstrap_limit,
+                    group_map=group_map,
+                )
+                logger.info(
+                    "tg_ingest sync round: dialogs={d} tally={t}",
+                    d=len(dialogs), t=dict(tally),
+                )
+                return len(dialogs), dict(tally)
+
             try:
                 while True:
-                    async with lock:
-                        dialogs = select_dialogs([d async for d in tg.iter_dialogs()])
-                        # Folders are read every round regardless of --folders scoping:
-                        # group tagging (resolve_group_map) needs the account's full
-                        # folder list too, not just the ones used to scope the sync.
-                        res = await tg(functions.messages.GetDialogFiltersRequest())
-                        filters = getattr(res, "filters", res)  # obj in new layers, list in old
-                        group_map = resolve_group_map(filters, peer_id=tg_utils.get_peer_id)
-                        if folder_names:
-                            spec, missing = resolve_folders(
-                                filters, folder_names, peer_id=tg_utils.get_peer_id,
-                            )
-                            if missing and not missing_warned:
-                                logger.warning(
-                                    "tg_ingest: folders not found: {m} (have: {have})",
-                                    m=missing,
-                                    have=[t for f in filters if (t := filter_title(f).strip())],
-                                )
-                                missing_warned = True
-                            dialogs = [d for d in dialogs if dialog_in_folders(d, spec)]
-                        tally = await sync_round(
-                            tg,
-                            http,
-                            dialogs=dialogs,
-                            state=state,
-                            save=lambda: save_state(state_path, state),
-                            api_base=args.api_base,
-                            api_key=args.api_key,
-                            queue=args.queue,
-                            bootstrap_limit=args.bootstrap_limit,
-                            group_map=group_map,
-                        )
-                        logger.info(
-                            "tg_ingest sync round: dialogs={d} tally={t}",
-                            d=len(dialogs), t=dict(tally),
-                        )
-                        # то, что раунд и так посчитал, — для feeder_status MCP
-                        round_status["last_round"] = {
-                            "finished_at": datetime.now(UTC).isoformat(),
-                            "dialogs": len(dialogs),
-                            "tally": dict(tally),
-                        }
+                    # итог раунда (и провал) — для feeder_status MCP
+                    await run_locked_round(lock, round_status, _round)
                     if args.once:
                         break
                     await asyncio.sleep(args.poll_interval)

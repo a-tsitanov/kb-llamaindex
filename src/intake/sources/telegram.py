@@ -172,20 +172,30 @@ class TelegramOps:
             filters = await self._filters()
         return [t for f in filters if (t := filter_title(f).strip())]
 
+    async def folders_with_members(self) -> dict[str, set[int]]:
+        """Название папки -> `peer_id` её каналов; фильтры читаются ОДНИМ запросом.
+
+        Для листинга: по запросу на каждую группу один FloodWait ронял бы весь
+        список. Общий список (chatlist) читается как обычная папка.
+        """
+        async with self._guard():
+            filters = await self._filters()
+        return {
+            t: self._member_ids(f)
+            for f in filters
+            if (t := filter_title(f).strip()) and hasattr(f, "include_peers")
+        }
+
     async def folder_members(self, folder: str) -> set[int]:
         """`peer_id` каналов папки (включённые и закреплённые); только чтение.
 
         Общий список (chatlist) читается как обычная папка: править его
-        нельзя, а видеть состав можно. Нет папки — `FolderNotFound`.
+        нельзя, а видеть состав можно. Нет папки — `FolderNotFound`. Папка
+        ищется тем же `_find_folder`, что и при правке: сравнение названий
+        живёт в одном месте.
         """
         async with self._guard():
-            wanted = folder.strip().casefold()
-            for f in await self._filters():
-                if filter_title(f).strip().casefold() == wanted and hasattr(f, "include_peers"):
-                    return self._member_ids(f)
-        raise FolderNotFound(
-            f"папки {folder!r} нет в аккаунте; агент папки не создаёт", folder=folder,
-        )
+            return self._member_ids(await self._find_folder(folder, writable=False))
 
     async def add_to_folder(self, peer_id: int, folder: str) -> bool:
         """True — состав папки изменён; False — канал в ней уже был."""
@@ -228,11 +238,11 @@ class TelegramOps:
         # новые слои отдают обёртку `.filters`, старые — список
         return list(getattr(res, "filters", res))
 
-    async def _find_folder(self, name: str) -> Any:
+    async def _find_folder(self, name: str, *, writable: bool = True) -> Any:
         wanted = name.strip().casefold()
         for f in await self._filters():
             if filter_title(f).strip().casefold() == wanted and hasattr(f, "include_peers"):
-                if isinstance(f, _tl().types.DialogFilterChatlist):
+                if writable and isinstance(f, _tl().types.DialogFilterChatlist):
                     raise FolderNotEditable(
                         f"папка {name!r} — общий список (chatlist), "
                         "его нельзя редактировать через UpdateDialogFilterRequest",

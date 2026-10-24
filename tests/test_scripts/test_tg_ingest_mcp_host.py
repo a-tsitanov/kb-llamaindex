@@ -16,7 +16,7 @@ class _Rec:
     def __init__(self):
         self.built = []
         self.served = []
-        self.serve_error: Exception | None = None
+        self.serve_error: BaseException | None = None
         self.release = asyncio.Event()
 
     def install(self, monkeypatch):
@@ -57,7 +57,7 @@ async def test_port_set_starts_server_with_the_same_client_and_lock(monkeypatch)
     assert built.ops._client is tg
     assert built.ops._lock is lock
     assert built.graph == "default"
-    assert rec.served == [("MCP", "0.0.0.0", 9105)]
+    assert rec.served == [("MCP", "127.0.0.1", 9105)]
     task.cancel()
 
 
@@ -123,3 +123,71 @@ async def test_status_snapshot_exposes_existing_cursors_and_last_round(monkeypat
     snap = rec.built[0].kw["status"]()
     assert snap == {"cursors": state, "last_round": round_status["last_round"]}
     task.cancel()
+
+
+async def test_host_is_configurable_and_defaults_to_loopback(monkeypatch):
+    rec = _Rec()
+    rec.install(monkeypatch)
+    _, _, task = _start({"TG_SOURCES_MCP_PORT": "9105", "TG_SOURCES_MCP_HOST": "0.0.0.0"})
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert rec.served == [("MCP", "0.0.0.0", 9105)]
+    task.cancel()
+
+
+async def test_busy_port_systemexit_does_not_kill_the_sweep(monkeypatch):
+    """uvicorn при занятом порте делает sys.exit(1): это SystemExit, не Exception."""
+    rec = _Rec()
+    rec.serve_error = SystemExit(1)
+    rec.install(monkeypatch)
+    logged = []
+    monkeypatch.setattr(T.logger, "exception", lambda *a, **k: logged.append((a, k)))
+    _, _, task = _start({"TG_SOURCES_MCP_PORT": "9105"})
+    await asyncio.wait_for(task, 1)       # SystemExit не вылетает в цикл
+    assert not task.cancelled() and task.exception() is None
+    assert logged
+
+
+async def test_cancellation_still_propagates_through_the_host(monkeypatch):
+    rec = _Rec()
+    rec.install(monkeypatch)
+    _, _, task = _start({"TG_SOURCES_MCP_PORT": "9105"})
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+async def test_round_runs_inside_the_shared_lock():
+    lock = asyncio.Lock()
+    status: dict = {"last_round": None}
+    seen = {}
+
+    async def body():
+        seen["locked"] = lock.locked()
+        waiter = asyncio.create_task(lock.acquire())
+        await asyncio.sleep(0.01)
+        seen["waiter_blocked"] = not waiter.done()
+        waiter.cancel()
+        return 3, {"sent": 2}
+
+    await T.run_locked_round(lock, status, body)
+    assert seen == {"locked": True, "waiter_blocked": True}
+    assert not lock.locked()
+    lr = status["last_round"]
+    assert lr["ok"] is True and lr["dialogs"] == 3 and lr["tally"] == {"sent": 2}
+
+
+async def test_failed_round_is_recorded_with_its_reason_and_reraised():
+    lock = asyncio.Lock()
+    status: dict = {"last_round": {"ok": True, "dialogs": 1, "tally": {}}}
+
+    async def body():
+        raise RuntimeError("flood storm")
+
+    with pytest.raises(RuntimeError):
+        await T.run_locked_round(lock, status, body)
+    lr = status["last_round"]
+    assert lr["ok"] is False and "flood storm" in lr["error"] and lr["finished_at"]
+    assert not lock.locked()

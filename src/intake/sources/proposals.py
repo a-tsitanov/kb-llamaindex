@@ -27,6 +27,16 @@ LEAVE = "leave"
 ACTIONS = frozenset({CONNECT, MOVE, LEAVE})
 
 
+class SourceInputError(ValueError):
+    """Отказ по входным данным источников (группа, действие, доверие): текст
+    для человека, адресован харнессу. Чужой `ValueError` (драйвера, библиотеки)
+    сюда не относится и харнессу текстом не отдаётся."""
+
+
+class SourceNotFound(LookupError):
+    """Источника нет в реестре или он не активен (наш отказ, не чужой `KeyError`)."""
+
+
 class BadProposal(ValueError):
     """Предложения нет, оно просрочено, уже использовано или код не тот."""
 
@@ -58,12 +68,12 @@ class ProposalStore:
 
     def create(self, items: list[ProposalItem], action: str) -> Proposal:
         if action not in ACTIONS:
-            raise ValueError(f"действие {action!r} не из {sorted(ACTIONS)}")
+            raise SourceInputError(f"действие {action!r} не из {sorted(ACTIONS)}")
         if not items:
-            raise ValueError("пустое предложение")
+            raise SourceInputError("пустое предложение")
         for it in items:
             if it.group_name not in GROUP_SET:
-                raise ValueError(
+                raise SourceInputError(
                     f"группа {it.group_name!r} не из {sorted(GROUP_SET)}"
                 )
         self._purge()
@@ -99,6 +109,11 @@ class ProposalStore:
                 "предложение погашено"
             )
         return proposal
+
+    def is_live(self, proposal_id: str) -> bool:
+        """Предложение ещё действует (не использовано и не просрочено)."""
+        self._purge()
+        return proposal_id in self._live
 
     def _purge(self) -> None:
         now = self._clock()

@@ -363,3 +363,51 @@ async def test_folder_members_missing_folder_names_it():
     with pytest.raises(FolderNotFound) as ei:
         await ops.folder_members("digest")
     assert ei.value.folder == "digest"
+
+
+@pytest.mark.asyncio
+async def test_folders_with_members_reads_filters_once():
+    client = _Client({functions.messages.GetDialogFiltersRequest: [
+        types.DialogFilterDefault(), _folder(2, "news", include=[10], pinned=[12]),
+        _folder(3, "digest", include=[11]),
+    ]})
+    ops, _ = _ops(client)
+    out = await ops.folders_with_members()
+    assert out == {"news": {_pid(10), _pid(12)}, "digest": {_pid(11)}}
+    assert [type(r) for r in client.requests] == [functions.messages.GetDialogFiltersRequest]
+
+
+@pytest.mark.asyncio
+async def test_folders_with_members_floodwait_and_lock():
+    ops, _ = _ops(_Client(dict(_FLOOD_RESPONSES)))
+    with pytest.raises(FloodWait):
+        await ops.folders_with_members()
+    client = _Client({functions.messages.GetDialogFiltersRequest: [_folder(2, "news")]})
+    ops, lock = _ops(client)
+    await lock.acquire()
+    task = asyncio.create_task(ops.folders_with_members())
+    await asyncio.sleep(0.01)
+    assert client.calls == 0 and not task.done()
+    lock.release()
+    await task
+
+
+@pytest.mark.asyncio
+async def test_folder_members_matches_the_title_the_same_way_as_edits(monkeypatch):
+    client = _Client({functions.messages.GetDialogFiltersRequest: [
+        _folder(2, "News", include=[10], pinned=[12]),
+    ]})
+    ops, _ = _ops(client)
+    seen = []
+    orig = TelegramOps._find_folder
+
+    async def spy(self, name, **kw):
+        seen.append(name)
+        return await orig(self, name, **kw)
+
+    monkeypatch.setattr(TelegramOps, "_find_folder", spy)
+    assert await ops.folder_members(" news ") == {_pid(10), _pid(12)}
+    assert seen == [" news "]
+    with pytest.raises(FolderNotFound) as ei:
+        await ops.folder_members("memes")
+    assert ei.value.folder == "memes"
