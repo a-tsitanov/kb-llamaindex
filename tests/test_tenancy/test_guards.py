@@ -69,9 +69,7 @@ def _call_args(text: str, func: str) -> list[str]:
 
 
 # Места ВНЕ authz.py, которым разрешено звать `authorize` напрямую, —
-# доставка наблюдения и шов MCP фидера (`src/intake/sources/auth.py`:
-# за инструментом настоящий аккаунт Telegram, право `sources` не должно
-# зависеть от AUTHZ_MODE).  Причина доставки ровно обратна общему правилу:
+# доставка наблюдения.  Причина ровно обратна общему правилу:
 # режим `log` существует ради окна наблюдения, когда отказ пишется в лог,
 # а запрос пропускается, но здесь «пропустить» означает ОТПРАВИТЬ
 # содержимое графа на чужой адрес — то есть совершить то, от чего
@@ -81,7 +79,6 @@ def _call_args(text: str, func: str) -> list[str]:
 _AUTHORIZE_DIRECT_ALLOWED = {
     "src/tenancy/authz.py",
     "src/watch/delivery.py",
-    "src/intake/sources/auth.py",
 }
 
 

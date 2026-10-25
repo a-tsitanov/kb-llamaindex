@@ -54,8 +54,7 @@ import asyncio
 import json
 import os
 from collections import Counter
-from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -433,130 +432,6 @@ async def sync_renames(repo: Any, dialogs: list[Any]) -> int:
     return renamed
 
 
-def seed_cursor(
-    state: dict, save: Callable[[], None], peer_id: int, last_id: int, title: str = "",
-) -> None:
-    """Перенести курсор истории, подтянутой при подключении, в состояние свипа.
-
-    Без этого первый же раунд видел бы ``last_id <= 0``, перечитывал те же
-    сообщения и получал 409 на каждое. Курсор только растёт: свип мог уйти
-    дальше, пока шло подключение.
-    """
-    entry = state.setdefault(str(peer_id), {"last_id": 0, "title": title})
-    entry["last_id"] = max(int(entry.get("last_id", 0) or 0), last_id)
-    save()
-
-
-def start_sources_mcp(
-    tg: Any,
-    lock: asyncio.Lock,
-    *,
-    http: Any,
-    api_base: str,
-    api_key: str,
-    graph: str | None,
-    state: dict,
-    round_status: dict,
-    env: Any = None,
-    save: Callable[[], None] | None = None,
-) -> asyncio.Task | None:
-    """Поднять MCP источников задачей рядом со свипом; без ``TG_SOURCES_MCP_PORT`` — ничего.
-
-    Сервер живёт в ЭТОМ процессе потому, что один токен — один поллер: второй
-    ``TelegramClient`` на той же сессии недопустим. Поэтому ``TelegramOps``
-    получает ТОТ ЖЕ клиент ``tg`` и ТОТ ЖЕ замок ``lock``, под которым идёт
-    раунд свипа. Падение сервера (сборка или работа) только логируется: свип
-    продолжается. Зависимость идёт scripts -> src, не наоборот.
-    """
-    env = os.environ if env is None else env
-    raw = (env.get("TG_SOURCES_MCP_PORT") or "").strip()
-    if not raw:
-        return None
-    try:
-        port = int(raw)
-    except ValueError:
-        logger.error("tg_ingest: TG_SOURCES_MCP_PORT={p!r} не число — MCP не поднят", p=raw)
-        return None
-    # по умолчанию только loopback; в контейнере compose задаёт 0.0.0.0, а
-    # наружу порт публикуется лишь на 127.0.0.1 хоста
-    host = (env.get("TG_SOURCES_MCP_HOST") or "").strip() or "127.0.0.1"
-    # Глубина истории новой подписки — своя, не TG_INGEST_BOOTSTRAP_LIMIT: та
-    # настроена под первый взгляд свипа (0 = ничего не тянуть), а спека обещает
-    # подписке 100 последних сообщений.
-    raw_depth = (env.get("TG_SOURCES_BOOTSTRAP") or "").strip()
-    try:
-        bootstrap = int(raw_depth) if raw_depth else 100
-    except ValueError:
-        logger.error("tg_ingest: TG_SOURCES_BOOTSTRAP={p!r} не число — берём 100", p=raw_depth)
-        bootstrap = 100
-
-    async def _host() -> None:
-        try:
-            # лениво: сервер нужен только при включённом порту
-            from src.intake.sources import mcp_server
-            from src.intake.sources.proposals import ProposalStore
-            from src.intake.sources.repository import SourceRepository
-            from src.intake.sources.telegram import TelegramOps
-            from src.tenancy.context import DEFAULT_GRAPH_ID
-
-            def status() -> dict:
-                return {"cursors": state, "last_round": round_status.get("last_round")}
-
-            mcp = mcp_server.build_sources_mcp(
-                TelegramOps(tg, lock),
-                lambda ctx: SourceRepository(graph=ctx),
-                ProposalStore(),
-                graph or DEFAULT_GRAPH_ID,
-                ingest=mcp_server.IngestTarget(
-                    http=http, api_base=api_base, api_key=api_key,
-                    bootstrap=bootstrap, graph=graph,
-                    on_cursor=(
-                        None if save is None
-                        else lambda peer, last, title: seed_cursor(state, save, peer, last, title)
-                    ),
-                ),
-                status=status,
-            )
-            logger.info("tg_ingest: MCP источников на {h}:{p}", h=host, p=port)
-            await mcp_server.serve_sources_mcp(mcp, host, port)
-        except asyncio.CancelledError:
-            raise
-        # SystemExit: uvicorn при занятом порте делает sys.exit(1), а это
-        # BaseException — без него такой сбой ушёл бы в цикл и убил свип.
-        # Голый BaseException нельзя: отмена и KeyboardInterrupt идут выше.
-        except (Exception, SystemExit):
-            logger.exception("tg_ingest: MCP источников упал; свип продолжается без него")
-
-    return asyncio.create_task(_host(), name="sources-mcp")
-
-
-async def run_locked_round(
-    lock: asyncio.Lock, round_status: dict, body: Callable[[], Awaitable[tuple[int, dict]]],
-) -> None:
-    """Раунд свипа под общим замком; итог (или провал) — в ``round_status``.
-
-    ``body`` возвращает (число диалогов, tally). Провалившийся раунд тоже
-    записывается (``ok=False`` и причина), иначе ``feeder_status`` показывал бы
-    устаревший «успех»; исключение идёт дальше как и раньше.
-    """
-    async with lock:
-        try:
-            dialogs, tally = await body()
-        except Exception as exc:
-            round_status["last_round"] = {
-                "ok": False,
-                "finished_at": datetime.now(UTC).isoformat(),
-                "error": f"{type(exc).__name__}: {exc}",
-            }
-            raise
-        round_status["last_round"] = {
-            "ok": True,
-            "finished_at": datetime.now(UTC).isoformat(),
-            "dialogs": dialogs,
-            "tally": dict(tally),
-        }
-
-
 def select_mode(args: Any) -> str:
     """Choose the run mode from parsed args: reingest wins over the legacy
     backfill, which wins over the default continuous sync."""
@@ -653,19 +528,7 @@ def main() -> int:
             httpx.AsyncClient(timeout=30.0, headers=client_headers(args.graph)) as http,
         ):
             missing_warned = False
-            # Один процесс на телеграм-аккаунт: один токен — один поллер, второй
-            # TelegramClient на той же сессии недопустим. Поэтому MCP источников
-            # живёт здесь и делит с раундом свипа ОДИН клиент и ОДИН замок.
-            lock = asyncio.Lock()
-            round_status: dict = {"last_round": None}
-            mcp_task = start_sources_mcp(
-                tg, lock, http=http, api_base=args.api_base, api_key=args.api_key,
-                graph=args.graph,
-                state=state, round_status=round_status,
-                save=lambda: save_state(state_path, state),
-            )
-            async def _round() -> tuple[int, dict]:
-                nonlocal missing_warned
+            while True:
                 dialogs = select_dialogs([d async for d in tg.iter_dialogs()])
                 # Folders are read every round regardless of --folders scoping:
                 # group tagging (resolve_group_map) needs the account's full
@@ -685,9 +548,9 @@ def main() -> int:
                         )
                         missing_warned = True
                     dialogs = [d for d in dialogs if dialog_in_folders(d, spec)]
-                # Без условия на MCP: /ingest читает реестр для доверия каждого
-                # документа и при выключенном MCP, и переименование без записи
-                # слепило бы доверие уже подключённых каналов навсегда.
+                # /ingest читает реестр для доверия каждого документа, а
+                # переименование без записи слепило бы доверие подключённых
+                # каналов навсегда.
                 try:
                     from src.intake.sources.repository import SourceRepository
                     from src.tenancy.context import DEFAULT_GRAPH_ID, cli_graph_context
@@ -716,21 +579,9 @@ def main() -> int:
                     "tg_ingest sync round: dialogs={d} tally={t}",
                     d=len(dialogs), t=dict(tally),
                 )
-                return len(dialogs), dict(tally)
-
-            try:
-                while True:
-                    # итог раунда (и провал) — для feeder_status MCP
-                    await run_locked_round(lock, round_status, _round)
-                    if args.once:
-                        break
-                    await asyncio.sleep(args.poll_interval)
-            finally:
-                if mcp_task is not None:
-                    mcp_task.cancel()
-                    # дождаться отмены: иначе --once выходит с «Task was destroyed
-                    # but it is pending»
-                    await asyncio.gather(mcp_task, return_exceptions=True)
+                if args.once:
+                    break
+                await asyncio.sleep(args.poll_interval)
 
     async def _run_reingest() -> int:
         import httpx

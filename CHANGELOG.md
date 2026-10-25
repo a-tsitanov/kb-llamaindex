@@ -8,81 +8,42 @@ with a section in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 loosely (Added / Changed / Fixed / Notes per stage).
 
-## [Feeder MCP] — 2026-10-23 — Источники Telegram из харнесса
+## [Feeder MCP removed] — 2026-10-25 — MCP источников снят
 
-### Added
-- **MCP источников в процессе фидера** (`src/intake/sources/mcp_server.py`,
-  включается `TG_SOURCES_MCP_PORT`): `sources_list`, `sources_search`,
-  `sources_resolve`, `sources_propose`, `sources_apply`, `source_move`,
-  `source_leave`, `source_trust_set`, `source_report`, `feeder_status`.
-  Каждый инструмент первым делом зовёт `require_sources_access` (право
-  `sources` на граф фидера, не зависит от `AUTHZ_MODE`). Запись в аккаунт
-  Telegram — только по одноразовому коду из `sources_propose`.
-- `TelegramOps.folder_members` — чтение состава папки; по нему
-  `sources_list` показывает расхождение с аккаунтом (`in_folder`).
-- Хостинг в `scripts/tg_ingest.py` (`start_sources_mcp`): один клиент и один
-  `asyncio.Lock` на раунд свипа и инструменты; падение сервера логируется и
-  свип продолжается. Без порта сервер не поднимается, поведение прежнее.
-- `docker-compose.tg-ingest.yml`: порт публикуется только на `127.0.0.1`,
-  `KB_MCP_REQUIRE_AUTH` как у `mcp-*`, Postgres-окружение,
-  `TG_SOURCES_BOOTSTRAP` (глубина истории нового канала, по умолчанию 100;
-  не зависит от `TG_INGEST_BOOTSTRAP_LIMIT`). Прямую зависимость `tg-ingest` от
-  `init` убрали как лишнюю: в проде он зависит от `api`, а тот от `init`, так
-  что `init` остаётся в графе зависимостей `up -d tg-ingest`.
-- Runbook `docs/runbook/feeder-sources.md`.
-- **Две новые таблицы графа: `source` и `source_slug`** (`src/storage/pg_schema.py`).
-  Их создаёт `setup_db`: до первого вызова инструмента нужно выполнить
-  `uv run python -m scripts.setup_db` (в стеке это делает сервис `init`).
-  Пустой реестр = прежнее поведение системы.
-- **Новое право ключа `sources`** (`Action.SOURCES`). `_FULL_SCOPES_SQL` в
-  `scripts/setup_db.py` теперь включает его, поэтому на свежей базе легаси-ключи
-  из `API_KEYS` (`legacy-env`) получают `sources` сразу. На уже существующей
-  базе их права не пересматриваются (маркер `authz_grandfather_v1`, вставка
-  `ON CONFLICT DO NOTHING`): нужен новый ключ
-  `scripts.tenant_admin key ... --scopes sources`. Подробности — в runbook.
-- **Изменён контракт `IngestParams` / `Ctx` / `trust_for`**: у `IngestParams` и
-  `Ctx` появились `channel` и `channel_trust` (личное доверие, снятое на
-  приёме), `trust_for(group, channel_trust=None)` предпочитает личное число
-  групповому. Это меняет запись графа: при противоречии побеждает большее
-  доверие. Ребро, у которого доверие не записано вовсе (колонка `source_trust`
-  без значения), сравнивается с `SIGNALS_SOURCE_TRUST_DEFAULT`, а не с нулём;
-  такие рёбра появляются в новых пространствах (колонка без `DEFAULT`, запись
-  без неизвестного доверия не штампует 0.0). В уже развёрнутых пространствах
-  колонка создана с `DEFAULT 0.0`: ребро, написанное до появления доверия,
-  несёт там `0.0`, неотличимое от настоящего нуля. Защита действует на рёбра,
-  записанные отныне, а канал с доверием `0.0` по-прежнему может вытеснить
-  старое ребро. Доверие действует только вперёд.
-- `in_folder` в `sources_list` имеет три значения: `true`, `false` и `null`
-  (папка собрана по признаку «все каналы» / «все группы», по составу не
-  ответить); `null` ставится и при флаге «только группы», хотя канал-вещание
-  такая папка не покрывает.
-- `source_leave` снимает канал с папки его группы (best-effort, сбой снятия
-  только в логе); подключение пишет курсор свипа после каждого сообщения
-  истории, а не один раз в конце.
-- `telethon` добавлен в extra `dev` (`pyproject.toml`), чтобы тесты фидера
-  шли без extra `tg`.
+### Removed
+- **MCP источников фидера снят по решению владельца**: каналы Telegram
+  добавляются руками в папки аккаунта, как до этой работы. MCP был построен,
+  выкачен на стенд и проверен вживую (тематический поиск `sources_discover`
+  работал, поиск по названию — нет), после чего удалён целиком:
+  `src/intake/sources/{mcp_server,telegram,proposals,service,report,auth}.py`,
+  их тесты, runbook `docs/runbook/feeder-sources.md`, хостинг сервера в
+  `scripts/tg_ingest.py` (`start_sources_mcp`, `seed_cursor`, замок раунда,
+  `TG_SOURCES_MCP_PORT` / `TG_SOURCES_MCP_HOST` / `TG_SOURCES_BOOTSTRAP`),
+  порт и `KB_MCP_REQUIRE_AUTH` в `docker-compose.tg-ingest.yml`, `telethon` из
+  extra `dev`.
+- **Право ключа `sources` (`Action.SOURCES`) убрано.** Ключ, уже выданный с
+  `scopes={sources}`, становится инертным: такое значение больше не входит в
+  `ALL_ACTIONS`, и ничто его не проверяет. Так и задумано.
+- Код живёт на ветке `a-tsitanov/feeder-mcp` и в истории; спека и план —
+  `docs/superpowers/`.
 
-- **`sources_discover(topic, limit, days)`** (одиннадцатый инструмент) и
-  `TelegramOps.discover`: тематический поиск каналов по сообщениям за окно
-  (`messages.SearchGlobalRequest`, `broadcasts_only`), агрегат по каналу
-  (`hits`, `active_days`, `last_post`), отсев scam/fake/restricted, каналов без
-  username, с малым числом попаданий и известной аудиторией ниже порога;
-  ранжирование по числу дней с упоминаниями. `FloodWait` не бросается: ответ
-  частичный (`partial`, `wait_seconds`). `sources_search` по-прежнему ищет по
-  названию. Доработка по живому прогону: глобальный поиск отдаёт каналы без
-  `participants_count`, поэтому аудитория добирается `GetFullChannelRequest`
-  по отобранным `limit` кандидатам (`enrich=True`, FloodWait даёт `partial`),
-  и только после этого применяется `min_participants` — лишь к известным
-  числам, с повторной сортировкой; окно `days` проверяется на нашей стороне
-  (старые посты пропускаются, пагинация останавливается), сообщение не
-  считается дважды, выдача не-`MessagesSlice` завершает пагинацию; `days`
-  и `limit` ограничены, пустая тема даёт пустой ответ.
+### Kept
+- **Реестр источников**: `SourceRepository`, таблицы `source` и `source_slug`,
+  `channel_key`. Строки можно писать руками.
+- **Доверие канала от приёма до записи графа**: `trust_for_channel` на
+  `/ingest`, `IngestParams.channel` / `channel_trust` и `Ctx`, перенос в
+  `fetch_source`, вызов `trust_for(group, channel_trust)` в
+  `build_property_graph`, `src/analytics/source_trust.py`, значение по
+  умолчанию для ребра без записанного доверия в `edge_conflicts` и то, что
+  `nebula_schema` / `nebula_store` больше не пишут ложный `0.0`.
+- `sync_renames` в `scripts/tg_ingest.py`: теперь работает безусловно и держит
+  ключи слагов реестра свежими, чтобы доверие не слепло при переименовании.
+- `src/intake/sources/folders.py` и `messages.py` (их импортирует свип).
 
 ### Notes
-- Доверие действует только вперёд: записанные связи не перештамповываются.
-- Папки агент не создаёт; допустимые группы — `GROUP_SET`.
-- Раунд свипа держит замок на всё время: инструмент, которому нужен
-  телеграм, ждёт конца раунда.
+- Раунд свипа снова идёт без замка и без `round_status`, как до этой работы.
+- В `docker-compose.tg-ingest.yml` остались `POSTGRES_*`: реестр читает
+  `sync_renames` (сбой не роняет свип).
 
 ## [Watch P2a] — 2026-10-21 — Находки живой проверки
 

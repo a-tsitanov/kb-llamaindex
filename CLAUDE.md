@@ -7,7 +7,7 @@
 | Приём | `src/intake/` | входная группа: классификатор, дедуп по телу, реестр приёма (`documents`), очередь, маршруты `/ingest` и выдача оригинала |
 | Ядро | `src/workflow/`, `src/graph/`, `src/retrieval/`, `src/analytics/` | документы в граф и чтение графа; статус обработки — `doc_processing` |
 | Наблюдение | `src/watch/` | подписки на сущности, детекторы событий, доставка |
-| Доступ | `src/tenancy/`, `src/api/graph_dep.py`, `src/mcp/_shared.py`, `src/intake/sources/auth.py` | арендаторы, права ключа, выбор графа; швов четыре, других нет. Четвёртый — проверка права `sources` у фидера: токен и граф берёт у `_shared`, решение принимает `authorize`, а не `guard` |
+| Доступ | `src/tenancy/`, `src/api/graph_dep.py`, `src/mcp/_shared.py` | арендаторы, права ключа, выбор графа; швов три, других нет |
 | Инфраструктура | `src/storage/` | Postgres, MinIO, схема графа — НИЖЕ контуров, импортировать её можно всем |
 
 Правила границы (исполняются тестом `tests/test_intake/test_boundaries.py`):

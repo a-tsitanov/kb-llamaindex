@@ -155,7 +155,7 @@ CREATE INDEX IF NOT EXISTS api_keys_tenant_idx ON public.api_keys (tenant_id);
 # Every action, as a SQL literal.  Spelled out rather than built from
 # `src.tenancy.authz.Action` so the emitted SQL is stable and greppable;
 # `tests/test_scripts/test_setup_db_authz.py` guards the two against drift.
-_FULL_SCOPES_SQL = "ARRAY['read', 'write', 'download_original', 'admin', 'sources']"
+_FULL_SCOPES_SQL = "ARRAY['read', 'write', 'download_original', 'admin']"
 
 # One-off: keys that predate the `scopes` column keep every action, so the
 # migration itself revokes nothing.  Guarded by a marker row rather than
