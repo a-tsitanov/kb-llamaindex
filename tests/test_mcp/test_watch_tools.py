@@ -224,6 +224,32 @@ async def test_unwatch_by_name_or_vid(repos):
     assert watch.removed == [("default", vid), ("default", vid)]
 
 
+async def test_unwatch_accepts_the_form_the_watch_was_made_with(repos):
+    """Подписка хранит каноническое имя; снимать её должно получаться тем же
+    написанием, каким ставили — иначе подписку не убрать своими словами."""
+    from src.graph.name_resolution import Candidate, Resolution
+
+    canonical = "Поляков Сергей Николаевич"
+    vid = entity_vid(canonical)
+
+    class _Resolver:
+        async def resolve(self, name, **kw):
+            return Resolution(
+                query=name,
+                chosen=Candidate(name=canonical, score=0.93,
+                                 matched_via=["stem"], label="Person"),
+            )
+
+    _, watch = repos(
+        watch=_Watch(watches=[{"entity_vid": vid, "entity_name": canonical}]),
+        resolver=_Resolver(),
+    )
+    out = await ts._unwatch("Полякова", graph=G)
+    assert out["status"] == "removed" and out["entity"] == canonical
+    assert out["matched_via"] == ["stem"] and out["score"] == 0.93
+    assert watch.removed == [("default", vid)]
+
+
 async def test_unwatch_unknown(repos):
     repos()
     assert (await ts._unwatch("Никто", graph=G))["status"] == "not_watched"

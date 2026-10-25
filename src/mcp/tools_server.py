@@ -1058,10 +1058,30 @@ async def _watch(
 
 async def _unwatch(name_or_vid: str, *, graph: GraphContext) -> dict[str, Any]:
     repo = _watch_repo(graph)
-    for w in await repo.list_watch(_OWNER):
-        if name_or_vid in (w["entity_vid"], w["entity_name"]):
-            await repo.remove_watch(_OWNER, w["entity_vid"])
-            return {"status": "removed", "entity": w["entity_name"]}
+    watches = await repo.list_watch(_OWNER)
+
+    async def _drop(wanted: str) -> dict[str, Any] | None:
+        for w in watches:
+            if wanted in (w["entity_vid"], w["entity_name"]):
+                await repo.remove_watch(_OWNER, w["entity_vid"])
+                return {"status": "removed", "entity": w["entity_name"]}
+        return None
+
+    done = await _drop(name_or_vid)
+    if done is not None:
+        return done
+    # Подписка хранит КАНОНИЧЕСКОЕ имя, а подписывались, возможно, падежной
+    # формой или инициалами (`_watch` разрешает их каскадом). Снятие обязано
+    # понимать ровно те же написания, иначе подписку нельзя убрать тем именем,
+    # которым её поставили.
+    resolver = await _resolver(graph)
+    if resolver is not None:
+        res = await resolver.resolve(name_or_vid, k=5)
+        if res.name:
+            done = await _drop(res.name)
+            if done is not None:
+                return dict(done, matched_via=res.chosen.matched_via,
+                            score=round(res.chosen.score, 3))
     return {"status": "not_watched", "query": name_or_vid}
 
 
@@ -1146,7 +1166,9 @@ async def kb_watch(
 
 @mcp.tool(timeout=120)
 async def kb_unwatch(name_or_vid: str) -> dict[str, Any]:
-    """Remove an entity from the watchlist (by its watched name or vid)."""
+    """Remove an entity from the watchlist, by its vid or by any name form the
+    watch itself accepts: the canonical name, a case ending, ё/е, an alias, the
+    other script or a legal form (the same cascade `kb_watch` resolves with)."""
     return await _unwatch(name_or_vid, graph=await _watch_graph(Action.WRITE))
 
 
