@@ -5,6 +5,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 
+from src.graph.name_resolution import Candidate, Resolution
 from src.graph.nebula_store import entity_vid
 from src.mcp import tools_server as ts
 from src.tenancy.context import new_graph_context
@@ -56,9 +57,29 @@ class _Watch:
         return len(event_ids or []) or 7
 
 
+class _Resolver:
+    def __init__(self, res):
+        self.res = res
+        self.calls: list[tuple] = []
+
+    async def resolve(self, name, k=5):
+        self.calls.append((name, k))
+        return self.res
+
+
+def _cand(name, via=("casefold",), score=0.9, label="Person", mc=3):
+    return Candidate(name=name, score=score, matched_via=list(via),
+                     matched_text=name, label=label, mention_count=mc)
+
+
 @pytest.fixture
 def repos(monkeypatch):
-    def _set(search=None, watch=None):
+    def _set(search=None, watch=None, resolver=None):
+        # без резолвера — прежний путь через зеркало
+        async def _res(graph):
+            return resolver
+
+        monkeypatch.setattr(ts, "_resolver", _res)
         search = search or _Search()
         watch = watch or _Watch()
         def _scoped(repo):
@@ -114,6 +135,82 @@ async def test_watch_rejects_unknown_kinds(repos):
     _, watch = repos(search=_Search(exact=[_ent("A")]))
     out = await ts._watch("A", ["new_mention", "gossip"], "", graph=G)
     assert "error" in out and watch.added == []
+
+
+# ── kb_watch через резолвер имён ─────────────────────────────────────
+
+
+@pytest.mark.parametrize("typed,via,score", [
+    ("Полякова", ["case-stem"], 0.82),
+    ("Поляков С.Н.", ["initials"], 0.88),
+    ("Likhachev", ["translit"], 0.8),
+])
+async def test_watch_resolver_subscribes_to_canonical(repos, typed, via, score):
+    canon = "Поляков Сергей Николаевич"
+    resolver = _Resolver(Resolution(query=typed, chosen=_cand(canon, via, score)))
+    search, watch = repos(search=_Search(exact=[_ent(canon, mc=9)]), resolver=resolver)
+    out = await ts._watch(typed, None, "", graph=G)
+    assert out["status"] == "watching"
+    assert out["entity"] == {"vid": entity_vid(canon), "name": canon,
+                             "label": "Person", "mention_count": 9}
+    assert out["matched_via"] == via and out["score"] == round(score, 3)
+    assert watch.added[0][1:3] == (entity_vid(canon), canon)
+    assert resolver.calls == [(typed, 5)]
+    assert search.calls == ["exact"]  # один точный запрос за vid
+
+
+async def test_watch_resolver_ambiguous_subscribes_to_nothing(repos):
+    res = Resolution(query="Поляков", chosen=_cand("Поляков А.", ["prefix"], 0.7),
+                     alternatives=[_cand("Поляков Б.", ["prefix"], 0.69, mc=5)],
+                     ambiguous=True)
+    _, watch = repos(resolver=_Resolver(res))
+    out = await ts._watch("Поляков", None, "", graph=G)
+    assert out["status"] == "ambiguous" and out["query"] == "Поляков"
+    assert [c["name"] for c in out["candidates"]] == ["Поляков А.", "Поляков Б."]
+    assert out["candidates"][0]["matched_via"] == ["prefix"]
+    assert out["candidates"][1]["score"] == 0.69
+    assert out["candidates"][1]["mention_count"] == 5
+    assert watch.added == []
+
+
+async def test_watch_resolver_not_found_passes_alternatives(repos):
+    res = Resolution(query="Икс", alternatives=[_cand("Икс-Групп", ["trigram"], 0.4)])
+    _, watch = repos(resolver=_Resolver(res))
+    out = await ts._watch("Икс", None, "", graph=G)
+    assert out["status"] == "not_found" and out["query"] == "Икс"
+    assert [c["name"] for c in out["candidates"]] == ["Икс-Групп"]
+    assert watch.added == []
+
+
+async def test_watch_resolver_not_found_without_alternatives(repos):
+    _, watch = repos(resolver=_Resolver(Resolution(query="Икс")))
+    out = await ts._watch("Икс", None, "", graph=G)
+    assert out == {"status": "not_found", "query": "Икс"} and watch.added == []
+
+
+async def test_watch_vid_falls_back_to_graph_identity(repos):
+    canon = "ГК «Росатом»"
+    res = Resolution(query="Росатом", chosen=_cand(canon, ["legal-form"], 0.9, "Organization"))
+    _, watch = repos(search=_Search(), resolver=_Resolver(res))  # зеркало пусто
+    out = await ts._watch("Росатом", None, "", graph=G)
+    assert out["status"] == "watching"
+    assert watch.added[0][1] == entity_vid(canon)
+    assert out["entity"]["vid"] == entity_vid(canon)
+    assert out["entity"]["label"] == "Organization"
+
+
+async def test_watch_without_resolver_one_exact_hit(repos):
+    _, watch = repos(search=_Search(exact=[_ent("Блинов")]), resolver=None)
+    out = await ts._watch("Блинов", None, "", graph=G)
+    assert out["status"] == "watching" and "matched_via" not in out
+    assert len(watch.added) == 1
+
+
+async def test_watch_without_resolver_ambiguous_substring(repos):
+    search, watch = repos(search=_Search(substring=[_ent("Блинов А"), _ent("Блинов Б")]))
+    out = await ts._watch("Блинов", None, "", graph=G)
+    assert out["status"] == "ambiguous" and search.calls == ["exact", "substring"]
+    assert watch.added == []
 
 
 # ── kb_unwatch / kb_watchlist ────────────────────────────────────────

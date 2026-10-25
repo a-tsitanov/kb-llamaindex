@@ -1006,20 +1006,53 @@ async def _watch(
         return {"error": "push delivery needs an authenticated key; "
                          "subscribe without webhook_url for feed-only"}
     search = _entity_search(graph)
-    hits = await search.search(name, mode="exact", limit=5)
-    if len(hits) != 1:
-        hits = await search.search(name, mode="substring", limit=10)
-    if not hits:
-        return {"status": "not_found", "query": name}
-    if len(hits) > 1:
-        return {"status": "ambiguous", "query": name,
-                "candidates": [_candidate(h) for h in hits]}
-    hit = hits[0]
+    resolver = await _resolver(graph)
+    resolved: dict[str, Any] = {}
+    if resolver is not None:
+        # Имя разбирает тот же каскад, что и find_entity_by_name: падеж,
+        # инициалы, другая письменность, правовая форма, слитое имя.
+        res = await resolver.resolve(name, k=5)
+        if res.status == "ambiguous":
+            return {"status": "ambiguous", "query": name,
+                    "candidates": [{**c.brief(), "mention_count": c.mention_count}
+                                   for c in res.candidates()]}
+        if res.status != "ok":
+            out: dict[str, Any] = {"status": "not_found", "query": name}
+            if res.alternatives:
+                # лучшие догадки ниже порога — подсказка, а не подписка
+                out["candidates"] = [{**c.brief(), "mention_count": c.mention_count}
+                                     for c in res.alternatives]
+            return out
+        chosen = res.chosen
+        rows = await search.search(chosen.name, mode="exact", limit=1)
+        if rows:
+            hit = rows[0]
+        else:
+            # Зеркало `entity` может отставать от графа; устаревшее зеркало
+            # не должно блокировать подписку.  vid графа — blake2b от имени,
+            # поэтому считается из канонического имени, а не берётся из зеркала.
+            from src.graph.nebula_store import entity_vid
+
+            hit = {"vid": entity_vid(chosen.name), "name": chosen.name,
+                   "label": chosen.label, "mention_count": chosen.mention_count}
+        # подписка на имя, которого пользователь не вводил, обязана это сказать
+        resolved = {"matched_via": chosen.matched_via, "score": round(chosen.score, 3)}
+    else:
+        hits = await search.search(name, mode="exact", limit=5)
+        if len(hits) != 1:
+            hits = await search.search(name, mode="substring", limit=10)
+        if not hits:
+            return {"status": "not_found", "query": name}
+        if len(hits) > 1:
+            return {"status": "ambiguous", "query": name,
+                    "candidates": [_candidate(h) for h in hits]}
+        hit = hits[0]
     await _watch_repo(graph).add_watch(
         _OWNER, hit["vid"], hit["name"], kinds=list(kinds or []), note=note,
         webhook_url=webhook_url, created_by=principal,
     )
-    return {"status": "watching", "entity": _candidate(hit), "kinds": list(kinds or []),
+    return {"status": "watching", "entity": _candidate(hit), **resolved,
+            "kinds": list(kinds or []),
             "delivery": "webhook" if webhook_url else "feed only"}
 
 
@@ -1093,9 +1126,12 @@ async def kb_watch(
     mentioning it, new connections / identifiers and contradicting facts then
     show up in `kb_watch_feed`.
 
-    `name` is resolved against the KB entity table (exact, then fuzzy). One
-    match ⇒ subscribed; several ⇒ returns `candidates` and subscribes to
-    nothing — call again with the exact candidate name. `kinds` limits the
+    `name` is resolved like in `find_entity_by_name`: case, ё/е, alias, other
+    script, legal form, case endings, a name merged away. One confident match
+    ⇒ subscribed, and the answer reports what it resolved to (`entity`,
+    `matched_via`, `score`); several ⇒ returns `candidates` (with
+    `matched_via`, `score`) and subscribes to nothing — call again with the
+    exact candidate name; nothing ⇒ `not_found`, with weak guesses if any. `kinds` limits the
     events (new_mention, new_connection, new_identifier, new_event, contradiction);
     empty = all. `note` is a free-text reason. Only events detected after
     the subscription are shown.
