@@ -1011,7 +1011,10 @@ async def _watch(
     if resolver is not None:
         # Имя разбирает тот же каскад, что и find_entity_by_name: падеж,
         # инициалы, другая письменность, правовая форма, слитое имя.
-        res = await resolver.resolve(name, k=5)
+        # k=10 намеренно: `_ambiguous` сравнивает два лучших, поэтому чем
+        # больше кандидатов, тем строже вывод. Фиксируем число, чтобы ответ
+        # не зависел от случайной величины и подписка не досталась однофамильцу.
+        res = await resolver.resolve(name, k=10)
         if res.status == "ambiguous":
             return {"status": "ambiguous", "query": name,
                     "candidates": [{**c.brief(), "mention_count": c.mention_count}
@@ -1076,7 +1079,7 @@ async def _unwatch(name_or_vid: str, *, graph: GraphContext) -> dict[str, Any]:
     # которым её поставили.
     resolver = await _resolver(graph)
     if resolver is not None:
-        res = await resolver.resolve(name_or_vid, k=5)
+        res = await resolver.resolve(name_or_vid, k=10)
         if res.name:
             done = await _drop(res.name)
             if done is not None:

@@ -155,7 +155,7 @@ async def test_watch_resolver_subscribes_to_canonical(repos, typed, via, score):
                              "label": "Person", "mention_count": 9}
     assert out["matched_via"] == via and out["score"] == round(score, 3)
     assert watch.added[0][1:3] == (entity_vid(canon), canon)
-    assert resolver.calls == [(typed, 5)]
+    assert resolver.calls == [(typed, 10)]
     assert search.calls == ["exact"]  # один точный запрос за vid
 
 
