@@ -11,11 +11,54 @@ failure, so a fail-open never wipes existing materialized scores).
 """
 from __future__ import annotations
 
+import asyncio
+import multiprocessing
 from typing import Any
 
 from loguru import logger
 
 _METRICS = ("pagerank", "betweenness", "eigenvector")
+
+
+def _compute_child(conn: Any, edges: list, names: list) -> None:
+    try:
+        conn.send((True, {m: compute_centrality(edges, names, m) for m in _METRICS}))
+    except BaseException as exc:
+        conn.send((False, f"{type(exc).__name__}: {exc}"))
+    finally:
+        conn.close()
+
+
+async def compute_all_isolated(store: Any) -> dict[str, dict[str, float]]:
+    """Export in a thread and compute in a cancellable, independent process."""
+    from src.graph.community_leiden import extract_entity_edges
+
+    edges, names = await asyncio.to_thread(extract_entity_edges, store)
+    ctx = multiprocessing.get_context("spawn")
+    receiver, sender = ctx.Pipe(duplex=False)
+    process = ctx.Process(target=_compute_child, args=(sender, edges, names), daemon=True)
+    try:
+        process.start()
+        sender.close()
+        while True:
+            if receiver.poll():
+                ok, result = await asyncio.to_thread(receiver.recv)
+                if not ok:
+                    raise RuntimeError(f"centrality subprocess failed: {result}")
+                return result
+            if not process.is_alive():
+                raise RuntimeError(f"centrality subprocess exited with code {process.exitcode}")
+            await asyncio.sleep(0.1)
+    finally:
+        sender.close()
+        receiver.close()
+        if process.pid is not None:
+            if process.is_alive():
+                process.terminate()
+            await asyncio.to_thread(process.join, 5)
+            if process.is_alive():
+                process.kill()
+                await asyncio.to_thread(process.join)
 
 
 def compute_centrality(

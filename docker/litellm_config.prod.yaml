@@ -22,6 +22,15 @@ model_list:
       api_base: http://host.docker.internal:11434
       num_ctx: 16384
       think: false
+  # small-ornith: temp eval alias — ornith-1.5:9b candidate to replace gemma as
+  # `small`. Mirrors small's params. Point extraction at it via
+  # LITELLM_MODEL_SMALL=small-ornith. Remove after the eval decision.
+  - model_name: small-ornith
+    litellm_params:
+      model: ollama_chat/ornith-1.5:9b
+      api_base: http://host.docker.internal:11434
+      num_ctx: 16384
+      think: false
   # ---- LARGE pool ----
   # deepseek-v4-flash:cloud — 1M context window. Real overflow source is the
   # small-tier community-report build (summarize_community_activity, cid=0 root
@@ -33,6 +42,22 @@ model_list:
       api_base: http://host.docker.internal:11434
       num_ctx: 976000
       think: false
+  # agent = openclaw bot brain. Same deepseek-v4-flash as large, but deliberately
+  # ABSENT from router_settings.fallbacks below: an interactive bot must not
+  # silently degrade to gemma on a deepseek hiccup the way the pipeline's large
+  # does. A deepseek failure here surfaces as an error, so openclaw's own
+  # gpt-5.5 fallback takes over instead of answering on the small model.
+  - model_name: agent
+    litellm_params:
+      model: ollama_chat/glm-5.2:cloud
+      api_base: http://host.docker.internal:11434
+      num_ctx: 976000
+      think: false
+      # per-model override of router_settings.timeout(60): an interactive bot
+      # turn is MCP retrieval + deepseek reasoning + possible multi-round tool
+      # calls, which legitimately runs past 60s. Only this alias — the pipeline's
+      # small/large keep fast-fail at 60s to avoid batch cooldown cascades.
+      timeout: 120
   # ---- Embeddings ----
   # nomic-embed-text (768) is the legacy embedder; bge-m3 (1024) is the
   # current one — far better RU retrieval discrimination. MUST match MILVUS_DIM.

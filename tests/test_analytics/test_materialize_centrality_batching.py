@@ -16,6 +16,8 @@ metric, batched into multi-statement requests under the nebula query-size cap.
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 import src.analytics.centrality_compute as cc
@@ -49,11 +51,11 @@ async def test_compute_all_runs_once_for_every_metric(monkeypatch):
     """The whole point: betweenness must be computed ONCE, not once per metric."""
     calls: list[int] = []
 
-    def _fake_compute_all(store, **_kw):
+    async def _fake_compute_all(store, **_kw):
         calls.append(1)
         return _SCORES
 
-    monkeypatch.setattr(cc, "compute_all", _fake_compute_all)
+    monkeypatch.setattr(cc, "compute_all_isolated", _fake_compute_all)
 
     await m.write_centrality_all(_RecStore(), _ALL)
 
@@ -62,7 +64,7 @@ async def test_compute_all_runs_once_for_every_metric(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_one_update_per_vertex_carries_every_metric(monkeypatch):
-    monkeypatch.setattr(cc, "compute_all", lambda store, **kw: _SCORES)
+    monkeypatch.setattr(cc, "compute_all_isolated", AsyncMock(return_value=_SCORES))
     store = _RecStore()
 
     await m.write_centrality_all(store, _ALL)
@@ -82,7 +84,7 @@ async def test_writes_are_batched_into_few_requests(monkeypatch):
     """273069 sequential round-trips is the thing being removed."""
     n = 500
     scores = {metric: {f"E{i}": float(i) for i in range(n)} for metric in _ALL}
-    monkeypatch.setattr(cc, "compute_all", lambda store, **kw: scores)
+    monkeypatch.setattr(cc, "compute_all_isolated", AsyncMock(return_value=scores))
     store = _RecStore()
 
     written = await m.write_centrality_all(store, _ALL)
@@ -98,7 +100,7 @@ async def test_batch_respects_the_statement_size_budget(monkeypatch):
     write-back. Batches must be bounded by rendered size, not vertex count."""
     monkeypatch.setattr(m, "_MAX_STMT_CHARS", 400)
     scores = {metric: {f"E{i}": float(i) for i in range(50)} for metric in _ALL}
-    monkeypatch.setattr(cc, "compute_all", lambda store, **kw: scores)
+    monkeypatch.setattr(cc, "compute_all_isolated", AsyncMock(return_value=scores))
     store = _RecStore()
 
     await m.write_centrality_all(store, _ALL)
@@ -111,7 +113,7 @@ async def test_batch_respects_the_statement_size_budget(monkeypatch):
 async def test_failed_batch_falls_back_to_per_vertex(monkeypatch):
     """Fail-soft must survive batching: an ER-merged or deleted vertex raises
     `Vertex or edge not found`, and must not drop the rest of its batch."""
-    monkeypatch.setattr(cc, "compute_all", lambda store, **kw: _SCORES)
+    monkeypatch.setattr(cc, "compute_all_isolated", AsyncMock(return_value=_SCORES))
     store = _RecStore(fail_on=(entity_vid("B"),))
 
     written = await m.write_centrality_all(store, _ALL)

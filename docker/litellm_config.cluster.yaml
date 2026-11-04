@@ -1,0 +1,95 @@
+# LiteLLM стенда .31. ПРЯМОЙ путь: текстовые модели идут в vLLM на .14
+# (10.10.113.14:8000), эмбеддинги — в bge-m3 на srv01:8081. Оба адреса видны
+# с .31 через VPN (ppp0) и ключа не требуют — проверено 2026-10-25.
+#
+# Раньше всё шло через кластерный litellm srv01:4000, потому что считалось,
+# что за шлюзом отвечает только srv01. Это больше не так, а лишний прокси
+# стоил ~160 мс на вызов (весь путь 202 мс при 40 мс работы vLLM).
+#
+# ВАЖНО: `small` и `large` — одна и та же модель qwen38, разница только в
+# `enable_thinking`. Кластер задавал его сам; при прямом пути флаг обязан
+# стоять здесь, иначе `small` начнёт думать (медленно), а `large` перестанет.
+#
+# Кластерный путь оставлен резервом: группы `*-cluster` и `fallbacks` ниже.
+# Если .14 падает, litellm сам уходит на srv01:4000 с прежней раскладкой.
+# Полный откат: вернуть файл из .bak-*-direct14 и пересоздать сервис litellm.
+
+model_list:
+  # ── прямой путь ────────────────────────────────────────────────────
+  - model_name: small
+    litellm_params:
+      model: hosted_vllm/qwen38
+      api_base: http://10.10.113.14:8000/v1
+      api_key: os.environ/CLUSTER_LLM_API_KEY
+      timeout: 600
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+  - model_name: small-ornith
+    litellm_params:
+      model: hosted_vllm/qwen38
+      api_base: http://10.10.113.14:8000/v1
+      api_key: os.environ/CLUSTER_LLM_API_KEY
+      timeout: 600
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+  - model_name: large
+    litellm_params:
+      model: hosted_vllm/qwen38
+      api_base: http://10.10.113.14:8000/v1
+      api_key: os.environ/CLUSTER_LLM_API_KEY
+      timeout: 600
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: true
+  - model_name: agent
+    litellm_params:
+      model: hosted_vllm/qwen38
+      api_base: http://10.10.113.14:8000/v1
+      api_key: os.environ/CLUSTER_LLM_API_KEY
+      timeout: 600
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: true
+  - model_name: bge-m3
+    litellm_params:
+      model: openai/bge-m3
+      api_base: http://10.10.113.11:8081/v1
+      api_key: os.environ/CLUSTER_LLM_API_KEY
+
+  # ── резерв через кластерный litellm ────────────────────────────────
+  - model_name: small-cluster
+    litellm_params:
+      model: openai/small
+      api_base: http://10.10.113.11:4000/v1
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: large-cluster
+    litellm_params:
+      model: openai/large
+      api_base: http://10.10.113.11:4000/v1
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: bge-m3-cluster
+    litellm_params:
+      model: openai/bge-m3
+      api_base: http://10.10.113.11:4000/v1
+      api_key: os.environ/OPENAI_API_KEY
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  num_retries: 0
+
+router_settings:
+  routing_strategy: simple-shuffle
+  num_retries: 2
+  # верхний предел на случай ухода в резерв (там возможны CPU-модели)
+  timeout: 900
+  allowed_fails: 3
+  cooldown_time: 60
+  fallbacks:
+    - small: [small-cluster]
+    - small-ornith: [small-cluster]
+    - large: [large-cluster]
+    - agent: [large-cluster]
+    - bge-m3: [bge-m3-cluster]

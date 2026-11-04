@@ -32,7 +32,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from typing import Any
+import multiprocessing
+from typing import Any, Callable
 
 from loguru import logger
 
@@ -185,22 +186,52 @@ def _coarsest_from_rows(
     return out
 
 
+async def _run_in_process(fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+    """Run ``fn(*args, **kwargs)`` in a fresh spawned child process.
+
+    A thread is not enough for Leiden: igraph/leidenalg hold the GIL, so the
+    worker's event loop (Temporal pollers + heartbeats) starved for 14 h on
+    2026-10-28 and the whole ``kb-graph-build`` queue showed no pollers.  The
+    child has its own GIL.  On cancel (heartbeat/start-to-close timeout) the
+    child is terminated instead of computing on in the background.
+    ``fn`` and its arguments must be picklable (module-level function).
+    """
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future = loop.create_future()
+
+    def _settle(setter: Callable[[Any], None], value: Any) -> None:
+        if not fut.done():
+            setter(value)
+
+    pool = multiprocessing.get_context("spawn").Pool(processes=1)
+    try:
+        pool.apply_async(
+            fn, args, kwargs,
+            callback=lambda r: loop.call_soon_threadsafe(_settle, fut.set_result, r),
+            error_callback=lambda e: loop.call_soon_threadsafe(_settle, fut.set_exception, e),
+        )
+        return await fut
+    finally:
+        pool.terminate()
+
+
 async def _leiden_rows(
     store: Any, *, gamma: float, max_levels: int, seed: int = 19,
 ) -> list[dict]:
     """leidenalg backend: stream edges + cluster in-worker.
 
     Returns the canonical rows shape
-    (``[{name, communityId, ids}]``).  CPU-bound clustering runs in a
-    thread so the activity event loop (and its heartbeat) stays live.
+    (``[{name, communityId, ids}]``).  Edge streaming (I/O) runs in a thread;
+    CPU-bound clustering runs in a child process (``_run_in_process``) so the
+    activity event loop (and its heartbeat) stays live.
     """
     edges, names = await asyncio.to_thread(extract_entity_edges, store)
     if max_levels > 1:
-        return await asyncio.to_thread(
+        return await _run_in_process(
             hierarchy_rows, edges, names,
             gamma=gamma, max_levels=max_levels, seed=seed,
         )
-    return await asyncio.to_thread(
+    return await _run_in_process(
         single_level_rows, edges, names, gamma=gamma, seed=seed,
     )
 

@@ -77,7 +77,7 @@ def _flush_centrality_batch(store: Any, stmts: list[str]) -> int:
         return written
 
 
-def _write_centrality_nebula_all_sync(store: Any, metrics: list[str]) -> int:
+def _write_centrality_nebula_all_sync(store: Any, metrics: list[str], all_scores: dict) -> int:
     """Compute EVERY metric from ONE export + ONE igraph build, write batched.
 
     ``compute_all`` computes all three metrics per call, so calling it once per
@@ -87,10 +87,8 @@ def _write_centrality_nebula_all_sync(store: Any, metrics: list[str]) -> int:
 
     Returns the number of VERTICES written (each carries every metric), not
     metric-rows."""
-    from src.analytics.centrality_compute import compute_all
     from src.graph.nebula_store import entity_vid
 
-    all_scores = compute_all(store)
     # transpose {metric -> {name -> score}} into {name -> {metric -> score}}
     # so each vertex is touched by exactly one UPDATE.
     per_vertex: dict[str, dict[str, float]] = {}
@@ -124,15 +122,14 @@ async def write_centrality_all(store: Any | None, metrics: list[str]) -> int:
     for metric in metrics:
         if metric not in _CENTRALITY_METRICS:
             raise ValueError(f"unknown centrality metric: {metric!r}")
-    return await asyncio.to_thread(
-        _write_centrality_nebula_all_sync, store, list(metrics),
-    )
+    from src.analytics.centrality_compute import compute_all_isolated
+
+    scores = await compute_all_isolated(store)
+    return await asyncio.to_thread(_write_centrality_nebula_all_sync, store, list(metrics), scores)
 
 
 async def _write_centrality_nebula(store: Any, metric: str) -> int:
     # Single-metric entry point keeps ONE write implementation.  compute_all
     # still computes all three internally; callers wanting more than one metric
     # must use write_centrality_all so that cost is paid once.
-    return await asyncio.to_thread(
-        _write_centrality_nebula_all_sync, store, [metric],
-    )
+    return await write_centrality_all(store, [metric])
