@@ -27,10 +27,28 @@ x-remote-env: &remote-env
   # timed every call out and retried it from scratch (2026-10-04).
   LITELLM_TIMEOUT_S: "900"
   LITELLM_MAX_RETRIES: "1"
-  # Entity watch (monitor sweep every 5 min, feed via MCP kb_watch_feed). The
-  # feed links documents through webui, which holds the API key.
+  # Entity watch (monitor sweep every 2 min, feed via MCP kb_watch_feed). The
+  # feed links documents through webui, which holds the API key. The interval
+  # lives in the Temporal Schedule: re-run scripts.setup_monitor_schedule after
+  # changing it.
   MONITOR_ENABLED: "true"
+  MONITOR_SWEEP_INTERVAL_MINUTES: "2"
   MONITOR_DOCUMENT_LINK: "http://10.10.113.12:8090/api/documents/{doc_id}"
+  # Download link next to every doc_id the MCP tools return (download_url) and
+  # in the watch e-mail; via webui (API key). No ?variant: the API serves the
+  # original upload when there is one, else the text (old docs, Telegram posts).
+  API_DOCUMENT_URL: "http://10.10.113.12:8090/api/documents/{doc_id}"
+  # Nightly graph maintenance as Temporal Schedules (UTC; empty = none). Apply
+  # with `python -m scripts.setup_graph_schedules` after changing.
+  TEMPORAL_COMMUNITY_SCHEDULE_CRON: ${TEMPORAL_COMMUNITY_SCHEDULE_CRON:-0 2 * * *}
+  TEMPORAL_ANALYTICS_SCHEDULE_CRON: ${TEMPORAL_ANALYTICS_SCHEDULE_CRON:-0 7 * * *}
+  # E-mail digest of watch events, one letter per sweep (off unless
+  # MONITOR_EMAIL_ENABLED=true in .env.offline). Default target = Mailpit on srv01.
+  MONITOR_EMAIL_ENABLED: ${MONITOR_EMAIL_ENABLED:-false}
+  MONITOR_EMAIL_SMTP_HOST: ${MONITOR_EMAIL_SMTP_HOST:-10.10.113.11}
+  MONITOR_EMAIL_SMTP_PORT: ${MONITOR_EMAIL_SMTP_PORT:-25}
+  MONITOR_EMAIL_FROM: ${MONITOR_EMAIL_FROM:-kb-watch@kb.local}
+  MONITOR_EMAIL_TO: ${MONITOR_EMAIL_TO:-}
 
 x-app: &app
   <<: *sock0
@@ -54,15 +72,36 @@ services:
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_API_KEY:-sk-litellm-stub}
-      # Admin UI (http://10.10.113.12:4000/ui) needs a DB; models stay in the
-      # config file (STORE_MODEL_IN_DB off). DB `litellm` lives on srv01 postgres.
+      # Admin UI (http://10.10.113.12:4000/ui) needs a DB; DB `litellm` lives on
+      # srv01 postgres. STORE_MODEL_IN_DB: models added via /model/new live in the
+      # DB and can be edited without a restart (llm-autoscale below uses it);
+      # models from the config file stay read-only.
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@10.10.113.11:5432/litellm
+      STORE_MODEL_IN_DB: "True"
       UI_USERNAME: admin
       UI_PASSWORD: ${LITELLM_UI_PASSWORD:?set LITELLM_UI_PASSWORD in .env.offline}
       # no internet: skip the remote model-cost-map fetch (~30 s of retries at boot)
       LITELLM_LOCAL_MODEL_COST_MAP: "True"
     volumes: ["./deploy/offline/stack/litellm_config.offline.yaml:/app/config.yaml:ro"]
     ports: ["4000:4000"]
+    restart: unless-stopped
+
+  # Adaptive cap on our share of the shared GPU vLLM: its queue grows -> lower
+  # max_parallel_requests of the DB deployment AUTOSCALE_MODEL_ID, queue empty ->
+  # raise it (deploy/offline/stack/llm_autoscale.py). Logs: docker logs kb-llm-autoscale-1
+  llm-autoscale:
+    <<: *sock0
+    image: ghcr.io/berriai/litellm:main-stable
+    pull_policy: never
+    entrypoint: ["python", "/app/llm_autoscale.py"]
+    environment:
+      LITELLM_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_API_KEY:-sk-litellm-stub}
+      VLLM_METRICS: ${AUTOSCALE_VLLM_METRICS:-http://10.10.151.15:8000/metrics}
+      AUTOSCALE_MODEL_ID: ${AUTOSCALE_MODEL_ID:-ds15-small}
+      AUTOSCALE_MIN: ${AUTOSCALE_MIN:-2}
+      AUTOSCALE_MAX: ${AUTOSCALE_MAX:-12}
+    volumes: ["./deploy/offline/stack/llm_autoscale.py:/app/llm_autoscale.py:ro"]
     restart: unless-stopped
 
   # Search / answer-synthesis LLM: "large" alias. Few slots → low latency.

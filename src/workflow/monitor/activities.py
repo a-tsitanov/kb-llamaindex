@@ -22,6 +22,7 @@ from src.analytics.contracts import (
     DeliverResult,
     MonitorIn,
     MonitorResult,
+    WatchEmailResult,
     WatchSweepResult,
 )
 from src.analytics.events_burst import build_burst_cypher
@@ -32,6 +33,7 @@ from src.retrieval.date_filters import today_epoch_days
 from src.storage.watch import WatchRepository
 from src.workflow.heartbeat import heartbeat_every
 from src.workflow.monitor.delivery import post_alert
+from src.workflow.monitor.watch_email import build_email, send_email
 from src.workflow.monitor.watch_sweep import run_watch_sweep
 
 # Maximum rows per sweep pass — keeps a single sweep bounded even on large graphs.
@@ -298,4 +300,51 @@ async def sweep_watch() -> WatchSweepResult:
         return WatchSweepResult(error=str(exc))
 
 
-MONITOR_ACTIVITIES = [sweep_watch, detect_alerts, deliver_alerts]
+# Watch subscriptions have no per-user owner yet (MCP tools use 'default').
+_WATCH_OWNER = "default"
+
+
+def watch_email_link() -> str:
+    """Document link template for the watch e-mail: the ORIGINAL uploaded
+    file (``API_DOCUMENT_URL``, already absolute) when configured, else the
+    feed link resolved against ``MONITOR_EMAIL_BASE_URL``."""
+    m = settings.monitor
+    return settings.api.document_url or (m.email_base_url + m.document_link)
+
+
+@activity.defn
+async def deliver_watch_email() -> WatchEmailResult:
+    """One e-mail digest with the watch events not mailed yet; marks them
+    ``emailed_at`` only after the SMTP server accepted the letter, so a
+    failed send is retried by the next sweep. Fail-soft; off unless
+    ``MONITOR_EMAIL_ENABLED``."""
+    m = settings.monitor
+    recipients = [a.strip() for a in m.email_to.split(",") if a.strip()]
+    if not m.email_enabled:
+        return WatchEmailResult()
+    if not m.email_smtp_host or not recipients:
+        return WatchEmailResult(error="watch email: MONITOR_EMAIL_SMTP_HOST / MONITOR_EMAIL_TO not set")
+    try:
+        repo = WatchRepository()
+        rows = await repo.pending_email(
+            _WATCH_OWNER, max_age_hours=m.email_max_age_hours, limit=m.email_batch,
+        )
+        if not rows:
+            return WatchEmailResult()
+        subject, text, html_body = build_email(rows, link=watch_email_link())
+        await asyncio.to_thread(
+            send_email,
+            host=m.email_smtp_host, port=m.email_smtp_port, sender=m.email_from,
+            recipients=recipients, subject=subject, text=text, html_body=html_body,
+            user=m.email_smtp_user, password=m.email_smtp_password,
+            starttls=m.email_smtp_starttls, timeout_s=m.email_timeout_s,
+        )
+        await repo.mark_emailed([r["id"] for r in rows])
+        logger.info("watch email sent  events={n}  to={to}", n=len(rows), to=len(recipients))
+        return WatchEmailResult(sent=1, events=len(rows))
+    except Exception as exc:
+        logger.warning("deliver_watch_email failed: {e}", e=exc)
+        return WatchEmailResult(error=str(exc))
+
+
+MONITOR_ACTIVITIES = [sweep_watch, deliver_watch_email, detect_alerts, deliver_alerts]

@@ -231,3 +231,33 @@ async def test_ack_all_marks_every_visible_event():
     sql, params = conn.cur.executed[0]
     assert "INSERT INTO watch_seen" in sql and "SELECT" in sql
     assert params == ("default",)
+
+
+# ── e-mail digest ────────────────────────────────────────────────────
+
+
+async def test_pending_email_reads_visible_unmailed_recent_events():
+    repo, conn = _repo(rows=[{"id": 7, "entity_vid": "v1"}])
+    rows = await repo.pending_email("default", max_age_hours=24, limit=200)
+    sql, params = conn.cur.executed[0]
+    assert "JOIN watch w ON w.entity_vid = e.entity_vid" in sql
+    assert "e.detected_at >= w.created_at" in sql
+    assert "e.emailed_at IS NULL" in sql
+    assert "make_interval(hours => %s)" in sql
+    assert params == ("default", 24, 200)
+    assert rows == [{"id": 7, "entity_vid": "v1"}]
+
+
+async def test_mark_emailed_stamps_the_events():
+    repo, conn = _repo()
+    await repo.mark_emailed([3, 4])
+    sql, params = conn.cur.executed[0]
+    assert "UPDATE watch_event SET emailed_at = now()" in sql
+    assert params == ([3, 4],)
+    assert conn.commits == 1
+
+
+async def test_mark_emailed_empty_is_a_no_op():
+    repo, conn = _repo()
+    await repo.mark_emailed([])
+    assert conn.cur.executed == [] and conn.commits == 0

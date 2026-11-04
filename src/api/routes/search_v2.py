@@ -28,11 +28,11 @@ from src.retrieval.date_filters import bounds_from_iso
 from src.workflow.client import get_temporal_client
 from src.workflow.contracts import (
     ConversationTurnDict,
-    DetectCommunitiesParams,
     GlobalSearchParams,
     OrchestratorParams,
     SearchOutcome,
 )
+from src.workflow.graph_schedules import community_build_params
 from src.workflow.search.community_wf import CommunityBuildWorkflow
 from src.workflow.search.global_wf import GlobalSearchWorkflow
 from src.workflow.search.orchestrator import SearchOrchestratorWorkflow
@@ -292,13 +292,7 @@ async def rebuild_communities() -> dict[str, str]:
         client = await get_temporal_client()
         handle = await client.start_workflow(
             CommunityBuildWorkflow.run,
-            DetectCommunitiesParams(
-                min_size=settings.temporal.community_min_size,
-                level=0,
-                max_levels=settings.agent.community_max_levels,
-                gamma=settings.temporal.community_leiden_gamma,
-                concurrency=settings.temporal.community_leiden_concurrency,
-            ),
+            community_build_params(),
             id=f"community-build-{request_id}",
             task_queue=settings.temporal.graph_build_task_queue,
             id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,

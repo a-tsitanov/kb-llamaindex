@@ -1,0 +1,19 @@
+# LLM gateway (haproxy) instead of the local LiteLLM — see docker/llm-gw/haproxy.cfg.
+#   docker compose -p agent_v2 -f docker-compose.llmgw.yml up -d llm-gw
+# Rollback: docker rm -f agent_v2-llm-gw-1 && docker compose -p agent_v2 \
+#   -f docker-compose.prod.yml -f docker-compose.litellm.yml up -d litellm
+services:
+  llm-gw:
+    image: haproxy:2.9-alpine
+    volumes:
+      - ./docker/llm-gw/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    environment:
+      LLM_GW_KEY: ${LLM_GW_KEY:?set LLM_GW_KEY in .env (srv02 virtual key agent_v2-31)}
+    networks:
+      default:
+        aliases: [litellm]
+    restart: unless-stopped
+networks:
+  default:
+    name: agent_v2_default
+    external: true

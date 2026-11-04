@@ -19,6 +19,7 @@ with workflow.unsafe.imports_passed_through():
         MonitorIn,
         MonitorResult,
         SweepResult,
+        WatchEmailResult,
         WatchSweepResult,
     )
     from src.config import settings
@@ -47,6 +48,15 @@ class MonitorSweepWorkflow:
             heartbeat_timeout=timedelta(minutes=2),
             retry_policy=_RETRY,
         )
+        # E-mail digest of the events just detected (and any a failed send
+        # left behind); a no-op unless MONITOR_EMAIL_ENABLED.
+        email = await workflow.execute_activity(
+            "deliver_watch_email",
+            result_type=WatchEmailResult,
+            start_to_close_timeout=timedelta(minutes=2),
+            schedule_to_close_timeout=timedelta(minutes=5),
+            retry_policy=_RETRY,
+        )
         monitor_in = MonitorIn(
             window_days=settings.monitor.new_window_days,
             risk_rise_delta=settings.monitor.risk_rise_delta,
@@ -73,10 +83,11 @@ class MonitorSweepWorkflow:
         )
         return SweepResult(
             watch_events=watch.events,
+            watch_emailed=email.events,
             new_connection_alerts=result.new_connection_alerts,
             risk_rise_alerts=result.risk_rise_alerts,
             burst_alerts=result.burst_alerts,
             delivered=deliver.delivered,
             failed=deliver.failed,
-            error="; ".join(e for e in (watch.error, result.error, deliver.error) if e),
+            error="; ".join(e for e in (watch.error, email.error, result.error, deliver.error) if e),
         )

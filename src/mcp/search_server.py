@@ -39,7 +39,9 @@ from temporalio.common import WorkflowIDReusePolicy
 
 from src.config import settings
 from src.mcp._shared import (
+    DOWNLOAD_HINT,
     assert_api_key_env_set,
+    attach_document_links,
     build_sse_auth,
     log_banner,
     parse_args,
@@ -66,7 +68,8 @@ mcp = FastMCP(
         "(corpus-wide GraphRAG themes), kb_drift_search (local seed + "
         "global), kb_auto_search (router picks the mode).  Each returns a "
         "synthesised Russian answer with citations.  For raw retrieval "
-        "primitives use the sibling MCP-2 tools server instead."
+        "primitives use the sibling MCP-2 tools server instead.  "
+        + DOWNLOAD_HINT
     ),
     auth=build_sse_auth(),  # evaluated at import time; see build_sse_auth docstring
 )
@@ -194,6 +197,20 @@ def _outcome_to_dict(outcome: SearchOutcome) -> dict[str, Any]:
     }
 
 
+async def _outcome_result(outcome: SearchOutcome) -> dict[str, Any]:
+    """``_outcome_to_dict`` + document download links: each source gets
+    ``download_url`` / ``file_name`` and a top-level ``documents`` list
+    (de-duplicated, source order, then any outcome-level documents) lets the
+    agent show the links without scanning chunks.  No links configured →
+    the plain ``_outcome_to_dict`` shape."""
+    out = _outcome_to_dict(outcome)
+    extra = [{"doc_id": d} for d in outcome.documents]
+    documents = await attach_document_links([*out["sources"], *extra])
+    if documents:
+        out["documents"] = documents
+    return out
+
+
 async def _stream_until_done(handle, ctx: Context, state_query) -> SearchOutcome:
     """Await the workflow result while forwarding coarse progress to the
     MCP client.  ``state_query`` is the workflow's ``get_state`` query
@@ -251,6 +268,10 @@ async def kb_search(
     aggregation use `kb_global_search`; for a mix use `kb_drift_search`;
     to let a router decide use `kb_auto_search`.
 
+    LINKS: every source (and the `documents` list, one entry per document)
+    carries `download_url` — the original uploaded file. Whenever you cite or
+    mention a document, show the user its `download_url` as a clickable link.
+
     Args:
       query: question in Russian (or the source-document language).
       max_refinements: cap for the reflective synthesis loop.
@@ -268,7 +289,9 @@ async def kb_search(
     Returns:
       {
         "answer": str,
-        "sources": [{chunk_id, doc_id, text, score}, ...],
+        "sources": [{chunk_id, doc_id, text, score, download_url,
+                     file_name}, ...],
+        "documents": [{doc_id, file_name, download_url}, ...],
         "citations": [...],
         "uncertainties": [...],
         "refinement_rounds": int,
@@ -279,6 +302,7 @@ async def kb_search(
       `uncertainties` and `refinement_rounds` come back EMPTY ([], [], 0) —
       they are products of the synthesis step you skipped. `sources` and
       `step_stats` are unchanged.
+      `download_url` / `file_name` are absent when links are not configured.
       On a malformed date param: {"error": str, "field": str} instead.
     """
     bounds = _bounds_or_error(doc_date_after, doc_date_before, created_after, created_before)
@@ -296,7 +320,7 @@ async def kb_search(
         ctx,
         SearchOrchestratorWorkflow.get_state,
     )
-    return _outcome_to_dict(outcome)
+    return await _outcome_result(outcome)
 
 
 @mcp.tool(timeout=1800)
@@ -319,14 +343,18 @@ async def kb_global_search(
     summaries are undated, so this tool has no doc_date_*/created_*
     params (unlike `kb_search`, `kb_drift_search`, `kb_auto_search`).
 
+    LINKS: every source (and the `documents` list, one entry per document)
+    carries `download_url` — the original uploaded file. Whenever you cite or
+    mention a document, show the user its `download_url` as a clickable link.
+
     Args:
       synthesize: pass False to skip the REDUCE step's large-model
         write-up and return the retrieved sources with an empty answer —
         for a client that composes its own answer and does not want to
         pay for the model call.
 
-    Returns the same shape as `kb_search` (answer + sources + citations +
-    uncertainties + latency_ms; mode == "global").  With synthesize=False,
+    Returns the same shape as `kb_search` (answer + sources + documents +
+    citations + uncertainties + latency_ms; mode == "global").  With synthesize=False,
     `answer` is "" and `citations` / `uncertainties` / `refinement_rounds`
     come back empty — they are products of the REDUCE synthesis you
     skipped; `sources` and `step_stats` are unchanged.
@@ -343,7 +371,7 @@ async def kb_global_search(
         ctx,
         GlobalSearchWorkflow.get_state,
     )
-    return _outcome_to_dict(outcome)
+    return await _outcome_result(outcome)
 
 
 @mcp.tool(timeout=1800)
@@ -367,6 +395,10 @@ async def kb_drift_search(
     COST: heaviest — runs local then global sequentially; may approach or
     hit the shared 1800s tool timeout. If it does, prefer `kb_search` or
     `kb_global_search` alone.
+
+    LINKS: every source (and the `documents` list, one entry per document)
+    carries `download_url` — the original uploaded file. Whenever you cite or
+    mention a document, show the user its `download_url` as a clickable link.
 
     Args:
       doc_date_after / doc_date_before: ISO YYYY-MM-DD, inclusive bounds —
@@ -402,7 +434,7 @@ async def kb_drift_search(
     )
     # DriftSearchWorkflow has no get_state query — skip progress polling.
     outcome = await _stream_until_done(handle, ctx, None)
-    return _outcome_to_dict(outcome)
+    return await _outcome_result(outcome)
 
 
 @mcp.tool(timeout=1800)
@@ -422,6 +454,10 @@ async def kb_auto_search(
     USE FOR: when you're unsure which mode fits and want the system to
     decide. Fail-safe: routing errors fall back to local.
     COST: a quick routing LLM call + the chosen workflow (up to ~30 min).
+
+    LINKS: every source (and the `documents` list, one entry per document)
+    carries `download_url` — the original uploaded file. Whenever you cite or
+    mention a document, show the user its `download_url` as a clickable link.
 
     Args:
       doc_date_after / doc_date_before: ISO YYYY-MM-DD, inclusive bounds —
@@ -455,7 +491,7 @@ async def kb_auto_search(
         id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
     )
     outcome = await _stream_until_done(handle, ctx, AutoSearchWorkflow.get_state)
-    return _outcome_to_dict(outcome)
+    return await _outcome_result(outcome)
 
 
 @mcp.tool(timeout=1800)

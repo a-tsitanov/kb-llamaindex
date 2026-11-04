@@ -65,6 +65,14 @@ class ApiSettings(BaseSettings):
     keys: str = "dev-local-key"
     cors_origins: str = "*"
     upload_dir: str = "/app/data/uploads"
+    # Client-facing download link of a document's ORIGINAL uploaded file,
+    # emitted next to every doc_id the MCP tools return. Template with
+    # {doc_id}; empty = no links. Must be reachable by the end user (e.g. the
+    # webui proxy that holds the API key), not the internal api:8000.
+    document_url: str = Field(
+        default="",
+        description="Шаблон ссылки на скачивание исходника документа ({doc_id}); пусто — без ссылок",
+    )
 
     @cached_property
     def keys_list(self) -> list[str]:
@@ -439,6 +447,12 @@ class TemporalSettings(BaseSettings):
     # the Leiden run; keep modest so a rebuild doesn't starve Neo4j.
     community_leiden_gamma: float = Field(default=1.0, gt=0)
     community_leiden_concurrency: int = Field(default=4, ge=1)
+    # Temporal Schedules for nightly graph maintenance, applied by
+    # scripts/setup_graph_schedules.py. Cron in UTC; empty = no schedule (the
+    # script deletes an existing one). A run still going when the next is due
+    # is skipped, never doubled. Keep the two windows apart.
+    community_schedule_cron: str = ""
+    analytics_schedule_cron: str = ""
 
     # Community-detection backend.  "gds" = in-Neo4j GDS Leiden (legacy);
     # "leidenalg" = in-worker leidenalg/igraph (memory off Neo4j); "graphscope"
@@ -1025,6 +1039,31 @@ class MonitorSettings(BaseSettings):
         default="/api/v1/documents/{doc_id}",
         description="Шаблон ссылки на документ в ленте наблюдения ({doc_id} подставляется)",
     )
+    # Entity-watch e-mail: one digest per sweep (same interval as the sweep)
+    # with the events detected since the last letter, to one shared address.
+    email_enabled: bool = Field(
+        default=False, description="Слать письмо-сводку по событиям наблюдения каждый свип"
+    )
+    email_smtp_host: str = Field(default="", description="SMTP-сервер для писем наблюдения")
+    email_smtp_port: int = Field(default=25, ge=1, le=65535, description="Порт SMTP")
+    email_smtp_user: str = Field(default="", description="Логин SMTP (пусто — без авторизации)")
+    email_smtp_password: str = Field(default="", description="Пароль SMTP")
+    email_smtp_starttls: bool = Field(default=False, description="STARTTLS перед отправкой")
+    email_from: str = Field(default="kb-watch@localhost", description="Адрес отправителя")
+    email_to: str = Field(
+        default="", description="Получатели через запятую (общий адрес, пока нет пользователей)"
+    )
+    email_base_url: str = Field(
+        default="",
+        description="Префикс к document_link для ссылок в письме (например http://10.10.113.12:8000)",
+    )
+    email_batch: int = Field(
+        default=200, ge=1, description="Макс. событий в одном письме (остаток — следующим свипом)"
+    )
+    email_max_age_hours: int = Field(
+        default=24, ge=1, description="События старше этого в письмо не попадают (история при включении)"
+    )
+    email_timeout_s: float = Field(default=10.0, gt=0.0, description="Таймаут SMTP, сек")
 
 
 class ClassifierSettings(BaseSettings):

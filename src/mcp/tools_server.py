@@ -45,8 +45,12 @@ from loguru import logger
 
 from src.config import settings
 from src.mcp._shared import (
+    DOWNLOAD_HINT,
     assert_api_key_env_set,
+    attach_document_links,
     build_sse_auth,
+    document_download_url,
+    document_links,
     log_banner,
     parse_args,
 )
@@ -60,7 +64,8 @@ mcp = FastMCP(
         "Atomic retrieval tools over the project knowledge base.  "
         "Each tool returns a JSON-serialisable dict.  Compose them "
         "yourself in your own LLM loop.  For an already-orchestrated "
-        "answer, use the sibling MCP-1 server (kb_search) instead."
+        "answer, use the sibling MCP-1 server (kb_search) instead.  "
+        + DOWNLOAD_HINT
     ),
     auth=build_sse_auth(),  # evaluated at import time; see build_sse_auth docstring
 )
@@ -300,6 +305,23 @@ async def _gs():
     return _deps.get("graph_store")
 
 
+async def _with_documents(out: dict[str, Any], key: str = "sources") -> dict[str, Any]:
+    """Add `download_url` / `file_name` to every `out[key]` item with a doc_id
+    and a de-duplicated top-level `documents` list (nothing when links are off)."""
+    items = out.get(key)
+    if isinstance(items, list):
+        documents = await attach_document_links([i for i in items if isinstance(i, dict)])
+        if documents:
+            out["documents"] = documents
+    return out
+
+
+async def _with_doc_link(out: dict[str, Any], doc_id: str) -> dict[str, Any]:
+    """Top-level `download_url` / `file_name` of the one document a tool read."""
+    link = (await document_links([doc_id])).get(doc_id)
+    return {**out, **link} if link else out
+
+
 # ── MCP tools (one per atomic_tools.* function) ────────────────────
 
 
@@ -316,6 +338,9 @@ async def vector_search(query: str, top_k: int = 10) -> dict[str, Any]:
     (`graph_search`, `find_entity_by_*`, `find_neighbours`, `graph_walk`).
     NEXT STEP: to read more around a good hit, call `get_chunks_by_doc_id`
     with its `doc_id`.
+    Each hit carries `download_url` (original uploaded file) + `file_name`;
+    `documents` lists each document once — show `download_url` to the user
+    as a clickable link whenever you cite a document.
     """
     await _init()
     if await _load_cross_encoder() is not None:
@@ -324,7 +349,7 @@ async def vector_search(query: str, top_k: int = 10) -> dict[str, Any]:
                                              rerank=_rerank_chunks)
     else:
         r = await atomic_tools.vector_search(await _r(), query=query, top_k=top_k)
-    return {"sources": json.loads(r.observation)}
+    return await _with_documents({"sources": json.loads(r.observation)})
 
 
 @mcp.tool(timeout=1800)
@@ -502,15 +527,20 @@ async def get_chunks_by_doc_id(
     USE FOR: expanding context around a `vector_search` hit within the
     same source, or reading a document chunk-by-chunk.
     REQUIRES: a `doc_id` you already have (from `vector_search` or graph
-    results). For the whole raw file at once, see `read_full_document`."""
+    results). For the whole raw file at once, see `read_full_document`.
+    Top-level `download_url` / `file_name` = the original uploaded file:
+    show the link to the user when you cite this document."""
     r = await atomic_tools.get_chunks_by_doc_id(
         await _c(), doc_id=doc_id, limit=limit, offset=offset,
     )
     # Observation is either a JSON list of chunks or an error dict.
     try:
-        return {"chunks": json.loads(r.observation)}
+        chunks = json.loads(r.observation)
     except json.JSONDecodeError:
         return {"error": r.observation}
+    if isinstance(chunks, dict):  # {"error": ..., "chunks": []} — no link
+        return {"chunks": chunks}
+    return await _with_doc_link({"chunks": chunks}, doc_id)
 
 
 @mcp.tool(timeout=1800)
@@ -524,13 +554,14 @@ async def read_full_document(
     retrieval splits content badly.
     REQUIRES: a `doc_id`. For large documents prefer
     `get_chunks_by_doc_id` (this returns one big blob, truncated at
-    `max_chars`)."""
+    `max_chars`). Top-level `download_url` / `file_name` = the original
+    uploaded file: show the link to the user when you cite this document."""
     r = await atomic_tools.read_full_document(
         await _c(), doc_id=doc_id, max_chars=max_chars,
     )
     if r.observation.startswith("Error"):
         return {"error": r.observation}
-    return {"text": r.observation}
+    return await _with_doc_link({"text": r.observation}, doc_id)
 
 
 # ── graph analysis tools (Track 7b — read-only GDS) ────────────────
@@ -1008,6 +1039,8 @@ def build_feed_cards(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "doc_title": path.rsplit("/", 1)[-1] if path else None,
                 "doc_date": _json_safe(r.get("doc_date")),
                 "link": settings.monitor.document_link.format(doc_id=doc) if doc else None,
+                # the original uploaded file (API_DOCUMENT_URL); None when off
+                "download_url": document_download_url(doc) if doc else None,
                 "latest": r["detected_at"],
                 "events": [],
             }
@@ -1068,9 +1101,10 @@ async def kb_watchlist() -> dict[str, Any]:
 @mcp.tool(timeout=120)
 async def kb_watch_feed(include_acked: bool = False, limit: int = 50) -> dict[str, Any]:
     """What is new about watched entities: events grouped into one card per
-    source document (title, date, `link` to GET the document — add
-    `?variant=original` for the uploaded file). Unacknowledged events only
-    unless `include_acked`. Acknowledge with `kb_ack`."""
+    source document (title, date, `download_url` = the original uploaded
+    file — show it to the user as a clickable link; `link` = the document
+    via the API). Unacknowledged events only unless `include_acked`.
+    Acknowledge with `kb_ack`."""
     return await _watch_feed(include_acked, limit)
 
 

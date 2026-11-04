@@ -15,7 +15,7 @@
 set -euo pipefail
 
 VPN_SERVER=109.167.225.58
-VPN_USER=bic-ext-22
+VPN_USER=bic-ext-23
 ROUTES="10.10.113.0/24 10.10.151.0/24"
 PROBE=10.10.113.11
 

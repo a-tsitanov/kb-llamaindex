@@ -31,6 +31,11 @@ x-app-env: &app-env
   # ── LLM proxy: EXTERNAL (litellm/ollama not in this compose) ──
   LITELLM_BASE_URL: ${LITELLM_BASE_URL:?set LITELLM_BASE_URL to the external proxy}
   LITELLM_API_KEY: ${LITELLM_API_KEY:-sk-litellm-stub}
+  # Per-request LLM timeout (src/config.py default 60 s). The cluster LiteLLM
+  # holds requests above its per-deployment cap in a queue, so a call can
+  # wait minutes before it starts; 60 s turned that wait into retries.
+  LITELLM_TIMEOUT_S: ${LITELLM_TIMEOUT_S:-60}
+  LITELLM_MAX_RETRIES: ${LITELLM_MAX_RETRIES:-2}
   # ── Redis LLM cache (consumed once feature/redis-llm-cache merges) ──
   REDIS_HOST: redis
   REDIS_PORT: "6379"

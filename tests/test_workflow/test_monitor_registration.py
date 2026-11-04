@@ -32,3 +32,20 @@ def test_sweep_runs_every_five_minutes_by_default():
     from src.config import MonitorSettings
 
     assert MonitorSettings.model_fields["sweep_interval_minutes"].default == 5
+
+
+def test_watch_email_runs_in_the_monitor_group_and_is_off_by_default():
+    from src.config import MonitorSettings
+    from src.workflow.monitor.activities import deliver_watch_email
+
+    assert deliver_watch_email in MONITOR_ACTIVITIES
+    assert MonitorSettings.model_fields["email_enabled"].default is False
+
+
+def test_every_monitor_activity_is_a_temporal_activity():
+    # A plain function in the list makes the Temporal Worker refuse to start
+    # ("missing attributes, was it decorated with @activity.defn?").
+    import temporalio.activity
+
+    for fn in MONITOR_ACTIVITIES:
+        temporalio.activity._Definition.must_from_callable(fn)

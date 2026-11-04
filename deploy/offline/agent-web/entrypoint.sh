@@ -4,6 +4,11 @@
 set -e
 mkdir -p "$DSH_HOME"
 cp /opt/dsh/cordis.patch.yml "$DSH_HOME/cordis.patch.yml"
+# Always-on agent rules ($DSH_HOME/AGENTS.md) and our skills ($DSH_HOME/skills,
+# hot-reloaded by dsh-skill-filesystem); image copies win over volume edits.
+cp /opt/dsh/AGENTS.md "$DSH_HOME/AGENTS.md"
+mkdir -p "$DSH_HOME/skills"
+for s in /opt/dsh/skills/*/; do rm -rf "$DSH_HOME/skills/$(basename "$s")"; cp -r "$s" "$DSH_HOME/skills/"; done
 # Local plugins → web profile node_modules + declared dependency (re-synced every
 # start so an existing /data volume picks up a rebuilt image).
 PROFILE="$DSH_HOME/profiles/web"

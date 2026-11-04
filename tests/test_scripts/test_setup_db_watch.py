@@ -41,3 +41,8 @@ def test_indexes_back_the_cursor_reads_and_the_feed():
     for idx in ("entity_mention_doc_idx", "edge_new_src_idx", "edge_new_tgt_idx",
                 "watch_event_entity_idx", "watch_entity_idx"):
         assert idx in _WATCH_INDEXES_DDL
+
+
+def test_email_digest_column_is_added_to_existing_tables():
+    assert "ALTER TABLE watch_event ADD COLUMN IF NOT EXISTS emailed_at TIMESTAMPTZ" in _WATCH_INDEXES_DDL
+    assert "WHERE emailed_at IS NULL" in _WATCH_INDEXES_DDL

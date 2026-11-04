@@ -169,6 +169,24 @@ class AsyncPostgres:
             rows = await cur.fetchall()
         return [(str(r[0]), r[1]) for r in rows]
 
+    async def paths_by_ids(
+        self, doc_ids: list[str],
+    ) -> dict[str, tuple[str, str | None]]:
+        """``{doc_id: (path, original_path)}`` for the given ids in ONE query.
+
+        Ids must be valid UUID strings (the caller filters); unknown ids are
+        simply absent from the result."""
+        if not doc_ids:
+            return {}
+        async with self._conn() as conn, conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id, path, original_path FROM documents "
+                "WHERE id = ANY(%s::uuid[])",
+                (list(doc_ids),),
+            )
+            rows = await cur.fetchall()
+        return {str(r[0]): (r[1], r[2] or None) for r in rows}
+
     async def get(self, doc_id: uuid.UUID) -> DocumentRow | None:
         async with (
             self._conn() as conn,

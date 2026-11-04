@@ -21,6 +21,7 @@ from src.analytics.contracts import (
     DeliverResult,
     MonitorIn,
     MonitorResult,
+    WatchEmailResult,
     WatchSweepResult,
 )
 from src.workflow.monitor.workflow import MonitorSweepWorkflow
@@ -34,6 +35,11 @@ async def _detect_stub(p: MonitorIn) -> MonitorResult:
 @activity.defn(name="sweep_watch")
 async def _sweep_stub() -> WatchSweepResult:
     return WatchSweepResult(events=5, by_kind={"new_mention": 5})
+
+
+@activity.defn(name="deliver_watch_email")
+async def _email_stub() -> WatchEmailResult:
+    return WatchEmailResult(sent=1, events=5)
 
 
 @activity.defn(name="deliver_alerts")
@@ -57,7 +63,7 @@ async def test_monitor_sweep_workflow_returns_tally() -> None:
             env.client,
             task_queue="t-mon",
             workflows=[MonitorSweepWorkflow],
-            activities=[_sweep_stub, _detect_stub, _deliver_stub],
+            activities=[_sweep_stub, _email_stub, _detect_stub, _deliver_stub],
             workflow_runner=UnsandboxedWorkflowRunner(),
         ),
     ):
@@ -73,4 +79,5 @@ async def test_monitor_sweep_workflow_returns_tally() -> None:
     assert out.delivered == 4
     assert out.failed == 1
     assert out.watch_events == 5
+    assert out.watch_emailed == 5
     assert out.error == ""

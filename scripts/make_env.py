@@ -245,6 +245,10 @@ _ENV_DESCRIPTIONS: dict[str, str] = {
     "ANALYTICS_MAX_STEPS": "Максимальное число примитивных вызовов в одном аналитическом плане.",
     # ── ApiSettings (API_*) — поверхность FastAPI ────────────────────
     "API_CORS_ORIGINS": "Разрешённые CORS-origin через запятую; '*' = любой.",
+    "API_DOCUMENT_URL": "Шаблон ссылки на скачивание исходного файла документа, {doc_id} подставляется; "
+    "MCP-инструменты кладут её в download_url рядом с каждым doc_id (и письмо наблюдения ссылается на неё). "
+    "Пусто — ссылок нет. Должна открываться у пользователя (прокси с ключом), не api:8000. "
+    "Офлайн: http://10.10.113.12:8090/api/documents/{doc_id}?variant=original.",
     "API_ENV": "Окружение приложения (development|production); в production preflight жёстко требует реальные секреты.",
     "API_KEYS": "Ключи API через запятую (клиенты шлют в заголовке X-API-Key). В проде задать реальные, не плейсхолдеры. Секрет.",
     "API_LOG_JSON": "Логировать в JSON (true) или в человекочитаемом виде (false).",
@@ -319,6 +323,18 @@ _ENV_DESCRIPTIONS: dict[str, str] = {
     "MINIO_SECURE": "Использовать TLS (https) при обращении к MinIO/S3.",
     # ── MonitorSettings (MONITOR_*) — непрерывный мониторинг/алерты ──
     "MONITOR_ACTIVITY_CONCURRENCY": "Параллелизм активностей монитор-свипа. >= 1.",
+    "MONITOR_EMAIL_ENABLED": "Письмо-сводка по событиям наблюдения за сущностями каждый свип. По умолчанию off.",
+    "MONITOR_EMAIL_SMTP_HOST": "SMTP-сервер для писем наблюдения (например mailpit).",
+    "MONITOR_EMAIL_SMTP_PORT": "Порт SMTP (Mailpit — 1025).",
+    "MONITOR_EMAIL_SMTP_USER": "Логин SMTP; пусто — без авторизации.",
+    "MONITOR_EMAIL_SMTP_PASSWORD": "Пароль SMTP.",
+    "MONITOR_EMAIL_SMTP_STARTTLS": "STARTTLS перед отправкой. По умолчанию off.",
+    "MONITOR_EMAIL_FROM": "Адрес отправителя писем наблюдения.",
+    "MONITOR_EMAIL_TO": "Получатели писем наблюдения через запятую (общий адрес).",
+    "MONITOR_EMAIL_BASE_URL": "Префикс ссылок на документ в письме (http://<api-host>:8000).",
+    "MONITOR_EMAIL_BATCH": "Макс. событий в одном письме; остаток уходит следующим свипом. >= 1.",
+    "MONITOR_EMAIL_MAX_AGE_HOURS": "События старше этого в письмо не попадают (чтобы не слать историю при включении). >= 1.",
+    "MONITOR_EMAIL_TIMEOUT_S": "Таймаут SMTP, сек.",
     "MONITOR_BURST_BASELINE_WINDOWS": "Сколько предыдущих окон усреднять как базовую ставку burst. >= 1.",
     "MONITOR_BURST_ENABLED": "Включить burst-детектор событий в монитор-свипе (E3). По умолчанию off.",
     "MONITOR_BURST_MIN_COUNT": "Мин. число недавних событий, чтобы пара (сущность,тип) считалась всплеском. >= 1.",

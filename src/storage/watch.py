@@ -248,6 +248,35 @@ class WatchRepository:
             await cur.execute(sql, (owner, int(limit)))
             return list(await cur.fetchall())
 
+    # ── e-mail digest ───────────────────────────────────────────────
+
+    async def pending_email(self, owner: str, *, max_age_hours: int, limit: int) -> list[dict[str, Any]]:
+        """Visible events not yet e-mailed, oldest first; events older than
+        ``max_age_hours`` are skipped so switching e-mail on does not mail
+        the whole history."""
+        sql = (
+            "SELECT e.id, e.entity_vid, e.entity_name, e.kind, e.doc_id, e.doc_date, "
+            "e.detail, e.why, e.detected_at, d.path AS doc_path "
+            + _VISIBLE
+            + "  AND e.emailed_at IS NULL\n"
+            "  AND e.detected_at > now() - make_interval(hours => %s)\n"
+            "ORDER BY e.detected_at, e.id LIMIT %s"
+        )
+        async with self._conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(sql, (owner, int(max_age_hours), int(limit)))
+            return list(await cur.fetchall())
+
+    async def mark_emailed(self, event_ids: list[int]) -> None:
+        if not event_ids:
+            return
+        async with self._conn() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE watch_event SET emailed_at = now() WHERE id = ANY(%s)",
+                    ([int(i) for i in event_ids],),
+                )
+            await conn.commit()
+
     async def mark_seen(self, owner: str, event_ids: list[int]) -> None:
         if not event_ids:
             return

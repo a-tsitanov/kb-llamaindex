@@ -401,6 +401,10 @@ CREATE INDEX IF NOT EXISTS edge_new_tgt_idx ON edge_new (tgt_vid);
 CREATE INDEX IF NOT EXISTS watch_event_entity_idx
     ON watch_event (entity_vid, detected_at DESC);
 CREATE INDEX IF NOT EXISTS watch_entity_idx ON watch (entity_vid);
+-- e-mail digest: set once the event went out in a letter
+ALTER TABLE watch_event ADD COLUMN IF NOT EXISTS emailed_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS watch_event_unmailed_idx
+    ON watch_event (detected_at) WHERE emailed_at IS NULL;
 """
 
 # Name resolution (src/graph/name_resolution.py). ``name_norm`` / ``name_translit`` are

@@ -101,6 +101,20 @@ services:
     network_mode: host
     restart: unless-stopped
 
+  # Test mail catcher for entity-watch e-mail (MONITOR_EMAIL_* on srv02).
+  # Standard ports on the cluster LAN: SMTP :25 (srv02 worker sends here),
+  # web UI http://10.10.113.11:8025 (also reachable over the VPN).
+  # No volume: letters are test data. Image loaded offline (docker save/load).
+  mailpit:
+    image: axllent/mailpit:v1.31.6
+    pull_policy: never
+    environment:
+      MP_SMTP_BIND_ADDR: 10.10.113.11:25
+      MP_UI_BIND_ADDR: 10.10.113.11:8025
+      MP_MAX_MESSAGES: "2000"
+    network_mode: host
+    restart: unless-stopped
+
 # Explicit names = the volumes created by the former dsh-web service, so
 # sessions, workspace and .credentials.yaml (cookie signing secret) survive.
 volumes:

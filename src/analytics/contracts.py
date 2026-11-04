@@ -166,8 +166,17 @@ class WatchSweepResult(_Frozen):
     error: str = ""
 
 
+class WatchEmailResult(_Frozen):
+    """Entity-watch e-mail digest: letters sent and events they carried."""
+
+    sent: int = 0
+    events: int = 0
+    error: str = ""
+
+
 class SweepResult(_Frozen):
     watch_events: int = 0
+    watch_emailed: int = 0
     new_connection_alerts: int = 0
     risk_rise_alerts: int = 0
     burst_alerts: int = 0
