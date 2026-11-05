@@ -44,6 +44,7 @@ x-app-env: &app-env
   API_CORS_ORIGINS: ${API_CORS_ORIGINS:?set allowed origin(s) for prod, e.g. https://app.example.com}
   MINIO_SECURE: ${MINIO_SECURE:-false}
   API_KEYS: ${API_KEYS:-changeme-key}
+  API_DOCUMENT_URL: ${API_DOCUMENT_URL:-}
   # Graph authorization: off (kill switch — guard AND tenant filters inert) |
   # log (default: decide, write `authz would-deny …`, allow anyway) | enforce.
   # Prod services get this explicit allow-list and no env_file, so a var that

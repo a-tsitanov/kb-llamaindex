@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import uuid
+from collections.abc import Iterable
 from typing import Any, NamedTuple
 
 from fastapi import HTTPException
@@ -268,3 +270,50 @@ def log_banner(server_name: str, transport: str, host: str, port: int) -> None:
             "MCP server '{n}' starting  transport={t}  host={h}  port={p}",
             n=server_name, t=transport, h=host, p=port,
         )
+
+
+DOWNLOAD_HINT = (
+    "When available, download_url links to the source document; use it when citing."
+)
+
+
+def document_download_url(doc_id: Any, graph: GraphContext) -> str | None:
+    template = settings.api.document_url
+    if not template or (not graph.is_default and "{graph_id}" not in template):
+        return None
+    try:
+        return template.format(doc_id=str(uuid.UUID(str(doc_id))), graph_id=graph.id)
+    except (ValueError, TypeError, AttributeError, KeyError, IndexError):
+        return None
+
+
+async def document_links(doc_ids: Iterable[Any], graph: GraphContext) -> dict[str, dict[str, str]]:
+    from src.intake.repository import IntakeRepository
+
+    wanted = {str(d): document_download_url(d, graph) for d in doc_ids if d}
+    wanted = {key: url for key, url in wanted.items() if url}
+    if not wanted:
+        return {}
+    canonical = {key: str(uuid.UUID(key)) for key in wanted}
+    try:
+        paths = await IntakeRepository(graph=graph).paths_by_ids(sorted(set(canonical.values())))
+    except Exception as exc:
+        logger.warning("document_links: file names unavailable: {e}", e=exc)
+        paths = {}
+    result = {}
+    for key, url in wanted.items():
+        path, original = paths.get(canonical[key], ("", None))
+        name = (original or path or "").rsplit("/", 1)[-1]
+        result[key] = {"download_url": url, **({"file_name": name} if name else {})}
+    return result
+
+
+async def attach_document_links(items: list[dict[str, Any]], graph: GraphContext) -> list[dict[str, Any]]:
+    links = await document_links((item.get("doc_id") for item in items), graph)
+    documents: dict[str, dict[str, Any]] = {}
+    for item in items:
+        doc = str(item.get("doc_id") or "")
+        if doc in links:
+            item.update(links[doc])
+            documents.setdefault(doc, {"doc_id": doc, **links[doc]})
+    return list(documents.values())

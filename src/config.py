@@ -69,6 +69,8 @@ class ApiSettings(BaseSettings):
     keys: str = "dev-local-key"
     cors_origins: str = "*"
     upload_dir: str = "/app/data/uploads"
+    # Public URL template; non-default graphs require a {graph_id} placeholder.
+    document_url: str = ""
 
     @cached_property
     def keys_list(self) -> list[str]:

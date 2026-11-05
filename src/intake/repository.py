@@ -156,6 +156,18 @@ class IntakeRepository:
                 await conn.commit()
                 yield conn
 
+    async def paths_by_ids(self, doc_ids: list[str]) -> dict[str, tuple[str, str | None]]:
+        """Return document paths from this graph in one query."""
+        if not doc_ids:
+            return {}
+        async with self._conn() as conn, conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id, path, original_path FROM documents WHERE id = ANY(%s::uuid[])",
+                (doc_ids,),
+            )
+            rows = await cur.fetchall()
+        return {str(row[0]): (row[1], row[2] or None) for row in rows}
+
     async def accept_document(
         self, doc_id: uuid.UUID, path: str,
         department: str = "", doc_type: str = "",

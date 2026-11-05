@@ -46,9 +46,11 @@ from loguru import logger
 from src.config import settings
 from src.mcp._shared import (
     assert_api_key_env_set,
+    attach_document_links,
     build_sse_auth,
     current_graph,
     current_principal,
+    document_links,
     log_banner,
     parse_args,
 )
@@ -65,7 +67,7 @@ mcp = FastMCP(
         "Atomic retrieval tools over the project knowledge base.  "
         "Each tool returns a JSON-serialisable dict.  Compose them "
         "yourself in your own LLM loop.  For an already-orchestrated "
-        "answer, use the sibling MCP-1 server (kb_search) instead."
+        "answer, use the sibling MCP-1 server (kb_search) instead. If download_url is available, show it when citing documents."
     ),
     auth=build_sse_auth(),  # evaluated at import time; see build_sse_auth docstring
 )
@@ -323,7 +325,9 @@ async def vector_search(query: str, top_k: int = 10) -> dict[str, Any]:
                                              rerank=_rerank_chunks)
     else:
         r = await atomic_tools.vector_search(deps["retriever"], query=query, top_k=top_k)
-    return {"sources": json.loads(r.observation)}
+    sources = json.loads(r.observation)
+    documents = await attach_document_links(sources, graph)
+    return {"sources": sources, **({"documents": documents} if documents else {})}
 
 
 @mcp.tool(timeout=1800)
@@ -516,7 +520,11 @@ async def get_chunks_by_doc_id(
     )
     # Observation is either a JSON list of chunks or an error dict.
     try:
-        return {"chunks": json.loads(r.observation)}
+        chunks = json.loads(r.observation)
+        out = {"chunks": chunks}
+        if isinstance(chunks, list):
+            out.update((await document_links([doc_id], graph)).get(doc_id, {}))
+        return out
     except json.JSONDecodeError:
         return {"error": r.observation}
 
@@ -542,7 +550,7 @@ async def read_full_document(
     )
     if r.observation.startswith("Error"):
         return {"error": r.observation}
-    return {"text": r.observation}
+    return {"text": r.observation, **(await document_links([doc_id], graph)).get(doc_id, {})}
 
 
 # ── graph analysis tools (Track 7b — read-only) ────────────────────
@@ -1129,7 +1137,9 @@ async def _watch_feed(
     repo = _watch_repo(graph)
     rows = await repo.feed(_OWNER, include_acked=include_acked, limit=limit)
     await repo.mark_seen(_OWNER, [r["id"] for r in rows])
-    return {"count": len(rows), "cards": build_feed_cards(rows)}
+    cards = build_feed_cards(rows)
+    await attach_document_links(cards, graph)
+    return {"count": len(rows), "cards": cards}
 
 
 async def _ack(

@@ -40,6 +40,7 @@ from temporalio.common import WorkflowIDReusePolicy
 from src.config import settings
 from src.mcp._shared import (
     assert_api_key_env_set,
+    attach_document_links,
     build_sse_auth,
     current_graph,
     log_banner,
@@ -68,7 +69,7 @@ mcp = FastMCP(
         "(corpus-wide GraphRAG themes), kb_drift_search (local seed + "
         "global), kb_auto_search (router picks the mode).  Each returns a "
         "synthesised Russian answer with citations.  For raw retrieval "
-        "primitives use the sibling MCP-2 tools server instead."
+        "primitives use the sibling MCP-2 tools server instead. If download_url is available, show it when citing documents."
     ),
     auth=build_sse_auth(),  # evaluated at import time; see build_sse_auth docstring
 )
@@ -199,6 +200,15 @@ def _outcome_to_dict(outcome: SearchOutcome) -> dict[str, Any]:
     }
 
 
+async def _outcome_result(outcome: SearchOutcome, graph) -> dict[str, Any]:
+    out = _outcome_to_dict(outcome)
+    extra = [{"doc_id": doc} for doc in outcome.documents]
+    documents = await attach_document_links([*out["sources"], *extra], graph)
+    if documents:
+        out["documents"] = documents
+    return out
+
+
 async def _stream_until_done(handle, ctx: Context, state_query) -> SearchOutcome:
     """Await the workflow result while forwarding coarse progress to the
     MCP client.  ``state_query`` is the workflow's ``get_state`` query
@@ -305,7 +315,7 @@ async def kb_search(
         ctx,
         SearchOrchestratorWorkflow.get_state,
     )
-    return _outcome_to_dict(outcome)
+    return await _outcome_result(outcome, graph)
 
 
 @mcp.tool(timeout=1800)
@@ -354,7 +364,7 @@ async def kb_global_search(
         ctx,
         GlobalSearchWorkflow.get_state,
     )
-    return _outcome_to_dict(outcome)
+    return await _outcome_result(outcome, graph)
 
 
 @mcp.tool(timeout=1800)
@@ -417,7 +427,7 @@ async def kb_drift_search(
     )
     # DriftSearchWorkflow has no get_state query — skip progress polling.
     outcome = await _stream_until_done(handle, ctx, None)
-    return _outcome_to_dict(outcome)
+    return await _outcome_result(outcome, graph)
 
 
 @mcp.tool(timeout=1800)
@@ -472,7 +482,7 @@ async def kb_auto_search(
         id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
     )
     outcome = await _stream_until_done(handle, ctx, AutoSearchWorkflow.get_state)
-    return _outcome_to_dict(outcome)
+    return await _outcome_result(outcome, graph)
 
 
 @mcp.tool(timeout=1800)
