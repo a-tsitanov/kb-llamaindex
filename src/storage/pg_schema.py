@@ -447,6 +447,8 @@ CREATE TABLE IF NOT EXISTS watch_event (
     dedup_key   TEXT NOT NULL UNIQUE,
     detected_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Отметка email digest; обновляется только после приёма SMTP.
+ALTER TABLE watch_event ADD COLUMN IF NOT EXISTS emailed_at TIMESTAMPTZ;
 -- Доставка (P2 S4).  Адресат — НА ПОДПИСКЕ: один URL на установку не мог
 -- быть правильным для нескольких подписчиков, и именно он делал доставку
 -- безадресной.  Пусто = не доставлять, только лента.
