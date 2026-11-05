@@ -984,6 +984,21 @@ class MonitorSettings(BaseSettings):
             "0 — только сводка. Переопределяется колонкой watch.daily_push_limit"
         ),
     )
+    # Legacy shared digest is restricted to the default graph and one principal.
+    email_enabled: bool = False
+    email_owner: str = ""
+    email_smtp_host: str = ""
+    email_smtp_port: int = Field(default=25, ge=1, le=65535)
+    email_smtp_user: str = ""
+    email_smtp_password: str = ""
+    email_smtp_starttls: bool = False
+    email_from: str = "kb-watch@localhost"
+    email_to: str = ""
+    email_batch: int = Field(default=200, ge=1)
+    email_max_age_hours: int = Field(default=24, ge=1)
+    email_timeout_s: float = Field(default=10.0, gt=0.0)
+    email_base_url: str = ""
+
     document_link: str = Field(
         default="/api/v1/documents/{doc_id}",
         description="Шаблон ссылки на документ в ленте наблюдения ({doc_id} подставляется)",

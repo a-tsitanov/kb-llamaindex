@@ -30,9 +30,10 @@ from src.graph.store import build_graph_store
 from src.intake.repository import IntakeRepository
 from src.tenancy import graph_repo
 from src.tenancy.context import GraphContext, default_graph_context
-from src.watch.delivery import deliver_due
+from src.watch.delivery import _may_read, deliver_due
 from src.watch.repository import WatchRepository
 from src.watch.sweep import detect_risk_rise, run_watch_sweep
+from src.watch.watch_email import build_email, send_email
 from src.workflow.heartbeat import heartbeat_every
 
 # Сколько наблюдаемых сущностей опрашивать за один FETCH PROP: защита от
@@ -118,6 +119,34 @@ async def sweep_watch() -> WatchSweepResult:
                             error="; ".join(errors))
 
 
+async def _deliver_email(repo: WatchRepository, graph: GraphContext) -> int:
+    """Send the opt-in legacy digest for one authorized default-graph principal."""
+    m = settings.monitor
+    if not m.email_enabled or not graph.is_default:
+        return 0
+    recipients = [value.strip() for value in m.email_to.split(",") if value.strip()]
+    if not m.email_owner or not m.email_smtp_host or not recipients:
+        raise ValueError("watch email requires owner, SMTP host and recipients")
+    if not await _may_read(m.email_owner, graph):
+        raise PermissionError("watch email owner cannot read the default graph")
+    async with repo.pending_email(
+        m.email_owner, max_age_hours=m.email_max_age_hours, limit=m.email_batch,
+    ) as rows:
+        if not rows:
+            return 0
+        template = (settings.api.document_url or (m.email_base_url + m.document_link)).replace(
+            "{graph_id}", graph.id,
+        )
+        subject, text, html_body = build_email(rows, link=template)
+        await asyncio.to_thread(
+            send_email, host=m.email_smtp_host, port=m.email_smtp_port,
+            sender=m.email_from, recipients=recipients, subject=subject, text=text,
+            html_body=html_body, user=m.email_smtp_user, password=m.email_smtp_password,
+            starttls=m.email_smtp_starttls, timeout_s=m.email_timeout_s,
+        )
+        return len(rows)
+
+
 @activity.defn
 async def deliver_watch() -> WatchDeliverResult:
     """Разослать события подписчикам — по каждому готовому графу.
@@ -135,10 +164,10 @@ async def deliver_watch() -> WatchDeliverResult:
     async with heartbeat_every(30.0, {"stage": "deliver"}):
         for graph in await _watch_graphs():
             try:
-                for key, n in (await deliver_due(
-                    WatchRepository(graph=graph), graph,
-                )).items():
+                repo = WatchRepository(graph=graph)
+                for key, n in (await deliver_due(repo, graph)).items():
                     tally[key] = tally.get(key, 0) + n
+                await _deliver_email(repo, graph)
             except Exception as exc:
                 logger.warning("deliver_watch failed  graph={g}: {e}", g=graph.id, e=exc)
                 errors.append(f"{graph.id}: {exc}")

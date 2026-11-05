@@ -296,6 +296,35 @@ class WatchRepository:
             await cur.execute(sql, (owner, int(limit)))
             return list(await cur.fetchall())
 
+    @asynccontextmanager
+    async def pending_email(self, principal: str, *, max_age_hours: int, limit: int):
+        """Lock pending default-feed events until the SMTP attempt finishes.
+
+        A failed send rolls back. Concurrent sweeps skip locked rows.
+        SMTP acceptance followed by a DB failure can still cause duplicates.
+        """
+        sql = (
+            "SELECT e.id, e.entity_vid, e.entity_name, e.kind, e.doc_id, e.doc_date, "
+            "e.detail, e.why, e.detected_at, d.path AS doc_path "
+            + _VISIBLE
+            + " AND w.created_by = %s AND e.emailed_at IS NULL "
+            " AND e.detected_at > now() - make_interval(hours => %s) "
+            " ORDER BY e.detected_at, e.id LIMIT %s FOR UPDATE OF e SKIP LOCKED"
+        )
+        async with (
+            self._conn() as conn,
+            conn.transaction(),
+            conn.cursor(row_factory=dict_row) as cur,
+        ):
+            await cur.execute(sql, ("default", principal, max_age_hours, limit))
+            rows = list(await cur.fetchall())
+            yield rows
+            if rows:
+                await cur.execute(
+                    "UPDATE watch_event SET emailed_at = now() WHERE id = ANY(%s)",
+                    ([row["id"] for row in rows],),
+                )
+
     async def mark_seen(self, owner: str, event_ids: list[int]) -> None:
         if not event_ids:
             return
