@@ -30,11 +30,11 @@ from src.tenancy.context import GraphContext, graph_scoped_id
 from src.workflow.client import get_temporal_client
 from src.workflow.contracts import (
     ConversationTurnDict,
-    DetectCommunitiesParams,
     GlobalSearchParams,
     OrchestratorParams,
     SearchOutcome,
 )
+from src.workflow.graph_schedules import community_build_params
 from src.workflow.search.community_wf import CommunityBuildWorkflow
 from src.workflow.search.global_wf import GlobalSearchWorkflow
 from src.workflow.search.orchestrator import SearchOrchestratorWorkflow
@@ -306,13 +306,7 @@ async def rebuild_communities(graph: GraphContext = Depends(resolve_graph_admin)
     request_id = uuid.uuid4().hex
     try:
         client = await get_temporal_client()
-        params = DetectCommunitiesParams(
-            min_size=settings.temporal.community_min_size,
-            level=0,
-            max_levels=settings.agent.community_max_levels,
-            gamma=settings.temporal.community_leiden_gamma,
-            graph_id=graph.id,
-        )
+        params = community_build_params(graph.id)
         handle = await client.start_workflow(
             CommunityBuildWorkflow.run,
             params,

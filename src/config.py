@@ -424,6 +424,9 @@ class TemporalSettings(BaseSettings):
     # ``gamma`` = resolution: >1 yields MORE, smaller communities; <1
     # yields fewer, larger ones.
     community_leiden_gamma: float = Field(default=1.0, gt=0)
+    # UTC Temporal cron expressions for maintenance of the default graph.
+    community_schedule_cron: str = ""
+    analytics_schedule_cron: str = ""
 
     # Community-detection backend. "leidenalg" = in-worker hierarchical
     # Leiden over the edge export; "graphscope" = distributed single-level

@@ -96,6 +96,8 @@ x-app-env: &app-env
   # default) | "graphscope" (distributed Leiden). Legacy "gds" maps to
   # "leidenalg".
   TEMPORAL_COMMUNITY_BACKEND: ${TEMPORAL_COMMUNITY_BACKEND:-leidenalg}
+  TEMPORAL_COMMUNITY_SCHEDULE_CRON: ${TEMPORAL_COMMUNITY_SCHEDULE_CRON:-}
+  TEMPORAL_ANALYTICS_SCHEDULE_CRON: ${TEMPORAL_ANALYTICS_SCHEDULE_CRON:-}
   # E1 first-seen stamping (created_at/first_doc_id on new graph elements) —
   # powers volatility / burst / new-connections. No backfill script exists for
   # NebulaGraph: elements that predate enabling are stamped on their next

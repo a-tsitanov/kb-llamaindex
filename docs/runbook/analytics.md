@@ -171,3 +171,17 @@ DELETE FROM ingest_metrics WHERE completed_at < NOW() - INTERVAL '6 months';
 - **Самозамер для finalize.** `fetch_history()` внутри finalize не видит свой Completed-event → строка finalize не пишется. Добавить локальный `perf_counter` для отдельной MetricRow.
 - **Алерты.** Grafana alerting на `p95_extract_kg > 30s` и rate `temporal_activity_execution_failed > 0`.
 - **Связка с LangFuse.** Соединить LangFuse trace_id с `workflow_run_id` через label, чтобы из drill-down прыгать в LLM-trace.
+# Расписание обслуживания графа
+
+Для графа `default` можно настроить Temporal Schedules `community-build` и
+`analytics-materialize`. Переменные `TEMPORAL_COMMUNITY_SCHEDULE_CRON` и
+`TEMPORAL_ANALYTICS_SCHEDULE_CRON` задают выражения cron в UTC, например
+`0 2 * * *` и `0 7 * * *`. Пустое значение при применении **удаляет**
+соответствующее расписание. Скрипт `python -m scripts.setup_graph_schedules`
+создаёт или обновляет оба расписания и сохраняет состояние паузы.
+
+Политика `SKIP` пропускает повтор только в рамках того же расписания. Она не
+останавливает ручные запуски, системный cron, другие расписания или другую
+задачу обслуживания. Перед переключением проверьте текущие запуски и отключите
+дублирующий системный cron; сначала оцените длительность обеих задач и нагрузку.
+Указанные два времени не гарантируют, что задачи не пересекутся.

@@ -2,11 +2,13 @@
 # at build time (BRAND_NAME / BRAND_SHORT). Everything is baked at build time
 # (npm + web profile init) so the container starts with no internet.
 #   docker buildx build --platform linux/amd64 -t agent-web:offline \
-#     [--build-arg BRAND_NAME="KB Ассистент" --build-arg BRAND_SHORT=KB] deploy/offline/agent-web
+#     [--build-arg BRAND_NAME="Портрет" --build-arg BRAND_SHORT="Портрет"] deploy/offline/agent-web
+# Brand mark (favicons + kb-brand sidebar/empty-chat mark) is a path-only SVG
+# portrait-in-frame, see brand/favicon-*.svg.
 FROM node:22-slim
 ARG DSH_VERSION=0.2.0-rc.2
-ARG BRAND_NAME="KB Ассистент"
-ARG BRAND_SHORT="KB"
+ARG BRAND_NAME="Портрет"
+ARG BRAND_SHORT="Портрет"
 ENV DSH_HOME=/data/dsh \
     DSH_TELEMETRY_DISABLED=1 \
     NODE_ENV=production
@@ -23,9 +25,11 @@ COPY plugin-brand/ /opt/dsh/plugins/kb-brand/
 COPY plugin-locale-ru/ /opt/dsh/plugins/kb-locale-ru/
 COPY brand/ /opt/dsh/brand/
 # Rebrand: title/manifest/favicons, Russian language pack (kb-locale-ru), UI strings, system prompt identity, startup
-# log prefix, kb-brand placeholders. GUARD: fail the build if a user-visible
-# "DeepSeek Harness" survives in the served bundles / prompt / web host strings
-# (bundle names are hashed, hence find+grep over whole dirs).
+# log prefix, kb-brand placeholders, empty-chat slogan. GUARD: fail the build if
+# a user-visible "DeepSeek Harness", the old brand "KB Ассистент" (unless it is
+# BRAND_NAME again) or the stock slogan "Into the Unknown" survives in the served
+# bundles / prompt / web host strings / our plugins (bundle names are hashed,
+# hence find+grep over whole dirs).
 RUN BRAND_NAME="${BRAND_NAME}" BRAND_SHORT="${BRAND_SHORT}" node /opt/dsh/brand/rebrand.mjs \
     && NM=/usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai \
     && for f in $(find $NM/dsh-client-ui-*/lib $NM/dsh-system-prompt/lib $NM/dsh-web-app/lib /opt/dsh/plugins/kb-brand/lib /opt/dsh/plugins/kb-locale-ru/lib -name '*.js'); do node --check "$f" || exit 1; done \
@@ -33,8 +37,15 @@ RUN BRAND_NAME="${BRAND_NAME}" BRAND_SHORT="${BRAND_SHORT}" node /opt/dsh/brand/
          $NM/dsh-web-frontend/dist $NM/dsh-client-ui-*/lib $NM/dsh-system-prompt/lib $NM/dsh-web-app/lib; then \
          echo "rebrand guard: 'DeepSeek Harness' still present in the files above" >&2; exit 1; fi \
     && if grep -rlE "__BRAND_|__RU_DICT__" /opt/dsh/plugins/kb-brand /opt/dsh/plugins/kb-locale-ru/lib $NM/dsh-web-frontend/dist; then \
-         echo "rebrand guard: unsubstituted placeholder" >&2; exit 1; fi
+         echo "rebrand guard: unsubstituted placeholder" >&2; exit 1; fi \
+    && if grep -rIl "Into the Unknown" $NM/dsh-web-frontend/dist $NM/dsh-client-ui-*/lib /opt/dsh/plugins/kb-brand /opt/dsh/plugins/kb-locale-ru; then \
+         echo "rebrand guard: stock slogan 'Into the Unknown' still present" >&2; exit 1; fi \
+    && if [ "${BRAND_NAME}" != "KB Ассистент" ] && grep -rIl "KB Ассистент" $NM/dsh-web-frontend/dist $NM/dsh-client-ui-*/lib $NM/dsh-system-prompt/lib $NM/dsh-web-app/lib /opt/dsh/plugins/kb-brand /opt/dsh/plugins/kb-locale-ru; then \
+         echo "rebrand guard: old brand 'KB Ассистент' still present" >&2; exit 1; fi
 COPY cordis.patch.yml /opt/dsh/cordis.patch.yml
+# Agent rules + kb-research skill: copied into $DSH_HOME by entrypoint.sh on every start.
+COPY AGENTS.md /opt/dsh/AGENTS.md
+COPY skills/ /opt/dsh/skills/
 COPY lan-proxy.mjs /opt/dsh/lan-proxy.mjs
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

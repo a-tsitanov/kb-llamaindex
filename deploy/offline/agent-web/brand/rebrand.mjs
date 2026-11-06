@@ -40,10 +40,9 @@ edit(path.join(DIST, 'manifest.webmanifest'), (s) => {
   m.short_name = SHORT
   return JSON.stringify(m, null, 2) + '\n'
 })
-const font = SHORT.length > 2 ? '11' : '15'
+// favicons are pure-path marks (no text/fonts): copied as is
 for (const [src, dst] of [['favicon-light.svg', 'favicon.svg'], ['favicon-dark.svg', 'favicon-dark.svg']]) {
-  const svg = fs.readFileSync(path.join(ASSETS, src), 'utf8').replaceAll('__BRAND_SHORT__', SHORT).replaceAll('__BRAND_FONT__', font)
-  fs.writeFileSync(path.join(DIST, dst), svg)
+  fs.copyFileSync(path.join(ASSETS, src), path.join(DIST, dst))
   edited.push(path.relative(PKG, path.join(DIST, dst)))
 }
 
@@ -57,6 +56,34 @@ edit(path.join(NM, 'dsh-web-app/lib/index.js'), (s) =>
 edit(path.join(NM, 'dsh-client-connection/lib/index.js'), (s) =>
   s.replaceAll('dsh web authentication required; reopen the URL printed by dsh web.',
     `${NAME}: authentication required; open the login link with the token.`))
+
+// empty-chat slogan, English fallback (the Russian one lives in ru.json conversation.hero.headline)
+edit(path.join(NM, 'dsh-client-ui-conversation/lib/client.js'), (s) =>
+  s.replaceAll('"hero.headline": "Into the Unknown"', '"hero.headline": "Who shall we profile?"'))
+
+// English fallback: neutralise DeepSeek-account/provider wording (the provider
+// is disabled offline; Russian equivalents live in ru.json). Exact strings only.
+const EN = {
+  'dsh-client-ui-model-selection/lib/client.js': [['"DeepSeek Account"', '"Cloud account"']],
+  'dsh-client-ui-settings-models/lib/client.js': [
+    ['"DeepSeek Account"', '"Cloud account"'],
+    ['"Configure the official DeepSeek provider to start building."', '"Configure a model provider to get started."'],
+  ],
+  'dsh-client-ui-chat/lib/client.js': [
+    ['"Stopped because you signed out of DeepSeek."', '"Stopped because you signed out of the account."'],
+    ['"Sign in to DeepSeek and ensure', '"Sign in to the account and ensure'],
+  ],
+  'dsh-client-ui-settings-session-log/lib/client.js': [['"Help improve DeepSeek models and products."', '"Session logs for diagnostics."']],
+  'dsh-client-ui-settings-web-search/lib/client.js': [
+    ['"Set up the DeepSeek search provider."', '"Set up the search provider."'],
+    ['"No key is configured; only conversations using a DeepSeek Account model can search, through the default endpoint."',
+      '"No key is configured; only models that support the default endpoint can search."'],
+  ],
+}
+for (const [rel, pairs] of Object.entries(EN)) {
+  const f = path.join(NM, rel)
+  if (fs.existsSync(f)) edit(f, (s) => pairs.reduce((acc, [a, b]) => acc.replaceAll(a, b), s))
+}
 
 // 3. generic pass over the shipped browser bundles + prompt + web-app host strings
 const targets = [

@@ -1,0 +1,16 @@
+# Additional controller; apply alongside the srv02 production compose files.
+services:
+  llm-autoscale-large:
+    image: ghcr.io/berriai/litellm:main-stable
+    pull_policy: never
+    entrypoint: ["python", "/app/autoscale-large.py"]
+    environment:
+      LITELLM_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_API_KEY:?set LITELLM_API_KEY}
+      VLLM_METRICS: ${AUTOSCALE_VLLM_METRICS:-http://10.10.151.15:8000/metrics}
+      AUTOSCALE_MODEL_ID: ds15-large
+      AUTOSCALE_MIN: ${AUTOSCALE_LARGE_MIN:-2}
+      AUTOSCALE_MAX: ${AUTOSCALE_LARGE_MAX:-12}
+    volumes:
+      - ./deploy/offline/llm-large-autoscale/autoscale.py:/app/autoscale-large.py:ro
+    restart: unless-stopped

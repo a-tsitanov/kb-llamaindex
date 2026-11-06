@@ -1,7 +1,7 @@
 {
   "name": "kb-brand",
   "version": "0.1.0",
-  "description": "KB agent web UI brand: sidebar mark + name and the empty-chat hero mark (replaces ui-brand-official)",
+  "description": "Agent web UI brand: sidebar mark + name and the empty-chat hero mark (replaces ui-brand-official)",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
