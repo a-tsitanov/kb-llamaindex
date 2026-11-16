@@ -187,6 +187,69 @@ class _OkHTTP:
 
 
 @pytest.mark.asyncio
+async def test_sync_pdf_and_caption_keep_cursor_on_attachment_failure():
+    from types import SimpleNamespace
+
+    from scripts.tg_ingest import sync_round
+
+    msg = _FakeMsg(2, "caption", datetime(2024, 1, 1, tzinfo=UTC))
+    msg.file = SimpleNamespace(mime_type="application/pdf")
+    tg = _SyncTG({"a": [msg]})
+
+    async def download_media(message, file):
+        assert message is msg and file is bytes
+        return b"%PDF-1.4 test"
+
+    tg.download_media = download_media
+
+    class HTTP:
+        def __init__(self):
+            self.files = []
+
+        async def post(self, url, headers=None, files=None, data=None):
+            self.files.append(files["file"])
+            return SimpleNamespace(status_code=500 if len(self.files) == 2 else 202)
+
+    http = HTTP()
+    state = {"10": {"last_id": 1, "title": "A"}}
+    tally = await sync_round(
+        tg, http, dialogs=[_sync_dialog(10, "a", "chan")], state=state,
+        save=lambda: None, api_base="http://a", api_key="k", queue=None,
+        bootstrap_limit=100,
+    )
+    assert [f[0] for f in http.files] == ["tg_chan_2.txt", "tg_chan_2.pdf"]
+    assert http.files[1][1:] == (b"%PDF-1.4 test", "application/pdf")
+    assert state["10"]["last_id"] == 1
+    assert tally["failed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_sync_pdf_without_caption():
+    from types import SimpleNamespace
+
+    from scripts.tg_ingest import sync_round
+
+    msg = _FakeMsg(2, None, datetime(2024, 1, 1, tzinfo=UTC))
+    msg.file = SimpleNamespace(mime_type="application/pdf")
+    tg = _SyncTG({"a": [msg]})
+
+    async def download_media(message, file):
+        return b"%PDF-1.4 test"
+
+    tg.download_media = download_media
+    http = _OkHTTP()
+    state = {"10": {"last_id": 1, "title": "A"}}
+    tally = await sync_round(
+        tg, http, dialogs=[_sync_dialog(10, "a", "chan")], state=state,
+        save=lambda: None, api_base="http://a", api_key="k", queue=None,
+        bootstrap_limit=100,
+    )
+    assert http.posted == [("tg_chan_2.pdf", "2024-01-01")]
+    assert state["10"]["last_id"] == 2
+    assert tally["sent"] == 1
+
+
+@pytest.mark.asyncio
 async def test_sync_round_ingests_only_new_and_advances_state():
     from scripts.tg_ingest import sync_round
 

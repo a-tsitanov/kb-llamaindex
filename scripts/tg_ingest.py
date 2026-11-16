@@ -115,7 +115,7 @@ async def post_ingest(
     api_base: str,
     api_key: str,
     filename: str,
-    text: str,
+    text: str | bytes,
     document_date: str,
     queue: str | None,
     group: str = "",
@@ -139,7 +139,8 @@ async def post_ingest(
     )
     res = await post_document(
         http, api_base, api_key,
-        filename=filename, content=text.encode("utf-8"), data=data,
+        filename=filename, content=text.encode("utf-8") if isinstance(text, str) else text,
+        content_type="application/pdf" if filename.endswith(".pdf") else "text/plain", data=data,
     )
     if res.outcome == DUPLICATE:
         logger.info("post_ingest duplicate file={f} — приём уже знает это тело",
@@ -148,6 +149,39 @@ async def post_ingest(
         logger.warning("post_ingest failed file={f} status={s}",
                        f=filename, s=res.status_code)
     return res.outcome
+
+
+async def post_message(tg_client: Any, http: Any, api_base: str, api_key: str,
+                       msg: Any, channel: str, queue: str | None, **options: Any) -> str:
+    doc = _message_to_doc(msg, channel)
+    is_pdf = getattr(getattr(msg, "file", None), "mime_type", None) == "application/pdf"
+    if doc is None and not is_pdf:
+        return "skipped"
+    outcomes = []
+    if doc:
+        filename, text, document_date = doc
+        outcome = await post_ingest(http, api_base, api_key, filename, text, document_date,
+                                    queue, channel=channel.lstrip("@"), **options)
+        if outcome == FAILED:
+            return FAILED
+        outcomes.append(outcome)
+    if is_pdf:
+        try:
+            content = await tg_client.download_media(msg, file=bytes)
+            if not content:
+                raise ValueError("empty PDF")
+        except Exception as exc:
+            logger.warning("tg_ingest: PDF download failed channel={c} msg_id={m}: {e}",
+                           c=channel, m=msg.id, e=exc)
+            return FAILED
+        outcome = await post_ingest(
+            http, api_base, api_key, f"tg_{channel.lstrip('@')}_{msg.id}.pdf", content,
+            msg.date.date().isoformat(), queue, channel=channel.lstrip("@"), **options,
+        )
+        if outcome == FAILED:
+            return FAILED
+        outcomes.append(outcome)
+    return SENT if SENT in outcomes else DUPLICATE
 
 
 async def read_and_enqueue(
@@ -168,15 +202,8 @@ async def read_and_enqueue(
     tally: Counter = Counter()
     for channel in channels:
         async for msg in tg_client.iter_messages(channel, limit=limit, reverse=True):
-            doc = _message_to_doc(msg, channel)
-            if doc is None:
-                tally["skipped"] += 1
-                continue
-            filename, text, document_date = doc
-            outcome = await post_ingest(
-                http, api_base, api_key, filename, text, document_date, queue,
-                channel=channel.lstrip("@"),
-            )
+            outcome = await post_message(tg_client, http, api_base, api_key,
+                                         msg, channel, queue)
             tally[outcome] += 1
     logger.info("tg_ingest tally: {t}", t=dict(tally))
     return tally
@@ -225,16 +252,9 @@ async def reingest_channels(
         group = group_map.get(dialog.id, "")
         slug = dialog_slug(dialog)
         async for msg in tg_client.iter_messages(dialog.entity, limit=limit, reverse=True):
-            doc = _message_to_doc(msg, slug)
-            if doc is None:
-                tally["skipped"] += 1
-                continue
-            filename, text, document_date = doc
-            outcome = await post_ingest(
-                http, api_base, api_key, filename, text, document_date, queue,
-                group=group, priority=priority, channel=slug.lstrip("@"),
-                on_duplicate="version",
-            )
+            outcome = await post_message(tg_client, http, api_base, api_key,
+                                         msg, slug, queue, group=group,
+                                         priority=priority, on_duplicate="version")
             tally[outcome] += 1
     logger.info("tg_ingest reingest tally: {t}", t=dict(tally))
     return tally, errors
@@ -366,17 +386,13 @@ async def sync_round(
             tally["dialog_errors"] += 1
             continue
         for msg in sorted(fetched, key=lambda m: m.id):
-            doc = _message_to_doc(msg, slug)
-            if doc is None:
+            outcome = await post_message(tg_client, http, api_base, api_key,
+                                         msg, slug, queue, group=group)
+            if outcome == "skipped":
                 tally["skipped"] += 1
                 entry["last_id"] = max(int(entry["last_id"]), msg.id)
                 save()
                 continue
-            filename, text, document_date = doc
-            outcome = await post_ingest(
-                http, api_base, api_key, filename, text, document_date, queue,
-                group=group, channel=slug.lstrip("@"),
-            )
             if outcome == FAILED:
                 tally["failed"] += 1
                 break  # retry from this message next round
@@ -389,7 +405,7 @@ async def sync_round(
                     c=entry.get("title") or slug,
                     ts=getattr(msg, "date", None),
                     mid=msg.id,
-                    p=" ".join(text.split())[:_PREVIEW_CHARS],
+                    p=" ".join((getattr(msg, "message", None) or "").split())[:_PREVIEW_CHARS],
                 )
             else:
                 # Документом не стало — тело уже принято раньше; превью не
